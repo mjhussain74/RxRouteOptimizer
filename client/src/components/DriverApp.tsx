@@ -1,0 +1,467 @@
+import { useState, useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { 
+  ArrowLeft, Navigation, MapPin, CheckCircle, Clock, Phone, 
+  FileText, ChevronRight, Loader2, ExternalLink, RefreshCw
+} from "lucide-react";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { io, Socket } from "socket.io-client";
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+const createNumberedIcon = (number: number, color: string) => {
+  return L.divIcon({
+    className: 'custom-div-icon',
+    html: `<div style="background-color: ${color}; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4);">${number}</div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+};
+
+const currentLocationIcon = L.divIcon({
+  className: 'custom-div-icon',
+  html: `<div style="background-color: #3b82f6; width: 20px; height: 20px; border-radius: 50%; border: 4px solid white; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.3), 0 2px 6px rgba(0,0,0,0.4);"></div>`,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+});
+
+interface MapCenterProps {
+  center: [number, number];
+}
+
+function MapCenter({ center }: MapCenterProps) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, 14);
+  }, [center, map]);
+  return null;
+}
+
+interface DriverAppProps {
+  driverId: number | null;
+  onBack: () => void;
+}
+
+export default function DriverApp({ driverId, onBack }: DriverAppProps) {
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [selectedStopIndex, setSelectedStopIndex] = useState(0);
+  const [isLocating, setIsLocating] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: driver, isLoading: driverLoading } = useQuery({
+    queryKey: [`/api/drivers/${driverId}`],
+    enabled: !!driverId,
+  });
+
+  const { data: driverRoutes = [], isLoading: routesLoading, refetch: refetchRoutes } = useQuery({
+    queryKey: [`/api/drivers/${driverId}/routes`],
+    enabled: !!driverId,
+  });
+
+  const activeRoute = (driverRoutes as any[]).find((r: any) => r.status === "dispatched");
+
+  const { data: routeData, refetch: refetchRoute } = useQuery({
+    queryKey: [`/api/routes/${activeRoute?.id}`],
+    enabled: !!activeRoute?.id,
+  });
+
+  const completeStopMutation = useMutation({
+    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/complete`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Failed to complete stop");
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchRoute();
+    },
+  });
+
+  useEffect(() => {
+    const newSocket = io({
+      path: "/socket.io",
+    });
+
+    newSocket.on("connect", () => {
+      console.log("Driver connected to socket");
+      if (driverId) {
+        newSocket.emit("register_driver", driverId);
+      }
+    });
+
+    newSocket.on("route_dispatched", (data: any) => {
+      console.log("Route dispatched:", data);
+      refetchRoutes();
+    });
+
+    newSocket.on("stop_status_update", (data: any) => {
+      console.log("Stop status updated:", data);
+      refetchRoute();
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [driverId, refetchRoutes, refetchRoute]);
+
+  const updateLocation = useCallback(() => {
+    if (!navigator.geolocation || !driverId) return;
+
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude: lat, longitude: lng } = position.coords;
+        setCurrentLocation({ lat, lng });
+        
+        fetch(`/api/drivers/${driverId}/location`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat, lng }),
+        });
+
+        if (socket) {
+          socket.emit("driver_location", { driverId, lat, lng });
+        }
+        setIsLocating(false);
+      },
+      (error) => {
+        console.error("Location error:", error);
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true }
+    );
+  }, [driverId, socket]);
+
+  useEffect(() => {
+    updateLocation();
+    const interval = setInterval(updateLocation, 30000);
+    return () => clearInterval(interval);
+  }, [updateLocation]);
+
+  const route = (routeData as any)?.route;
+  const stops = (routeData as any)?.stops || [];
+  const pendingStops = stops.filter((s: any) => s.status !== "completed");
+  const completedStops = stops.filter((s: any) => s.status === "completed");
+
+  const currentStop = pendingStops[selectedStopIndex] || pendingStops[0];
+
+  const mapCenter: [number, number] = currentLocation
+    ? [currentLocation.lat, currentLocation.lng]
+    : currentStop?.delivery?.lat && currentStop?.delivery?.lng
+    ? [currentStop.delivery.lat, currentStop.delivery.lng]
+    : [40.7128, -74.006];
+
+  const openInMaps = (lat: number, lng: number, address: string) => {
+    const encodedAddress = encodeURIComponent(address);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    
+    if (isIOS) {
+      window.open(`maps://maps.google.com/maps?daddr=${lat},${lng}&q=${encodedAddress}`);
+    } else {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&destination_place_id=${encodedAddress}`);
+    }
+  };
+
+  if (!driverId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="bg-slate-800/50 border-slate-700 max-w-md w-full">
+          <CardContent className="py-8 text-center">
+            <Navigation className="h-12 w-12 mx-auto text-slate-500 mb-4" />
+            <h2 className="text-xl font-bold text-white mb-2">Driver App</h2>
+            <p className="text-slate-400 mb-4">
+              Please access this page from the link provided by your dispatcher.
+            </p>
+            <Button onClick={onBack} variant="outline" className="border-slate-600">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (driverLoading || routesLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="bg-slate-800/80 backdrop-blur-sm border-b border-slate-700 sticky top-0 z-50">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <button
+            onClick={onBack}
+            className="text-slate-400 hover:text-white transition-colors"
+          >
+            <ArrowLeft className="h-6 w-6" />
+          </button>
+          <div className="text-center">
+            <h1 className="text-lg font-bold text-white">
+              {(driver as any)?.name || "Driver"}
+            </h1>
+            <p className="text-xs text-slate-400">
+              {activeRoute ? `Route: ${route?.name}` : "No active route"}
+            </p>
+          </div>
+          <button
+            onClick={() => { refetchRoutes(); refetchRoute(); }}
+            className="text-slate-400 hover:text-white transition-colors"
+          >
+            <RefreshCw className="h-5 w-5" />
+          </button>
+        </div>
+      </header>
+
+      {!activeRoute ? (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <Card className="bg-slate-800/50 border-slate-700 max-w-md w-full">
+            <CardContent className="py-8 text-center">
+              <Clock className="h-12 w-12 mx-auto text-yellow-400 mb-4" />
+              <h2 className="text-xl font-bold text-white mb-2">Waiting for Route</h2>
+              <p className="text-slate-400 mb-4">
+                Your dispatcher will send you a route when ready. Pull down to refresh.
+              </p>
+              <Button
+                onClick={() => refetchRoutes()}
+                variant="outline"
+                className="border-slate-600"
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Check for Routes
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col">
+          <div className="h-56 relative">
+            <MapContainer
+              center={mapCenter}
+              zoom={14}
+              style={{ height: "100%", width: "100%" }}
+              className="z-0"
+            >
+              <TileLayer
+                attribution='&copy; OpenStreetMap'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <MapCenter center={mapCenter} />
+
+              {currentLocation && (
+                <Marker position={[currentLocation.lat, currentLocation.lng]} icon={currentLocationIcon}>
+                  <Popup>Your Location</Popup>
+                </Marker>
+              )}
+
+              {pendingStops.map((stop: any, index: number) => {
+                if (!stop.delivery?.lat || !stop.delivery?.lng) return null;
+                const color = index === 0 ? "#22c55e" : "#3b82f6";
+                return (
+                  <Marker
+                    key={stop.id}
+                    position={[stop.delivery.lat, stop.delivery.lng]}
+                    icon={createNumberedIcon(completedStops.length + index + 1, color)}
+                  >
+                    <Popup>{stop.delivery.addressText}</Popup>
+                  </Marker>
+                );
+              })}
+            </MapContainer>
+
+            <div className="absolute bottom-4 right-4 z-[1000]">
+              <Button
+                size="sm"
+                onClick={updateLocation}
+                disabled={isLocating}
+                className="bg-blue-500 hover:bg-blue-600 shadow-lg"
+              >
+                {isLocating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Navigation className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex-1 p-4 space-y-4 overflow-y-auto pb-24">
+            <Card className="bg-slate-800/50 border-slate-700">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-white text-lg">Progress</CardTitle>
+                  <span className="text-blue-400 font-bold">
+                    {completedStops.length}/{stops.length}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="w-full bg-slate-700 rounded-full h-2.5">
+                  <div
+                    className="bg-blue-500 h-2.5 rounded-full transition-all"
+                    style={{ width: `${(completedStops.length / stops.length) * 100}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {currentStop && (
+              <Card className="bg-green-500/10 border-green-500/30">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                      {completedStops.length + 1}
+                    </div>
+                    <CardTitle className="text-green-400">Next Stop</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <p className="text-white font-medium">{currentStop.delivery?.addressText}</p>
+                    {currentStop.delivery?.customerName && (
+                      <p className="text-slate-400 text-sm mt-1">
+                        {currentStop.delivery.customerName}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    {currentStop.delivery?.customerPhone && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(`tel:${currentStop.delivery.customerPhone}`)}
+                        className="flex-1 border-slate-600"
+                      >
+                        <Phone className="mr-2 h-4 w-4" />
+                        Call
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      onClick={() => openInMaps(
+                        currentStop.delivery.lat,
+                        currentStop.delivery.lng,
+                        currentStop.delivery.addressText
+                      )}
+                      className="flex-1 bg-blue-500 hover:bg-blue-600"
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Navigate
+                    </Button>
+                  </div>
+
+                  {currentStop.delivery?.notes && (
+                    <div className="bg-slate-900/50 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-slate-400 text-sm mb-1">
+                        <FileText className="h-4 w-4" />
+                        Notes
+                      </div>
+                      <p className="text-white text-sm">{currentStop.delivery.notes}</p>
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={() => completeStopMutation.mutate({
+                      routeId: activeRoute.id,
+                      stopId: currentStop.id
+                    })}
+                    disabled={completeStopMutation.isPending}
+                    className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3"
+                  >
+                    {completeStopMutation.isPending ? (
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    ) : (
+                      <CheckCircle className="mr-2 h-5 w-5" />
+                    )}
+                    Mark as Delivered
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {pendingStops.length > 1 && (
+              <Card className="bg-slate-800/50 border-slate-700">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-white text-sm">Upcoming Stops</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {pendingStops.slice(1, 4).map((stop: any, index: number) => (
+                    <div
+                      key={stop.id}
+                      className="flex items-center gap-3 p-2 rounded-lg bg-slate-900/30"
+                    >
+                      <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-xs font-bold">
+                        {completedStops.length + index + 2}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm truncate">{stop.delivery?.addressText}</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-slate-500" />
+                    </div>
+                  ))}
+                  {pendingStops.length > 4 && (
+                    <p className="text-slate-500 text-xs text-center">
+                      +{pendingStops.length - 4} more stops
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {completedStops.length > 0 && (
+              <Card className="bg-slate-800/50 border-slate-700">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-white text-sm flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-400" />
+                    Completed ({completedStops.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {completedStops.slice(-3).map((stop: any, index: number) => (
+                    <div
+                      key={stop.id}
+                      className="flex items-center gap-3 p-2 rounded-lg bg-green-500/10"
+                    >
+                      <CheckCircle className="h-5 w-5 text-green-400" />
+                      <p className="text-slate-300 text-sm truncate">{stop.delivery?.addressText}</p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {pendingStops.length === 0 && completedStops.length > 0 && (
+              <Card className="bg-green-500/10 border-green-500/30">
+                <CardContent className="py-8 text-center">
+                  <CheckCircle className="h-16 w-16 mx-auto text-green-400 mb-4" />
+                  <h2 className="text-xl font-bold text-white mb-2">Route Complete!</h2>
+                  <p className="text-slate-400">
+                    You've completed all {completedStops.length} deliveries.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
