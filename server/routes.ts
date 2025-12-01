@@ -18,20 +18,23 @@ interface GeocodedAddress {
 
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.error('Google Maps API key not configured');
+      return null;
+    }
+
     const encodedAddress = encodeURIComponent(address);
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=1`,
-      {
-        headers: {
-          'User-Agent': 'RouteOptimizer/1.0'
-        }
-      }
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${apiKey}`
     );
     const data = await response.json();
-    if (data && data.length > 0) {
+    
+    if (data.results && data.results.length > 0) {
+      const location = data.results[0].geometry.location;
       return {
-        lat: parseFloat(data[0].lat),
-        lng: parseFloat(data[0].lon)
+        lat: location.lat,
+        lng: location.lng
       };
     }
     return null;
@@ -52,71 +55,89 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-function optimizeRouteNearestNeighbor(
+async function optimizeRouteWithGoogle(
   startLat: number,
   startLng: number,
   deliveries: Array<{ id: number; lat: number; lng: number }>
-): number[] {
-  const unvisited = [...deliveries];
-  const order: number[] = [];
-  let currentLat = startLat;
-  let currentLng = startLng;
-
-  while (unvisited.length > 0) {
-    let nearestIndex = 0;
-    let nearestDistance = Infinity;
-
-    for (let i = 0; i < unvisited.length; i++) {
-      const distance = calculateDistance(
-        currentLat,
-        currentLng,
-        unvisited[i].lat,
-        unvisited[i].lng
-      );
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = i;
-      }
+): Promise<{ order: number[]; distance: number; duration: number } | null> {
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.error('Google Maps API key not configured');
+      return null;
     }
 
-    const nearest = unvisited.splice(nearestIndex, 1)[0];
-    order.push(nearest.id);
-    currentLat = nearest.lat;
-    currentLng = nearest.lng;
-  }
+    // Build waypoints array (exclude start and end which are the same as start for now)
+    const waypoints = deliveries.map(d => ({
+      location: { latitude: d.lat, longitude: d.lng }
+    }));
 
-  return order;
-}
-
-function twoOptImprove(
-  order: number[],
-  deliveriesMap: Map<number, { lat: number; lng: number }>,
-  startLat: number,
-  startLng: number
-): number[] {
-  let improved = true;
-  let bestOrder = [...order];
-
-  while (improved) {
-    improved = false;
-    for (let i = 0; i < bestOrder.length - 1; i++) {
-      for (let j = i + 2; j < bestOrder.length; j++) {
-        const newOrder = [...bestOrder];
-        const segment = newOrder.slice(i + 1, j + 1).reverse();
-        newOrder.splice(i + 1, j - i, ...segment);
-
-        const oldDistance = calculateTotalDistance(bestOrder, deliveriesMap, startLat, startLng);
-        const newDistance = calculateTotalDistance(newOrder, deliveriesMap, startLat, startLng);
-
-        if (newDistance < oldDistance) {
-          bestOrder = newOrder;
-          improved = true;
+    const requestBody = {
+      origin: {
+        location: {
+          latitude: startLat,
+          longitude: startLng
         }
+      },
+      destination: {
+        location: {
+          latitude: startLat,
+          longitude: startLng
+        }
+      },
+      intermediates: waypoints,
+      optimizeWaypointOrder: true,
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_AWARE_OPTIMAL"
+    };
+
+    const response = await fetch(
+      `https://routes.googleapis.com/routes/v2:computeRoutes?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Client": "gl-node/16.0.0"
+        },
+        body: JSON.stringify(requestBody)
+      }
+    );
+
+    const data = await response.json();
+
+    if (!data.routes || data.routes.length === 0) {
+      console.error('No routes found from Google Routes API');
+      return null;
+    }
+
+    const route = data.routes[0];
+    const optimizedWaypointOrder = route.optimizedIntermediateWaypointOrder || [];
+    
+    // Map the optimized order back to delivery IDs
+    const order = optimizedWaypointOrder.map((idx: number) => deliveries[idx].id);
+    
+    // Calculate totals
+    const legs = route.legs || [];
+    let totalDistance = 0;
+    let totalDuration = 0;
+
+    for (const leg of legs) {
+      if (leg.distanceMeters) totalDistance += leg.distanceMeters;
+      if (leg.duration) {
+        const durationMs = leg.duration.match(/(\d+)s/)?.[1];
+        if (durationMs) totalDuration += parseInt(durationMs);
       }
     }
-  }
 
-  return bestOrder;
+    return {
+      order,
+      distance: totalDistance / 1000, // Convert to km
+      duration: Math.round(totalDuration) // in seconds
+    };
+  } catch (error) {
+    console.error('Google Routes API error:', error);
+    return null;
+  }
 }
 
 function calculateTotalDistance(
@@ -360,20 +381,18 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No geocoded deliveries found" });
       }
 
-      const deliveriesMap = new Map(
-        geocodedDeliveries.map(d => [d.id, { lat: d.lat!, lng: d.lng! }])
-      );
-
-      let optimizedOrder = optimizeRouteNearestNeighbor(
+      // Use Google Routes API for optimization
+      const optimizationResult = await optimizeRouteWithGoogle(
         startLat,
         startLng,
         geocodedDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
       );
 
-      optimizedOrder = twoOptImprove(optimizedOrder, deliveriesMap, startLat, startLng);
+      if (!optimizationResult) {
+        return res.status(500).json({ error: "Failed to optimize route with Google Routes API" });
+      }
 
-      const totalDistance = calculateTotalDistance(optimizedOrder, deliveriesMap, startLat, startLng);
-      const estimatedDuration = Math.round(totalDistance / 30 * 60);
+      const { order: optimizedOrder, distance: totalDistance, duration: estimatedDuration } = optimizationResult;
 
       const route = await storage.createRoute({
         batchId,

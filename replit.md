@@ -16,12 +16,13 @@ A web-based route optimization application that takes multiple delivery addresse
 - **Backend**: Express.js + Socket.IO
 - **Database**: PostgreSQL with Drizzle ORM
 - **Maps**: Leaflet with OpenStreetMap tiles
-- **Geocoding**: OpenStreetMap Nominatim API
+- **Geocoding**: Google Maps Geocoding API
+- **Route Optimization**: Google Routes API
 - **Styling**: Tailwind CSS + shadcn/ui components
 
 ### Key Features
 1. **CSV Upload**: Drag-and-drop CSV file upload with automatic address geocoding
-2. **Route Optimization**: Nearest-neighbor algorithm with 2-opt improvement
+2. **Route Optimization**: Google Routes API with waypoint order optimization
 3. **Interactive Maps**: Leaflet maps showing routes, stops, and driver locations
 4. **Driver Mobile App**: PWA for iOS/Android with navigation and delivery tracking
 5. **Real-time Updates**: WebSocket-based live updates between dispatcher and drivers
@@ -93,9 +94,11 @@ address,customer_name,customer_phone,notes
 ## Recent Changes
 - Initial MVP implementation (2024-11-28)
 - Added secure password hashing with bcrypt
-- Implemented route optimization with nearest-neighbor + 2-opt
+- Integrated Google Maps Geocoding API for address geocoding
+- Integrated Google Routes API for advanced route optimization
 - Added real-time WebSocket communication
 - Created mobile-friendly driver PWA
+- Improved password security architecture (passwords never exposed in API)
 
 ## User Preferences
 - Dark theme UI preferred
