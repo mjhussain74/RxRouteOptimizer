@@ -117,8 +117,12 @@ async function optimizeRouteWithGoogle(
       intermediates: waypoints,
       optimizeWaypointOrder: true,
       travelMode: "DRIVE",
-      routingPreference: "TRAFFIC_AWARE_OPTIMAL"
+      routingPreference: "TRAFFIC_AWARE_OPTIMAL",
+      computeAlternativeRoutes: false
     };
+
+    console.log('Calling Google Routes API with', deliveries.length, 'waypoints');
+    console.log('Request body:', JSON.stringify(requestBody, null, 2).substring(0, 200));
 
     const response = await fetch(
       `https://routes.googleapis.com/routes/v2:computeRoutes?key=${apiKey}`,
@@ -126,11 +130,14 @@ async function optimizeRouteWithGoogle(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Goog-FieldMask": "routes.legs,routes.optimizedIntermediateWaypointOrder"
+          "X-Goog-Api-Client": "gl-node/16.0.0",
+          "X-Goog-FieldMask": "routes.legs,routes.optimizedIntermediateWaypointOrder,routes.duration,routes.distanceMeters"
         },
         body: JSON.stringify(requestBody)
       }
     );
+
+    console.log('Google Routes API response status:', response.status);
 
     if (response.status === 403) {
       console.log('Google Routes API returned 403 Forbidden. Ensure Routes API is enabled in Google Cloud Console.');
@@ -139,7 +146,7 @@ async function optimizeRouteWithGoogle(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Google Routes API error:', response.status, errorText);
+      console.log('Google Routes API error:', response.status, 'Response:', errorText.substring(0, 300));
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
@@ -149,15 +156,18 @@ async function optimizeRouteWithGoogle(
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
+    console.log('Google Routes API response received, parsing...');
     const data = JSON.parse(responseText);
 
     if (!data.routes || data.routes.length === 0) {
-      console.log('No routes from Google API, using fallback');
+      console.log('No routes from Google API response, using fallback');
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
     const route = data.routes[0];
     const optimizedWaypointOrder = route.optimizedIntermediateWaypointOrder || [];
+    console.log('Optimized waypoint order from Google:', optimizedWaypointOrder);
+    
     const order = optimizedWaypointOrder.map((idx: number) => deliveries[idx].id);
     
     const legs = route.legs || [];
@@ -171,6 +181,8 @@ async function optimizeRouteWithGoogle(
         if (durationMs) totalDuration += parseInt(durationMs);
       }
     }
+
+    console.log('Successfully optimized route with Google API:', { order, distance: totalDistance / 1000, duration: totalDuration });
 
     return {
       order,
