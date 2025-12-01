@@ -51,18 +51,20 @@ export default function RouteOptimizer({
   });
 
   const handleGeocodeStart = async () => {
-    if (!startAddress) return;
+    if (!startAddress.trim()) return;
     
     setIsGeocoding(true);
     try {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(startAddress)}&limit=1`,
-        { headers: { 'User-Agent': 'RouteOptimizer/1.0' } }
+        `/api/geocode?address=${encodeURIComponent(startAddress)}`,
+        { method: "GET" }
       );
       const data = await response.json();
-      if (data && data.length > 0) {
-        setStartLat(parseFloat(data[0].lat));
-        setStartLng(parseFloat(data[0].lon));
+      if (data && data.lat !== undefined && data.lng !== undefined) {
+        setStartLat(data.lat);
+        setStartLng(data.lng);
+      } else {
+        console.error('Geocoding failed:', data);
       }
     } catch (error) {
       console.error('Geocoding error:', error);
@@ -78,8 +80,8 @@ export default function RouteOptimizer({
       batchId: selectedBatchId,
       startLat,
       startLng,
-      startAddress: startAddress || "Starting Point",
-      routeName: routeName || `Route ${new Date().toLocaleTimeString()}`,
+      startAddress: startAddress.trim() || "Starting Point",
+      routeName: routeName.trim() || `Route ${new Date().toLocaleTimeString()}`,
     });
   };
 

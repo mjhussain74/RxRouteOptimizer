@@ -397,6 +397,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/geocode", async (req, res) => {
+    try {
+      const { address } = req.query;
+      if (!address || typeof address !== "string") {
+        return res.status(400).json({ error: "Address required" });
+      }
+
+      const geocoded = await geocodeAddress(address);
+      if (!geocoded) {
+        return res.status(400).json({ error: "Could not geocode address" });
+      }
+
+      res.json(geocoded);
+    } catch (error) {
+      console.error("Geocode error:", error);
+      res.status(500).json({ error: "Failed to geocode address" });
+    }
+  });
+
   app.get("/api/routes", async (req, res) => {
     try {
       const routes = await storage.getRoutes();
