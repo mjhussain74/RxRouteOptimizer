@@ -55,6 +55,42 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
+function optimizeRouteNearestNeighbor(
+  startLat: number,
+  startLng: number,
+  deliveries: Array<{ id: number; lat: number; lng: number }>
+): number[] {
+  const unvisited = [...deliveries];
+  const order: number[] = [];
+  let currentLat = startLat;
+  let currentLng = startLng;
+
+  while (unvisited.length > 0) {
+    let nearestIndex = 0;
+    let nearestDistance = Infinity;
+
+    for (let i = 0; i < unvisited.length; i++) {
+      const distance = calculateDistance(
+        currentLat,
+        currentLng,
+        unvisited[i].lat,
+        unvisited[i].lng
+      );
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = i;
+      }
+    }
+
+    const nearest = unvisited.splice(nearestIndex, 1)[0];
+    order.push(nearest.id);
+    currentLat = nearest.lat;
+    currentLng = nearest.lng;
+  }
+
+  return order;
+}
+
 async function optimizeRouteWithGoogle(
   startLat: number,
   startLng: number,
@@ -63,27 +99,20 @@ async function optimizeRouteWithGoogle(
   try {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
-      console.error('Google Maps API key not configured');
-      return null;
+      console.log('Google Routes API key not configured, falling back to nearest-neighbor algorithm');
+      return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
-    // Build waypoints array (exclude start and end which are the same as start for now)
     const waypoints = deliveries.map(d => ({
       location: { latitude: d.lat, longitude: d.lng }
     }));
 
     const requestBody = {
       origin: {
-        location: {
-          latitude: startLat,
-          longitude: startLng
-        }
+        location: { latitude: startLat, longitude: startLng }
       },
       destination: {
-        location: {
-          latitude: startLat,
-          longitude: startLng
-        }
+        location: { latitude: startLat, longitude: startLng }
       },
       intermediates: waypoints,
       optimizeWaypointOrder: true,
@@ -97,26 +126,40 @@ async function optimizeRouteWithGoogle(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Goog-Api-Client": "gl-node/16.0.0"
+          "X-Goog-FieldMask": "routes.legs,routes.optimizedIntermediateWaypointOrder"
         },
         body: JSON.stringify(requestBody)
       }
     );
 
-    const data = await response.json();
+    if (response.status === 403) {
+      console.log('Google Routes API returned 403 Forbidden. Ensure Routes API is enabled in Google Cloud Console.');
+      return optimizeRouteFallback(startLat, startLng, deliveries);
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('Google Routes API error:', response.status, errorText);
+      return optimizeRouteFallback(startLat, startLng, deliveries);
+    }
+
+    const responseText = await response.text();
+    if (!responseText) {
+      console.log('Empty response from Google Routes API, using fallback');
+      return optimizeRouteFallback(startLat, startLng, deliveries);
+    }
+
+    const data = JSON.parse(responseText);
 
     if (!data.routes || data.routes.length === 0) {
-      console.error('No routes found from Google Routes API');
-      return null;
+      console.log('No routes from Google API, using fallback');
+      return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
     const route = data.routes[0];
     const optimizedWaypointOrder = route.optimizedIntermediateWaypointOrder || [];
-    
-    // Map the optimized order back to delivery IDs
     const order = optimizedWaypointOrder.map((idx: number) => deliveries[idx].id);
     
-    // Calculate totals
     const legs = route.legs || [];
     let totalDistance = 0;
     let totalDuration = 0;
@@ -131,13 +174,26 @@ async function optimizeRouteWithGoogle(
 
     return {
       order,
-      distance: totalDistance / 1000, // Convert to km
-      duration: Math.round(totalDuration) // in seconds
+      distance: totalDistance / 1000,
+      duration: Math.round(totalDuration)
     };
   } catch (error) {
-    console.error('Google Routes API error:', error);
-    return null;
+    console.log('Google Routes API call failed, using fallback:', error);
+    return optimizeRouteFallback(startLat, startLng, deliveries);
   }
+}
+
+function optimizeRouteFallback(
+  startLat: number,
+  startLng: number,
+  deliveries: Array<{ id: number; lat: number; lng: number }>
+): { order: number[]; distance: number; duration: number } {
+  const order = optimizeRouteNearestNeighbor(startLat, startLng, deliveries);
+  const deliveriesMap = new Map(deliveries.map(d => [d.id, { lat: d.lat, lng: d.lng }]));
+  const distance = calculateTotalDistance(order, deliveriesMap, startLat, startLng);
+  const duration = Math.round(distance / 30 * 60 * 60);
+  
+  return { order, distance, duration };
 }
 
 function calculateTotalDistance(
