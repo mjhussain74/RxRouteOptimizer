@@ -84,6 +84,15 @@ export const driverLocations = pgTable("driver_locations", {
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
 });
 
+export const deliveryProofs = pgTable("delivery_proofs", {
+  id: serial("id").primaryKey(),
+  stopId: integer("stop_id").references(() => routeStops.id),
+  signature: text("signature"),
+  picture: text("picture"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   batches: many(deliveryBatches),
 }));
@@ -111,13 +120,18 @@ export const routesRelations = relations(routes, ({ one, many }) => ({
   stops: many(routeStops),
 }));
 
-export const routeStopsRelations = relations(routeStops, ({ one }) => ({
+export const routeStopsRelations = relations(routeStops, ({ one, many }) => ({
   route: one(routes, { fields: [routeStops.routeId], references: [routes.id] }),
   delivery: one(deliveries, { fields: [routeStops.deliveryId], references: [deliveries.id] }),
+  proofs: many(deliveryProofs),
 }));
 
 export const driverLocationsRelations = relations(driverLocations, ({ one }) => ({
   driver: one(drivers, { fields: [driverLocations.driverId], references: [drivers.id] }),
+}));
+
+export const deliveryProofsRelations = relations(deliveryProofs, ({ one }) => ({
+  stop: one(routeStops, { fields: [deliveryProofs.stopId], references: [routeStops.id] }),
 }));
 
 export const insertUserSchema = createInsertSchema(users).pick({

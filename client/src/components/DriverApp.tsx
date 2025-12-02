@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   ArrowLeft, Navigation, MapPin, CheckCircle, Clock, Phone, 
-  FileText, ChevronRight, Loader2, ExternalLink, RefreshCw
+  FileText, ChevronRight, Loader2, ExternalLink, RefreshCw, Camera, RotateCcw, Send, X
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -56,6 +56,12 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedStopIndex, setSelectedStopIndex] = useState(0);
   const [isLocating, setIsLocating] = useState(false);
+  const [showProofModal, setShowProofModal] = useState(false);
+  const [signature, setSignature] = useState<string | null>(null);
+  const [picture, setPicture] = useState<string | null>(null);
+  const [proofNotes, setProofNotes] = useState("");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
   const { data: driver, isLoading: driverLoading } = useQuery({
@@ -87,6 +93,74 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       refetchRoute();
     },
   });
+
+  const submitProofMutation = useMutation({
+    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/proof`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signature, picture, notes: proofNotes }),
+      });
+      if (!response.ok) throw new Error("Failed to submit proof");
+      return response.json();
+    },
+    onSuccess: async () => {
+      setSignature(null);
+      setPicture(null);
+      setProofNotes("");
+      setShowProofModal(false);
+      await completeStopMutation.mutateAsync({
+        routeId: activeRoute.id,
+        stopId: currentStop.id
+      });
+    },
+  });
+
+  const startSignature = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    
+    let isDrawing = false;
+    
+    const handleMouseDown = (e: MouseEvent) => {
+      isDrawing = true;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    };
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDrawing) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    };
+    
+    const handleMouseUp = () => {
+      isDrawing = false;
+      setSignature(canvas.toDataURL());
+    };
+    
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const capturePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setPicture(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     const newSocket = io({
@@ -379,19 +453,11 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                   )}
 
                   <Button
-                    onClick={() => completeStopMutation.mutate({
-                      routeId: activeRoute.id,
-                      stopId: currentStop.id
-                    })}
-                    disabled={completeStopMutation.isPending}
+                    onClick={() => setShowProofModal(true)}
                     className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3"
                   >
-                    {completeStopMutation.isPending ? (
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    ) : (
-                      <CheckCircle className="mr-2 h-5 w-5" />
-                    )}
-                    Mark as Delivered
+                    <CheckCircle className="mr-2 h-5 w-5" />
+                    Get Signature & Photo
                   </Button>
                 </CardContent>
               </Card>
@@ -460,6 +526,59 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               </Card>
             )}
           </div>
+
+          {showProofModal && currentStop && (
+            <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
+              <Card className="bg-slate-800 border-slate-700 max-w-md w-full">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-white">Delivery Proof</CardTitle>
+                  <button onClick={() => setShowProofModal(false)} className="text-slate-400 hover:text-white">
+                    <X className="h-5 w-5" />
+                  </button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-white text-sm font-medium block mb-2">Customer Signature</label>
+                    <canvas
+                      ref={canvasRef}
+                      onMouseEnter={startSignature}
+                      width={280}
+                      height={120}
+                      className="border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair w-full"
+                    />
+                    <div className="flex gap-2 mt-2">
+                      <Button size="sm" variant="outline" onClick={() => { const ctx = canvasRef.current?.getContext("2d"); if (ctx && canvasRef.current) { ctx.fillStyle = "#111827"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); setSignature(null); } }} className="flex-1 border-slate-600"><RotateCcw className="h-4 w-4 mr-1" />Clear</Button>
+                      {signature && <span className="flex-1 text-green-400 text-sm">✓ Captured</span>}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-white text-sm font-medium block mb-2">Photo of Item</label>
+                    <input ref={fileInputRef} type="file" accept="image/*" onChange={capturePhoto} className="hidden" />
+                    <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full border-slate-600"><Camera className="mr-2 h-4 w-4" />Take Photo</Button>
+                    {picture && <div className="mt-2 text-green-400 text-sm">✓ Photo captured</div>}
+                  </div>
+
+                  <div>
+                    <label className="text-white text-sm font-medium block mb-2">Notes</label>
+                    <input type="text" value={proofNotes} onChange={(e) => setProofNotes(e.target.value)} placeholder="Optional notes..." className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-sm" />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setShowProofModal(false)} className="flex-1 border-slate-600">Cancel</Button>
+                    <Button 
+                      onClick={() => submitProofMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
+                      disabled={(!signature && !picture) || submitProofMutation.isPending}
+                      className="flex-1 bg-green-500 hover:bg-green-600"
+                    >
+                      {submitProofMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                      Submit & Complete
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -609,5 +609,31 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/routes/:routeId/stops/:stopId/proof", async (req, res) => {
+    try {
+      const stopId = parseInt(req.params.stopId);
+      const { signature, picture, notes } = req.body;
+
+      if (!signature && !picture) {
+        return res.status(400).json({ error: "Signature or picture required" });
+      }
+
+      const result = await (storage as any).db.insert(
+        (storage as any).deliveryProofs
+      ).values({
+        stopId,
+        signature: signature || null,
+        picture: picture || null,
+        notes: notes || null,
+      }).returning();
+
+      io.emit("proof_submitted", { stopId, proof: result[0] });
+      res.json(result[0]);
+    } catch (error) {
+      console.error("Proof submission error:", error);
+      res.status(500).json({ error: "Failed to submit proof" });
+    }
+  });
+
   return httpServer;
 }
