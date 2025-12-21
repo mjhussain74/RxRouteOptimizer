@@ -124,32 +124,49 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     
     let isDrawing = false;
     
-    const handleMouseDown = (e: MouseEvent) => {
-      isDrawing = true;
+    const getCoordinates = (e: any) => {
       const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
+      const clientX = e.clientX !== undefined ? e.clientX : e.touches?.[0]?.clientX;
+      const clientY = e.clientY !== undefined ? e.clientY : e.touches?.[0]?.clientY;
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+      };
     };
     
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleStart = (e: any) => {
+      isDrawing = true;
+      e.preventDefault();
+      const coords = getCoordinates(e);
+      ctx.beginPath();
+      ctx.moveTo(coords.x, coords.y);
+    };
+    
+    const handleMove = (e: any) => {
       if (!isDrawing) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      ctx.lineTo(x, y);
+      e.preventDefault();
+      const coords = getCoordinates(e);
+      ctx.lineTo(coords.x, coords.y);
       ctx.stroke();
     };
     
-    const handleMouseUp = () => {
+    const handleEnd = (e: any) => {
+      if (!isDrawing) return;
+      e.preventDefault();
       isDrawing = false;
       setSignature(canvas.toDataURL());
     };
     
-    canvas.addEventListener("mousedown", handleMouseDown);
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mouseup", handleMouseUp);
+    // Mouse events
+    canvas.addEventListener("mousedown", handleStart);
+    canvas.addEventListener("mousemove", handleMove);
+    canvas.addEventListener("mouseup", handleEnd);
+    canvas.addEventListener("mouseout", handleEnd);
+    
+    // Touch events
+    canvas.addEventListener("touchstart", handleStart);
+    canvas.addEventListener("touchmove", handleMove);
+    canvas.addEventListener("touchend", handleEnd);
   };
 
   const capturePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -386,13 +403,30 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                   </span>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div className="w-full bg-slate-700 rounded-full h-2.5">
                   <div
                     className="bg-blue-500 h-2.5 rounded-full transition-all"
                     style={{ width: `${(completedStops.length / stops.length) * 100}%` }}
                   />
                 </div>
+                
+                {route?.estimatedDuration && (
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="bg-slate-900/50 rounded-lg p-3">
+                      <p className="text-slate-500">Est. Total Time</p>
+                      <p className="text-white font-bold text-lg">
+                        {Math.floor(route.estimatedDuration / 60)}h {route.estimatedDuration % 60}m
+                      </p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-3">
+                      <p className="text-slate-500">Distance</p>
+                      <p className="text-white font-bold text-lg">
+                        {route.estimatedDistance?.toFixed(1) || 0} km
+                      </p>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
