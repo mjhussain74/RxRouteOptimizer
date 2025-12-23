@@ -256,14 +256,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     : [40.7128, -74.006];
 
   const openInMaps = (lat: number, lng: number, address: string) => {
-    const encodedAddress = encodeURIComponent(address);
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    
-    if (isIOS) {
-      window.open(`maps://maps.google.com/maps?daddr=${lat},${lng}&q=${encodedAddress}`);
-    } else {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&destination_place_id=${encodedAddress}`);
-    }
+    // Always use Google Maps HTTPS URL for consistent behavior across all platforms
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
   };
 
   if (!driverId) {
