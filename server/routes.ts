@@ -20,26 +20,36 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
   try {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
-      console.error('Google Maps API key not configured');
+      console.error('❌ Google Maps API key not configured in environment');
+      console.error('Available env keys:', Object.keys(process.env).filter(k => k.includes('GOOGLE') || k.includes('API')));
       return null;
     }
 
     const encodedAddress = encodeURIComponent(address);
+    console.log(`🔄 Geocoding address: ${address}`);
+    
     const response = await fetch(
       `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${apiKey}`
     );
     const data = await response.json();
     
+    if (data.error_message) {
+      console.error(`❌ Geocoding API error for "${address}":`, data.error_message);
+      return null;
+    }
+    
     if (data.results && data.results.length > 0) {
       const location = data.results[0].geometry.location;
+      console.log(`✅ Successfully geocoded "${address}" to [${location.lat}, ${location.lng}]`);
       return {
         lat: location.lat,
         lng: location.lng
       };
     }
+    console.warn(`⚠️ No results found for address: ${address}`);
     return null;
   } catch (error) {
-    console.error('Geocoding error:', error);
+    console.error('❌ Geocoding error:', error);
     return null;
   }
 }
