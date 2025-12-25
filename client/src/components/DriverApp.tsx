@@ -116,7 +116,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     },
   });
 
-  const startSignature = () => {
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -135,8 +135,9 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     };
     
     const handleStart = (e: any) => {
-      isDrawing = true;
       e.preventDefault();
+      e.stopPropagation();
+      isDrawing = true;
       const coords = getCoordinates(e);
       ctx.beginPath();
       ctx.moveTo(coords.x, coords.y);
@@ -145,6 +146,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     const handleMove = (e: any) => {
       if (!isDrawing) return;
       e.preventDefault();
+      e.stopPropagation();
       const coords = getCoordinates(e);
       ctx.lineTo(coords.x, coords.y);
       ctx.stroke();
@@ -153,21 +155,33 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     const handleEnd = (e: any) => {
       if (!isDrawing) return;
       e.preventDefault();
+      e.stopPropagation();
       isDrawing = false;
       setSignature(canvas.toDataURL());
     };
     
     // Mouse events
-    canvas.addEventListener("mousedown", handleStart);
-    canvas.addEventListener("mousemove", handleMove);
-    canvas.addEventListener("mouseup", handleEnd);
-    canvas.addEventListener("mouseout", handleEnd);
+    canvas.addEventListener("mousedown", handleStart, { passive: false });
+    canvas.addEventListener("mousemove", handleMove, { passive: false });
+    canvas.addEventListener("mouseup", handleEnd, { passive: false });
+    canvas.addEventListener("mouseout", handleEnd, { passive: false });
     
     // Touch events
-    canvas.addEventListener("touchstart", handleStart);
-    canvas.addEventListener("touchmove", handleMove);
-    canvas.addEventListener("touchend", handleEnd);
-  };
+    canvas.addEventListener("touchstart", handleStart, { passive: false });
+    canvas.addEventListener("touchmove", handleMove, { passive: false });
+    canvas.addEventListener("touchend", handleEnd, { passive: false });
+    
+    // Cleanup
+    return () => {
+      canvas.removeEventListener("mousedown", handleStart);
+      canvas.removeEventListener("mousemove", handleMove);
+      canvas.removeEventListener("mouseup", handleEnd);
+      canvas.removeEventListener("mouseout", handleEnd);
+      canvas.removeEventListener("touchstart", handleStart);
+      canvas.removeEventListener("touchmove", handleMove);
+      canvas.removeEventListener("touchend", handleEnd);
+    };
+  }, []);
 
   const capturePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -569,10 +583,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     <label className="text-white text-sm font-medium block mb-2">Customer Signature</label>
                     <canvas
                       ref={canvasRef}
-                      onMouseEnter={startSignature}
                       width={280}
                       height={120}
                       className="border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair w-full"
+                      style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none" } as any}
                     />
                     <div className="flex gap-2 mt-2">
                       <Button size="sm" variant="outline" onClick={() => { const ctx = canvasRef.current?.getContext("2d"); if (ctx && canvasRef.current) { ctx.fillStyle = "#111827"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); setSignature(null); } }} className="flex-1 border-slate-600"><RotateCcw className="h-4 w-4 mr-1" />Clear</Button>
