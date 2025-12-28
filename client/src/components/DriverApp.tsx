@@ -151,12 +151,35 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     
+    // Set proper dimensions and scaling
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#fff";
+    
+    // Clear canvas with dark background
+    ctx.fillStyle = "#111827";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    
     let isDrawing = false;
     
     const getCoordinates = (e: any) => {
       const rect = canvas.getBoundingClientRect();
-      const clientX = e.clientX !== undefined ? e.clientX : e.touches?.[0]?.clientX;
-      const clientY = e.clientY !== undefined ? e.clientY : e.touches?.[0]?.clientY;
+      let clientX = e.clientX;
+      let clientY = e.clientY;
+      
+      if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      }
+      
       return {
         x: clientX - rect.left,
         y: clientY - rect.top
@@ -168,6 +191,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       e.stopPropagation();
       isDrawing = true;
       const coords = getCoordinates(e);
+      console.log("✏️ Signature start:", coords);
       ctx.beginPath();
       ctx.moveTo(coords.x, coords.y);
     };
@@ -186,7 +210,9 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       e.preventDefault();
       e.stopPropagation();
       isDrawing = false;
-      setSignature(canvas.toDataURL());
+      const signatureData = canvas.toDataURL();
+      console.log("✅ Signature captured:", signatureData.substring(0, 50) + "...");
+      setSignature(signatureData);
     };
     
     // Mouse events
@@ -610,13 +636,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 <CardContent className="space-y-4">
                   <div>
                     <label className="text-white text-sm font-medium block mb-2">Customer Signature</label>
-                    <canvas
-                      ref={canvasRef}
-                      width={280}
-                      height={120}
-                      className="border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair w-full"
-                      style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none" } as any}
-                    />
+                    <div className="relative w-full bg-slate-900 rounded border-2 border-slate-600" style={{ height: "120px" }}>
+                      <canvas
+                        ref={canvasRef}
+                        className="absolute inset-0 w-full h-full rounded cursor-crosshair"
+                        style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", display: "block" } as any}
+                      />
+                    </div>
                     <div className="flex gap-2 mt-2">
                       <Button size="sm" variant="outline" onClick={() => { const ctx = canvasRef.current?.getContext("2d"); if (ctx && canvasRef.current) { ctx.fillStyle = "#111827"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); setSignature(null); } }} className="flex-1 border-slate-600"><RotateCcw className="h-4 w-4 mr-1" />Clear</Button>
                       {signature && <span className="flex-1 text-green-400 text-sm">✓ Captured</span>}
