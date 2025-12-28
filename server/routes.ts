@@ -624,8 +624,9 @@ export async function registerRoutes(
       const stopId = parseInt(req.params.stopId);
       const { signature, picture, notes } = req.body;
 
-      if (!signature && !picture) {
-        return res.status(400).json({ error: "Signature or picture required" });
+      // Allow submission if: signature OR picture provided, OR notes provided (skip with note)
+      if (!signature && !picture && !notes) {
+        return res.status(400).json({ error: "Signature, picture, or notes required" });
       }
 
       const result = await (storage as any).db.insert(
