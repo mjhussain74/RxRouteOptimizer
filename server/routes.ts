@@ -629,23 +629,23 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Signature, picture, or notes required" });
       }
 
-      const result = await (storage as any).db.insert(
-        (storage as any).deliveryProofs
-      ).values({
+      // Create the delivery proof
+      console.log(`📝 Creating delivery proof for stop ${stopId}`);
+      const proof = await (storage as any).createDeliveryProof(
         stopId,
-        signature: signature || null,
-        picture: picture || null,
-        notes: notes || null,
-      }).returning();
+        signature || null,
+        picture || null,
+        notes || null
+      );
 
       // Automatically mark the stop as completed when proof is submitted
       console.log(`✅ Proof submitted for stop ${stopId}, marking as completed`);
       const completedStop = await storage.completeRouteStop(stopId);
       
-      io.emit("proof_submitted", { stopId, proof: result[0] });
+      io.emit("proof_submitted", { stopId, proof });
       io.emit("stop_status_update", { stopId, status: "completed" });
       
-      res.json({ proof: result[0], stop: completedStop });
+      res.json({ proof, stop: completedStop });
     } catch (error) {
       console.error("Proof submission error:", error);
       res.status(500).json({ error: "Failed to submit proof" });

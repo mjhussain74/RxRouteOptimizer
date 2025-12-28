@@ -3,7 +3,7 @@ import { neon } from "@neondatabase/serverless";
 import { eq, and, desc } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import {
-  users, drivers, deliveryBatches, deliveries, routes, routeStops, driverLocations,
+  users, drivers, deliveryBatches, deliveries, routes, routeStops, driverLocations, deliveryProofs,
   type User, type InsertUser,
   type Driver, type InsertDriver,
   type DeliveryBatch, type InsertDeliveryBatch,
@@ -270,6 +270,16 @@ export class DatabaseStorage implements IStorage {
     
     await this.updateDriverLocation(driverId, lat, lng);
     
+    return result[0];
+  }
+
+  async createDeliveryProof(stopId: number, signature: string | null, picture: string | null, notes: string | null) {
+    const result = await db.insert(deliveryProofs).values({
+      stopId,
+      signature,
+      picture,
+      notes,
+    }).returning();
     return result[0];
   }
 }
