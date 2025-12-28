@@ -116,6 +116,28 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     },
   });
 
+  const skipDeliveryMutation = useMutation({
+    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/proof`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signature: null, picture: null, notes: proofNotes || "Skipped - no signature/photo available" }),
+      });
+      if (!response.ok) throw new Error("Failed to skip delivery");
+      return response.json();
+    },
+    onSuccess: async () => {
+      setSignature(null);
+      setPicture(null);
+      setProofNotes("");
+      setShowProofModal(false);
+      await completeStopMutation.mutateAsync({
+        routeId: activeRoute.id,
+        stopId: currentStop.id
+      });
+    },
+  });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -606,16 +628,31 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     <input type="text" value={proofNotes} onChange={(e) => setProofNotes(e.target.value)} placeholder="Optional notes..." className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-sm" />
                   </div>
 
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setShowProofModal(false)} className="flex-1 border-slate-600">Cancel</Button>
-                    <Button 
-                      onClick={() => submitProofMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
-                      disabled={(!signature && !picture) || submitProofMutation.isPending}
-                      className="flex-1 bg-green-500 hover:bg-green-600"
-                    >
-                      {submitProofMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                      Submit & Complete
-                    </Button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => setShowProofModal(false)} className="flex-1 border-slate-600">Close</Button>
+                      <Button 
+                        onClick={() => submitProofMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
+                        disabled={(!signature && !picture) || submitProofMutation.isPending}
+                        className="flex-1 bg-green-500 hover:bg-green-600"
+                      >
+                        {submitProofMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                        Submit Proof
+                      </Button>
+                    </div>
+                    
+                    <div className="border-t border-slate-600 pt-3">
+                      <p className="text-slate-400 text-xs mb-2">No signature/photo available?</p>
+                      <Button 
+                        onClick={() => skipDeliveryMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
+                        disabled={skipDeliveryMutation.isPending}
+                        variant="outline"
+                        className="w-full border-orange-500 text-orange-400 hover:bg-orange-500/10"
+                      >
+                        {skipDeliveryMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                        Mark as Delivered
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
