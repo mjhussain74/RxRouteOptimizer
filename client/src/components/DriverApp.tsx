@@ -105,19 +105,23 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       return response.json();
     },
     onSuccess: async () => {
+      console.log("✅ Proof submitted successfully");
       setSignature(null);
       setPicture(null);
       setProofNotes("");
       setShowProofModal(false);
-      await completeStopMutation.mutateAsync({
-        routeId: activeRoute.id,
-        stopId: currentStop.id
-      });
+      // Wait a moment for the backend to process, then refetch route
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await refetchRoute();
     },
+    onError: (error) => {
+      console.error("❌ Proof submission error:", error);
+    }
   });
 
   const skipDeliveryMutation = useMutation({
     mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      console.log("📝 Submitting skip delivery for stop:", stopId);
       const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/proof`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -127,15 +131,18 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       return response.json();
     },
     onSuccess: async () => {
+      console.log("✅ Delivery marked as completed (skip)");
       setSignature(null);
       setPicture(null);
       setProofNotes("");
       setShowProofModal(false);
-      await completeStopMutation.mutateAsync({
-        routeId: activeRoute.id,
-        stopId: currentStop.id
-      });
+      // Wait a moment for the backend to process, then refetch route
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await refetchRoute();
     },
+    onError: (error) => {
+      console.error("❌ Skip delivery error:", error);
+    }
   });
 
   useEffect(() => {
@@ -592,8 +599,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
           </div>
 
           {showProofModal && currentStop && (
-            <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
-              <Card className="bg-slate-800 border-slate-700 max-w-md w-full">
+            <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 overflow-hidden" style={{ overscrollBehavior: 'none' }}>
+              <Card className="bg-slate-800 border-slate-700 max-w-md w-full max-h-[90vh] overflow-y-auto">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-white">Delivery Proof</CardTitle>
                   <button onClick={() => setShowProofModal(false)} className="text-slate-400 hover:text-white">

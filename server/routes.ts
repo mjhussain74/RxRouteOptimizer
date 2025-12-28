@@ -638,8 +638,14 @@ export async function registerRoutes(
         notes: notes || null,
       }).returning();
 
+      // Automatically mark the stop as completed when proof is submitted
+      console.log(`✅ Proof submitted for stop ${stopId}, marking as completed`);
+      const completedStop = await storage.completeRouteStop(stopId);
+      
       io.emit("proof_submitted", { stopId, proof: result[0] });
-      res.json(result[0]);
+      io.emit("stop_status_update", { stopId, status: "completed" });
+      
+      res.json({ proof: result[0], stop: completedStop });
     } catch (error) {
       console.error("Proof submission error:", error);
       res.status(500).json({ error: "Failed to submit proof" });
