@@ -192,12 +192,12 @@ async function optimizeRouteWithGoogle(
       }
     }
 
-    console.log('Successfully optimized route with Google API:', { order, distance: totalDistance / 1000, duration: totalDuration });
+    console.log('Successfully optimized route with Google API:', { order, distance: totalDistance / 1000, duration: Math.round(totalDuration / 60) });
 
     return {
       order,
       distance: totalDistance / 1000,
-      duration: Math.round(totalDuration)
+      duration: Math.round(totalDuration / 60)
     };
   } catch (error) {
     console.log('Google Routes API call failed, using fallback:', error);
@@ -213,9 +213,10 @@ function optimizeRouteFallback(
   const order = optimizeRouteNearestNeighbor(startLat, startLng, deliveries);
   const deliveriesMap = new Map(deliveries.map(d => [d.id, { lat: d.lat, lng: d.lng }]));
   const distance = calculateTotalDistance(order, deliveriesMap, startLat, startLng);
-  const duration = Math.round(distance / 30 * 60 * 60);
+  const durationSeconds = Math.round(distance / 30 * 60 * 60);
+  const durationMinutes = Math.round(durationSeconds / 60);
   
-  return { order, distance, duration };
+  return { order, distance, duration: durationMinutes };
 }
 
 function calculateTotalDistance(
