@@ -642,7 +642,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     </div>
                     <div className="p-3 bg-slate-700/50 rounded">
                       <p className="text-slate-400 text-xs">Total Stops</p>
-                      <p className="text-white font-semibold">{routeData?.stops?.length || 0}</p>
+                      <p className="text-white font-semibold">{(routeData as any)?.stops?.length || 0}</p>
                     </div>
                     <div className="p-3 bg-green-500/10 rounded border border-green-500/30">
                       <p className="text-green-400 text-xs">Completed</p>
