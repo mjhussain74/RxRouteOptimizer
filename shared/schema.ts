@@ -158,6 +158,8 @@ export const insertDeliverySchema = createInsertSchema(deliveries).omit({
 export const insertRouteSchema = createInsertSchema(routes).omit({
   id: true,
   createdAt: true,
+}).extend({
+  optimizedOrder: z.array(z.number()).nullable().optional(),
 });
 
 export const insertRouteStopSchema = createInsertSchema(routeStops).omit({
