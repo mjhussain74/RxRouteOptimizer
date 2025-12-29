@@ -715,7 +715,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       <Button variant="outline" onClick={() => setShowProofModal(false)} className="flex-1 border-slate-600">Close</Button>
                       <Button 
                         onClick={() => submitProofMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
-                        disabled={(!signature && !picture) || submitProofMutation.isPending}
+                        disabled={(!signature && !picture && !proofNotes) || submitProofMutation.isPending}
                         className="flex-1 bg-green-500 hover:bg-green-600"
                       >
                         {submitProofMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
