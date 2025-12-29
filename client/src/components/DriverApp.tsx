@@ -382,6 +382,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               <RefreshCw className="h-5 w-5" />
             </button>
           </div>
+        </div>
       </header>
 
       {!activeRoute ? (
