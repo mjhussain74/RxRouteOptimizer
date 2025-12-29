@@ -241,8 +241,8 @@ export default function RouteOptimizer({
                   </div>
                 </div>
 
-                <div className="max-h-64 overflow-y-auto space-y-2">
-                  {deliveries.slice(0, 10).map((delivery: any, index: number) => (
+                <div className="max-h-96 overflow-y-auto space-y-2">
+                  {deliveries.map((delivery: any, index: number) => (
                     <div
                       key={delivery.id}
                       className="flex items-start gap-3 bg-slate-900/30 rounded-lg p-3"
@@ -265,11 +265,6 @@ export default function RouteOptimizer({
                       )}
                     </div>
                   ))}
-                  {deliveries.length > 10 && (
-                    <p className="text-slate-500 text-sm text-center py-2">
-                      +{deliveries.length - 10} more addresses
-                    </p>
-                  )}
                 </div>
               </div>
             ) : (

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   ArrowLeft, Navigation, MapPin, CheckCircle, Clock, Phone, 
-  FileText, ChevronRight, Loader2, ExternalLink, RefreshCw, Camera, RotateCcw, Send, X
+  FileText, ChevronRight, Loader2, ExternalLink, RefreshCw, Camera, RotateCcw, Send, X, BarChart3
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -60,6 +60,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [signature, setSignature] = useState<string | null>(null);
   const [picture, setPicture] = useState<string | null>(null);
   const [proofNotes, setProofNotes] = useState("");
+  const [showDeliveryReport, setShowDeliveryReport] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -148,50 +149,48 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
-    
-    // Set proper dimensions and scaling
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    
-    ctx.scale(dpr, dpr);
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#fff";
-    
-    // Clear canvas with dark background
-    ctx.fillStyle = "#111827";
-    ctx.fillRect(0, 0, rect.width, rect.height);
     
     let isDrawing = false;
     
-    const getCoordinates = (e: any) => {
+    const initCanvas = () => {
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#fff";
+    };
+    
+    initCanvas();
+    
+    const getCoordinates = (e: TouchEvent | MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      let clientX = e.clientX;
-      let clientY = e.clientY;
+      let clientX = 0, clientY = 0;
       
-      if (e.touches && e.touches.length > 0) {
+      if (e instanceof TouchEvent && e.touches.length > 0) {
         clientX = e.touches[0].clientX;
         clientY = e.touches[0].clientY;
+      } else if (e instanceof MouseEvent) {
+        clientX = e.clientX;
+        clientY = e.clientY;
       }
       
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      
       return {
-        x: clientX - rect.left,
-        y: clientY - rect.top
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
       };
     };
     
     const handleStart = (e: any) => {
       e.preventDefault();
-      e.stopPropagation();
       isDrawing = true;
       const coords = getCoordinates(e);
-      console.log("✏️ Signature start:", coords);
       ctx.beginPath();
       ctx.moveTo(coords.x, coords.y);
     };
@@ -199,34 +198,27 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     const handleMove = (e: any) => {
       if (!isDrawing) return;
       e.preventDefault();
-      e.stopPropagation();
       const coords = getCoordinates(e);
       ctx.lineTo(coords.x, coords.y);
       ctx.stroke();
     };
     
     const handleEnd = (e: any) => {
-      if (!isDrawing) return;
       e.preventDefault();
-      e.stopPropagation();
       isDrawing = false;
-      const signatureData = canvas.toDataURL();
-      console.log("✅ Signature captured:", signatureData.substring(0, 50) + "...");
-      setSignature(signatureData);
+      if (canvas.toDataURL !== undefined) {
+        setSignature(canvas.toDataURL());
+      }
     };
     
-    // Mouse events
-    canvas.addEventListener("mousedown", handleStart, { passive: false });
-    canvas.addEventListener("mousemove", handleMove, { passive: false });
-    canvas.addEventListener("mouseup", handleEnd, { passive: false });
-    canvas.addEventListener("mouseout", handleEnd, { passive: false });
+    canvas.addEventListener("mousedown", handleStart, false);
+    canvas.addEventListener("mousemove", handleMove, false);
+    canvas.addEventListener("mouseup", handleEnd, false);
+    canvas.addEventListener("mouseout", handleEnd, false);
+    canvas.addEventListener("touchstart", handleStart, false);
+    canvas.addEventListener("touchmove", handleMove, false);
+    canvas.addEventListener("touchend", handleEnd, false);
     
-    // Touch events
-    canvas.addEventListener("touchstart", handleStart, { passive: false });
-    canvas.addEventListener("touchmove", handleMove, { passive: false });
-    canvas.addEventListener("touchend", handleEnd, { passive: false });
-    
-    // Cleanup
     return () => {
       canvas.removeEventListener("mousedown", handleStart);
       canvas.removeEventListener("mousemove", handleMove);
@@ -375,13 +367,21 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               {activeRoute ? `Route: ${route?.name}` : "No active route"}
             </p>
           </div>
-          <button
-            onClick={() => { refetchRoutes(); refetchRoute(); }}
-            className="text-slate-400 hover:text-white transition-colors"
-          >
-            <RefreshCw className="h-5 w-5" />
-          </button>
-        </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowDeliveryReport(true)}
+              className="text-slate-400 hover:text-white transition-colors"
+              title="Delivery Report"
+            >
+              <BarChart3 className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => { refetchRoutes(); refetchRoute(); }}
+              className="text-slate-400 hover:text-white transition-colors"
+            >
+              <RefreshCw className="h-5 w-5" />
+            </button>
+          </div>
       </header>
 
       {!activeRoute ? (
@@ -624,6 +624,54 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
             )}
           </div>
 
+          {showDeliveryReport && activeRoute && (
+            <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
+              <Card className="bg-slate-800 border-slate-700 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-white flex items-center gap-2"><BarChart3 className="h-5 w-5" />Delivery Report</CardTitle>
+                  <button onClick={() => setShowDeliveryReport(false)} className="text-slate-400 hover:text-white">
+                    <X className="h-5 w-5" />
+                  </button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-3 bg-slate-700/50 rounded">
+                      <p className="text-slate-400 text-xs">Route Name</p>
+                      <p className="text-white font-semibold">{activeRoute.name}</p>
+                    </div>
+                    <div className="p-3 bg-slate-700/50 rounded">
+                      <p className="text-slate-400 text-xs">Total Stops</p>
+                      <p className="text-white font-semibold">{routeData?.stops?.length || 0}</p>
+                    </div>
+                    <div className="p-3 bg-green-500/10 rounded border border-green-500/30">
+                      <p className="text-green-400 text-xs">Completed</p>
+                      <p className="text-white font-semibold">{completedStops.length}</p>
+                    </div>
+                    <div className="p-3 bg-yellow-500/10 rounded border border-yellow-500/30">
+                      <p className="text-yellow-400 text-xs">Pending</p>
+                      <p className="text-white font-semibold">{pendingStops.length}</p>
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-600 pt-4">
+                    <h3 className="text-white font-semibold mb-3">Completed Deliveries</h3>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {completedStops.map((stop: any, idx: number) => (
+                        <div key={stop.id} className="flex items-start gap-2 p-2 bg-slate-700/30 rounded">
+                          <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-white text-sm">{idx + 1}. {stop.delivery?.customerName}</p>
+                            <p className="text-slate-400 text-xs">{stop.delivery?.addressText}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <Button onClick={() => setShowDeliveryReport(false)} className="w-full bg-blue-600 hover:bg-blue-700">Close</Button>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
           {showProofModal && currentStop && (
             <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 overflow-hidden" style={{ overscrollBehavior: 'none' }}>
               <Card className="bg-slate-800 border-slate-700 max-w-md w-full max-h-[90vh] overflow-y-auto">
@@ -636,13 +684,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 <CardContent className="space-y-4">
                   <div>
                     <label className="text-white text-sm font-medium block mb-2">Customer Signature</label>
-                    <div className="relative w-full bg-slate-900 rounded border-2 border-slate-600" style={{ height: "120px" }}>
-                      <canvas
-                        ref={canvasRef}
-                        className="absolute inset-0 w-full h-full rounded cursor-crosshair"
-                        style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", display: "block" } as any}
-                      />
-                    </div>
+                    <canvas
+                      ref={canvasRef}
+                      width={280}
+                      height={120}
+                      className="w-full border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair"
+                      style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", display: "block" } as any}
+                    />
                     <div className="flex gap-2 mt-2">
                       <Button size="sm" variant="outline" onClick={() => { const ctx = canvasRef.current?.getContext("2d"); if (ctx && canvasRef.current) { ctx.fillStyle = "#111827"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); setSignature(null); } }} className="flex-1 border-slate-600"><RotateCcw className="h-4 w-4 mr-1" />Clear</Button>
                       {signature && <span className="flex-1 text-green-400 text-sm">✓ Captured</span>}
@@ -676,15 +724,24 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     
                     <div className="border-t border-slate-600 pt-3">
                       <p className="text-slate-400 text-xs mb-2">No signature/photo available?</p>
-                      <Button 
-                        onClick={() => skipDeliveryMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
-                        disabled={skipDeliveryMutation.isPending}
-                        variant="outline"
-                        className="w-full border-orange-500 text-orange-400 hover:bg-orange-500/10"
-                      >
-                        {skipDeliveryMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
-                        Mark as Delivered
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button 
+                          onClick={() => skipDeliveryMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
+                          disabled={skipDeliveryMutation.isPending}
+                          variant="outline"
+                          className="flex-1 border-orange-500 text-orange-400 hover:bg-orange-500/10"
+                        >
+                          {skipDeliveryMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                          Mark as Delivered
+                        </Button>
+                        <Button 
+                          onClick={() => setShowProofModal(false)} 
+                          variant="outline"
+                          className="flex-1 border-red-500 text-red-400 hover:bg-red-500/10"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
