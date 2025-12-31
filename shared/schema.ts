@@ -91,6 +91,7 @@ export const deliveryProofs = pgTable("delivery_proofs", {
   signature: text("signature"),
   picture: text("picture"),
   notes: text("notes"),
+  barcode: text("barcode"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

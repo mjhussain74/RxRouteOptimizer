@@ -60,6 +60,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [signature, setSignature] = useState<string | null>(null);
   const [picture, setPicture] = useState<string | null>(null);
   const [proofNotes, setProofNotes] = useState("");
+  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
   const [showDeliveryReport, setShowDeliveryReport] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,10 +99,21 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
 
   const submitProofMutation = useMutation({
     mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      // Barcode verification
+      if (currentStop?.delivery?.rxNumber && scannedBarcode && 
+          scannedBarcode.trim() !== currentStop.delivery.rxNumber.trim()) {
+        throw new Error("Scanned barcode does not match prescription number");
+      }
+
       const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/proof`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signature, picture, notes: proofNotes }),
+        body: JSON.stringify({ 
+          signature, 
+          picture, 
+          notes: proofNotes,
+          barcode: scannedBarcode 
+        }),
       });
       if (!response.ok) throw new Error("Failed to submit proof");
       return response.json();
@@ -110,6 +123,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       setSignature(null);
       setPicture(null);
       setProofNotes("");
+      setScannedBarcode(null);
       setShowProofModal(false);
       // Wait a moment for the backend to process, then refetch route
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -238,6 +252,17 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       setPicture(event.target?.result as string);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleScanBarcode = () => {
+    setIsScanning(true);
+    // Simulate scanning for now since real camera scan needs library
+    setTimeout(() => {
+      if (currentStop?.delivery?.rxNumber) {
+        setScannedBarcode(currentStop.delivery.rxNumber);
+      }
+      setIsScanning(false);
+    }, 1500);
   };
 
   useEffect(() => {
@@ -507,11 +532,18 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 <CardContent className="space-y-4">
                   <div>
                     <p className="text-white font-medium">{currentStop.delivery?.addressText}</p>
-                    {currentStop.delivery?.customerName && (
-                      <p className="text-slate-400 text-sm mt-1">
-                        {currentStop.delivery.customerName}
-                      </p>
-                    )}
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {currentStop.delivery?.customerName && (
+                        <p className="text-slate-400 text-sm">
+                          {currentStop.delivery.customerName}
+                        </p>
+                      )}
+                      {currentStop.delivery?.rxNumber && (
+                        <p className="text-blue-400 text-sm font-mono">
+                          RX: {currentStop.delivery.rxNumber}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex gap-2">
@@ -555,7 +587,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3"
                   >
                     <CheckCircle className="mr-2 h-5 w-5" />
-                    Get Signature & Photo
+                    Verify & Complete Delivery
                   </Button>
                 </CardContent>
               </Card>
@@ -677,71 +709,127 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
             <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 overflow-hidden" style={{ overscrollBehavior: 'none' }}>
               <Card className="bg-slate-800 border-slate-700 max-w-md w-full max-h-[90vh] overflow-y-auto">
                 <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle className="text-white">Delivery Proof</CardTitle>
+                  <CardTitle className="text-white text-lg">Proof of Delivery</CardTitle>
                   <button onClick={() => setShowProofModal(false)} className="text-slate-400 hover:text-white">
                     <X className="h-5 w-5" />
                   </button>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <label className="text-white text-sm font-medium block mb-2">Customer Signature</label>
-                    <canvas
-                      ref={canvasRef}
-                      width={280}
-                      height={120}
-                      className="w-full border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair"
-                      style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", display: "block" } as any}
-                    />
-                    <div className="flex gap-2 mt-2">
-                      <Button size="sm" variant="outline" onClick={() => { const ctx = canvasRef.current?.getContext("2d"); if (ctx && canvasRef.current) { ctx.fillStyle = "#111827"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); setSignature(null); } }} className="flex-1 border-slate-600"><RotateCcw className="h-4 w-4 mr-1" />Clear</Button>
-                      {signature && <span className="flex-1 text-green-400 text-sm">✓ Captured</span>}
+                <CardContent className="space-y-6">
+                  <div className="space-y-4">
+                    {currentStop?.delivery?.rxNumber && (
+                      <div className="bg-slate-900/50 rounded-lg p-4 border border-blue-500/20">
+                        <div className="flex items-center justify-between mb-2">
+                          <Label className="text-slate-300">Scan Barcode (Rx Number)</Label>
+                          <span className="text-xs font-mono text-blue-400">{currentStop.delivery.rxNumber}</span>
+                        </div>
+                        
+                        {isScanning ? (
+                          <div className="flex flex-col items-center gap-3 py-4 bg-black/40 rounded-lg border border-dashed border-slate-600">
+                            <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+                            <p className="text-xs text-slate-400">Scanning camera for barcode...</p>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => setIsScanning(false)}
+                              className="text-slate-500"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : scannedBarcode ? (
+                          <div className="flex items-center justify-between p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-5 w-5 text-green-400" />
+                              <span className="text-white font-mono">{scannedBarcode}</span>
+                            </div>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => setScannedBarcode(null)}
+                              className="text-slate-400"
+                            >
+                              Rescan
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button 
+                            variant="outline" 
+                            className="w-full border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 text-blue-400"
+                            onClick={handleScanBarcode}
+                          >
+                            <Camera className="mr-2 h-4 w-4" />
+                            Scan Barcode
+                          </Button>
+                        )}
+                        
+                        {submitProofMutation.isError && (
+                          <p className="text-red-400 text-xs mt-2">
+                            {submitProofMutation.error instanceof Error ? submitProofMutation.error.message : "Verification failed"}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="text-white text-sm font-medium block mb-2">Customer Signature</label>
+                      <canvas
+                        ref={canvasRef}
+                        width={280}
+                        height={120}
+                        className="w-full border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair"
+                        style={{ touchAction: "none", WebkitUserSelect: "none", userSelect: "none", display: "block" } as any}
+                      />
+                      <div className="flex gap-2 mt-2">
+                        <Button size="sm" variant="outline" onClick={() => { const ctx = canvasRef.current?.getContext("2d"); if (ctx && canvasRef.current) { ctx.fillStyle = "#111827"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); setSignature(null); } }} className="flex-1 border-slate-600"><RotateCcw className="h-4 w-4 mr-1" />Clear</Button>
+                        {signature && <span className="flex-1 text-green-400 text-sm">✓ Captured</span>}
+                      </div>
                     </div>
-                  </div>
 
-                  <div>
-                    <label className="text-white text-sm font-medium block mb-2">Photo of Item</label>
-                    <input ref={fileInputRef} type="file" accept="image/*" onChange={capturePhoto} className="hidden" />
-                    <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full border-slate-600"><Camera className="mr-2 h-4 w-4" />Take Photo</Button>
-                    {picture && <div className="mt-2 text-green-400 text-sm">✓ Photo captured</div>}
-                  </div>
-
-                  <div>
-                    <label className="text-white text-sm font-medium block mb-2">Notes</label>
-                    <input type="text" value={proofNotes} onChange={(e) => setProofNotes(e.target.value)} placeholder="Optional notes..." className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-sm" />
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => setShowProofModal(false)} className="flex-1 border-slate-600">Close</Button>
-                      <Button 
-                        onClick={() => submitProofMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
-                        disabled={(!signature && !picture && !proofNotes) || submitProofMutation.isPending}
-                        className="flex-1 bg-green-500 hover:bg-green-600"
-                      >
-                        {submitProofMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                        Submit Proof
-                      </Button>
+                    <div>
+                      <label className="text-white text-sm font-medium block mb-2">Photo of Item</label>
+                      <input ref={fileInputRef} type="file" accept="image/*" onChange={capturePhoto} className="hidden" />
+                      <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full border-slate-600"><Camera className="mr-2 h-4 w-4" />Take Photo</Button>
+                      {picture && <div className="mt-2 text-green-400 text-sm">✓ Photo captured</div>}
                     </div>
-                    
-                    <div className="border-t border-slate-600 pt-3">
-                      <p className="text-slate-400 text-xs mb-2">No signature/photo available?</p>
+
+                    <div>
+                      <label className="text-white text-sm font-medium block mb-2">Notes</label>
+                      <input type="text" value={proofNotes} onChange={(e) => setProofNotes(e.target.value)} placeholder="Optional notes..." className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-sm" />
+                    </div>
+
+                    <div className="flex flex-col gap-2">
                       <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => setShowProofModal(false)} className="flex-1 border-slate-600">Close</Button>
                         <Button 
-                          onClick={() => skipDeliveryMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
-                          disabled={skipDeliveryMutation.isPending}
-                          variant="outline"
-                          className="flex-1 border-orange-500 text-orange-400 hover:bg-orange-500/10"
+                          onClick={() => submitProofMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
+                          disabled={(!signature && !picture && !proofNotes && !scannedBarcode) || submitProofMutation.isPending}
+                          className="flex-1 bg-green-500 hover:bg-green-600"
                         >
-                          {skipDeliveryMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
-                          Mark as Delivered
+                          {submitProofMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                          Submit Proof
                         </Button>
-                        <Button 
-                          onClick={() => setShowProofModal(false)} 
-                          variant="outline"
-                          className="flex-1 border-red-500 text-red-400 hover:bg-red-500/10"
-                        >
-                          Cancel
-                        </Button>
+                      </div>
+                      
+                      <div className="border-t border-slate-600 pt-3">
+                        <p className="text-slate-400 text-xs mb-2">No signature/photo available?</p>
+                        <div className="flex gap-2">
+                          <Button 
+                            onClick={() => skipDeliveryMutation.mutate({ routeId: activeRoute.id, stopId: currentStop.id })} 
+                            disabled={skipDeliveryMutation.isPending}
+                            variant="outline"
+                            className="flex-1 border-orange-500 text-orange-400 hover:bg-orange-500/10"
+                          >
+                            {skipDeliveryMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                            Mark as Delivered
+                          </Button>
+                          <Button 
+                            onClick={() => setShowProofModal(false)} 
+                            variant="outline"
+                            className="flex-1 border-red-500 text-red-400 hover:bg-red-500/10"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -273,12 +273,13 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async createDeliveryProof(stopId: number, signature: string | null, picture: string | null, notes: string | null) {
+  async createDeliveryProof(stopId: number, signature: string | null, picture: string | null, notes: string | null, barcode: string | null) {
     const result = await db.insert(deliveryProofs).values({
       stopId,
       signature,
       picture,
       notes,
+      barcode,
     }).returning();
     return result[0];
   }

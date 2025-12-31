@@ -624,20 +624,21 @@ export async function registerRoutes(
   app.post("/api/routes/:routeId/stops/:stopId/proof", async (req, res) => {
     try {
       const stopId = parseInt(req.params.stopId);
-      const { signature, picture, notes } = req.body;
+      const { signature, picture, notes, barcode } = req.body;
 
-      // Allow submission if: signature OR picture provided, OR notes provided (skip with note)
-      if (!signature && !picture && !notes) {
-        return res.status(400).json({ error: "Signature, picture, or notes required" });
+      // Allow submission if: signature OR picture provided, OR notes provided (skip with note), OR barcode provided
+      if (!signature && !picture && !notes && !barcode) {
+        return res.status(400).json({ error: "Signature, picture, notes, or barcode required" });
       }
 
       // Create the delivery proof
-      console.log(`📝 Creating delivery proof for stop ${stopId}`);
-      const proof = await (storage as any).createDeliveryProof(
+      console.log(`📝 Creating delivery proof for stop ${stopId} with barcode: ${barcode || 'none'}`);
+      const proof = await storage.createDeliveryProof(
         stopId,
         signature || null,
         picture || null,
-        notes || null
+        notes || null,
+        barcode || null
       );
 
       // Automatically mark the stop as completed when proof is submitted
