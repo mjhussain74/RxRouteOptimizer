@@ -372,6 +372,7 @@ export async function registerRoutes(
           lng: geocoded?.lng || null,
           customerName: row.customer_name || row.customerName || row.name || null,
           customerPhone: row.customer_phone || row.customerPhone || row.phone || null,
+          rxNumber: row.rx_number || row.rx_no || row.Rx_Number || row.RxNo || null,
           notes: row.notes || row.Notes || null,
           status: geocoded ? "geocoded" : "pending"
         });

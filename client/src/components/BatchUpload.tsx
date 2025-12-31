@@ -208,14 +208,18 @@ export default function BatchUpload({ onBatchCreated }: BatchUploadProps) {
                   <span className="text-slate-400 font-mono text-sm bg-slate-700/50 px-2 py-0.5 rounded">notes</span>
                   <span className="text-slate-400 text-sm">Delivery notes (optional)</span>
                 </div>
+                <div className="flex items-start gap-3">
+                  <span className="text-blue-400 font-mono text-sm bg-blue-500/10 px-2 py-0.5 rounded">rx_number</span>
+                  <span className="text-slate-400 text-sm">Prescription number (optional)</span>
+                </div>
               </div>
 
               <div className="bg-slate-900/50 rounded-lg p-4">
                 <p className="text-slate-500 text-xs mb-2">Example CSV:</p>
                 <pre className="text-xs text-slate-300 font-mono whitespace-pre-wrap">
-{`address,customer_name,customer_phone,notes
-123 Main St, New York, NY,John Doe,555-0101,Leave at door
-456 Oak Ave, Brooklyn, NY,Jane Smith,555-0102,Ring bell twice`}
+{`address,customer_name,customer_phone,rx_number,notes
+123 Main St, New York, NY,John Doe,555-0101,RX123,Leave at door
+456 Oak Ave, Brooklyn, NY,Jane Smith,555-0102,RX456,Ring bell twice`}
                 </pre>
               </div>
             </div>

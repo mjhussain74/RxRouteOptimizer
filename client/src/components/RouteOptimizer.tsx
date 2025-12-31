@@ -254,9 +254,14 @@ export default function RouteOptimizer({
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm truncate">{delivery.addressText}</p>
-                        {delivery.customerName && (
-                          <p className="text-slate-500 text-xs">{delivery.customerName}</p>
-                        )}
+                        <div className="flex gap-2">
+                          {delivery.customerName && (
+                            <p className="text-slate-500 text-xs">{delivery.customerName}</p>
+                          )}
+                          {delivery.rxNumber && (
+                            <p className="text-blue-400 text-xs font-mono">RX: {delivery.rxNumber}</p>
+                          )}
+                        </div>
                       </div>
                       {delivery.lat && delivery.lng ? (
                         <CheckCircle className="h-4 w-4 text-green-400 flex-shrink-0" />

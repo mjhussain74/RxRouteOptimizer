@@ -86,9 +86,9 @@ A web-based route optimization application that takes multiple delivery addresse
 
 ### CSV Format
 ```csv
-address,customer_name,customer_phone,notes
-123 Main St, New York, NY,John Doe,555-0101,Leave at door
-456 Oak Ave, Brooklyn, NY,Jane Smith,555-0102,Ring bell twice
+address,customer_name,customer_phone,rx_number,notes
+123 Main St, New York, NY,John Doe,555-0101,RX123,Leave at door
+456 Oak Ave, Brooklyn, NY,Jane Smith,555-0102,RX456,Ring bell twice
 ```
 
 ## Recent Changes
@@ -99,6 +99,8 @@ address,customer_name,customer_phone,notes
 - Added real-time WebSocket communication
 - Created mobile-friendly driver PWA
 - Improved password security architecture (passwords never exposed in API)
+- Added Rx Number column to CSV upload and delivery tracking
+- Implemented Barcode scanning placeholder in driver app proof flow
 
 ## User Preferences
 - Dark theme UI preferred
