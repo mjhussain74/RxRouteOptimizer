@@ -722,59 +722,57 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-4">
-                    {currentStop?.delivery?.rxNumber && (
-                      <div className="bg-slate-900/50 rounded-lg p-4 border border-blue-500/20">
-                        <div className="flex items-center justify-between mb-2">
-                          <Label className="text-slate-300">Scan Barcode (Rx Number)</Label>
-                          <span className="text-xs font-mono text-blue-400">{currentStop.delivery.rxNumber}</span>
-                        </div>
-                        
-                        {isScanning ? (
-                          <div className="flex flex-col items-center gap-3 py-4 bg-black/40 rounded-lg border border-dashed border-slate-600">
-                            <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
-                            <p className="text-xs text-slate-400">Scanning camera for barcode...</p>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={() => setIsScanning(false)}
-                              className="text-slate-500"
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        ) : scannedBarcode ? (
-                          <div className="flex items-center justify-between p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                            <div className="flex items-center gap-2">
-                              <CheckCircle className="h-5 w-5 text-green-400" />
-                              <span className="text-white font-mono">{scannedBarcode}</span>
-                            </div>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={() => setScannedBarcode(null)}
-                              className="text-slate-400"
-                            >
-                              Rescan
-                            </Button>
-                          </div>
-                        ) : (
-                          <Button 
-                            variant="outline" 
-                            className="w-full border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 text-blue-400"
-                            onClick={handleScanBarcode}
-                          >
-                            <Camera className="mr-2 h-4 w-4" />
-                            Scan Barcode
-                          </Button>
-                        )}
-                        
-                        {submitProofMutation.isError && (
-                          <p className="text-red-400 text-xs mt-2">
-                            {submitProofMutation.error instanceof Error ? submitProofMutation.error.message : "Verification failed"}
-                          </p>
-                        )}
+                    <div className="bg-slate-900/50 rounded-lg p-4 border border-blue-500/20">
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="text-slate-300">Scan Barcode (Rx Number)</Label>
+                        <span className="text-xs font-mono text-blue-400">{currentStop?.delivery?.rxNumber || "N/A"}</span>
                       </div>
-                    )}
+                      
+                      {isScanning ? (
+                        <div className="flex flex-col items-center gap-3 py-4 bg-black/40 rounded-lg border border-dashed border-slate-600">
+                          <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+                          <p className="text-xs text-slate-400">Scanning camera for barcode...</p>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => setIsScanning(false)}
+                            className="text-slate-500"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : scannedBarcode ? (
+                        <div className="flex items-center justify-between p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-5 w-5 text-green-400" />
+                            <span className="text-white font-mono">{scannedBarcode}</span>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => setScannedBarcode(null)}
+                            className="text-slate-400"
+                          >
+                            Rescan
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button 
+                          variant="outline" 
+                          className="w-full border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 text-blue-400"
+                          onClick={handleScanBarcode}
+                        >
+                          <Camera className="mr-2 h-4 w-4" />
+                          Scan Barcode
+                        </Button>
+                      )}
+                      
+                      {submitProofMutation.isError && (
+                        <p className="text-red-400 text-xs mt-2">
+                          {submitProofMutation.error instanceof Error ? submitProofMutation.error.message : "Verification failed"}
+                        </p>
+                      )}
+                    </div>
 
                     <div>
                       <label className="text-white text-sm font-medium block mb-2">Customer Signature</label>
