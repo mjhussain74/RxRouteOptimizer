@@ -585,7 +585,11 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                   )}
 
                   <Button
-                    onClick={() => setShowProofModal(true)}
+                    onClick={() => {
+                      setShowProofModal(true);
+                      setScannedBarcode(null); // Reset scanned barcode when opening modal
+                      setIsScanning(false);
+                    }}
                     className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3"
                   >
                     <CheckCircle className="mr-2 h-5 w-5" />
