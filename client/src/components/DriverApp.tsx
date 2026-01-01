@@ -4,7 +4,7 @@ import {
   ArrowLeft, Navigation, MapPin, CheckCircle, Clock, Phone, 
   FileText, ChevronRight, Loader2, ExternalLink, RefreshCw, Camera, RotateCcw, Send, X, BarChart3
 } from "lucide-react";
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -261,37 +261,31 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     setIsScanning(true);
     setScannedBarcode(null);
 
-    // Wait for the DOM element to be available
-    setTimeout(() => {
+    // Using Html5Qrcode directly instead of the Scanner UI for more control
+    setTimeout(async () => {
       try {
-        const scanner = new Html5QrcodeScanner(
-          "reader",
-          { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-            showTorchButtonIfSupported: true,
-            rememberLastUsedCamera: true,
-            supportedScanTypes: [0] // Html5QrcodeScanType.SCAN_TYPE_CAMERA
-          },
-          /* verbose= */ false
-        );
+        const html5QrCode = new Html5Qrcode("reader");
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
 
-        scanner.render(
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
           (decodedText) => {
             setScannedBarcode(decodedText);
             setIsScanning(false);
-            scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+            html5QrCode.stop().catch(err => console.error("Stop failed", err));
           },
           (errorMessage) => {
-            // Log once but don't spam
+            // Scanning...
           }
         );
       } catch (err) {
-        console.error("Scanner initialization failed", err);
+        console.error("Camera access failed:", err);
+        // Fallback or alert user
+        alert("Could not access camera. Please ensure you have granted permission and are using HTTPS.");
         setIsScanning(false);
       }
-    }, 200);
+    }, 300);
   };
 
   useEffect(() => {
