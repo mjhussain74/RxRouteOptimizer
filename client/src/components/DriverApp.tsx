@@ -4,6 +4,7 @@ import {
   ArrowLeft, Navigation, MapPin, CheckCircle, Clock, Phone, 
   FileText, ChevronRight, Loader2, ExternalLink, RefreshCw, Camera, RotateCcw, Send, X, BarChart3
 } from "lucide-react";
+import { Html5QrcodeScanner } from "html5-qrcode";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -258,13 +259,27 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
 
   const handleScanBarcode = () => {
     setIsScanning(true);
-    // Simulate scanning for now since real camera scan needs library
+    setScannedBarcode(null);
+
+    // Wait for the DOM element to be available
     setTimeout(() => {
-      if (currentStop?.delivery?.rxNumber) {
-        setScannedBarcode(currentStop.delivery.rxNumber);
-      }
-      setIsScanning(false);
-    }, 1500);
+      const scanner = new Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        /* verbose= */ false
+      );
+
+      scanner.render(
+        (decodedText) => {
+          setScannedBarcode(decodedText);
+          setIsScanning(false);
+          scanner.clear();
+        },
+        (error) => {
+          // Silent fail for scanning attempts
+        }
+      );
+    }, 100);
   };
 
   useEffect(() => {
@@ -730,8 +745,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       
                       {isScanning ? (
                         <div className="flex flex-col items-center gap-3 py-4 bg-black/40 rounded-lg border border-dashed border-slate-600">
-                          <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
-                          <p className="text-xs text-slate-400">Scanning camera for barcode...</p>
+                          <div id="reader" className="w-full max-w-[300px] overflow-hidden rounded-lg"></div>
+                          <p className="text-xs text-slate-400">Position barcode within the frame</p>
                           <Button 
                             variant="ghost" 
                             size="sm" 

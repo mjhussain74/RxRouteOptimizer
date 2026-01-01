@@ -64,6 +64,7 @@
     "gl-matrix": "^3.4.3",
     "gsap": "^3.12.5",
     "howler": "^2.2.4",
+    "html5-qrcode": "^2.3.8",
     "input-otp": "^1.2.4",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.453.0",
