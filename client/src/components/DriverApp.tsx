@@ -263,23 +263,35 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
 
     // Wait for the DOM element to be available
     setTimeout(() => {
-      const scanner = new Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        /* verbose= */ false
-      );
+      try {
+        const scanner = new Html5QrcodeScanner(
+          "reader",
+          { 
+            fps: 10, 
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+            showTorchButtonIfSupported: true,
+            rememberLastUsedCamera: true,
+            supportedScanTypes: [0] // Html5QrcodeScanType.SCAN_TYPE_CAMERA
+          },
+          /* verbose= */ false
+        );
 
-      scanner.render(
-        (decodedText) => {
-          setScannedBarcode(decodedText);
-          setIsScanning(false);
-          scanner.clear();
-        },
-        (error) => {
-          // Silent fail for scanning attempts
-        }
-      );
-    }, 100);
+        scanner.render(
+          (decodedText) => {
+            setScannedBarcode(decodedText);
+            setIsScanning(false);
+            scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+          },
+          (errorMessage) => {
+            // Log once but don't spam
+          }
+        );
+      } catch (err) {
+        console.error("Scanner initialization failed", err);
+        setIsScanning(false);
+      }
+    }, 200);
   };
 
   useEffect(() => {
