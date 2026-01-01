@@ -183,14 +183,17 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     
     initCanvas();
     
-    const getCoordinates = (e: TouchEvent | MouseEvent) => {
+    const getCoordinates = (e: any) => {
       const rect = canvas.getBoundingClientRect();
       let clientX = 0, clientY = 0;
       
-      if (e instanceof TouchEvent && e.touches.length > 0) {
+      if (e.touches && e.touches.length > 0) {
         clientX = e.touches[0].clientX;
         clientY = e.touches[0].clientY;
-      } else if (e instanceof MouseEvent) {
+      } else if (e.changedTouches && e.changedTouches.length > 0) {
+        clientX = e.changedTouches[0].clientX;
+        clientY = e.changedTouches[0].clientY;
+      } else {
         clientX = e.clientX;
         clientY = e.clientY;
       }
@@ -205,7 +208,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     };
     
     const handleStart = (e: any) => {
-      e.preventDefault();
+      // Only prevent default if it's a touch event to allow scrolling outside the canvas
+      if (e.type.startsWith('touch')) {
+        e.preventDefault();
+      }
       isDrawing = true;
       const coords = getCoordinates(e);
       ctx.beginPath();
@@ -214,17 +220,23 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     
     const handleMove = (e: any) => {
       if (!isDrawing) return;
-      e.preventDefault();
+      if (e.type.startsWith('touch')) {
+        e.preventDefault();
+      }
       const coords = getCoordinates(e);
       ctx.lineTo(coords.x, coords.y);
       ctx.stroke();
     };
     
     const handleEnd = (e: any) => {
-      e.preventDefault();
-      isDrawing = false;
-      if (canvas.toDataURL !== undefined) {
-        setSignature(canvas.toDataURL());
+      if (isDrawing) {
+        if (e.type.startsWith('touch')) {
+          e.preventDefault();
+        }
+        isDrawing = false;
+        if (canvas.toDataURL !== undefined) {
+          setSignature(canvas.toDataURL());
+        }
       }
     };
     
