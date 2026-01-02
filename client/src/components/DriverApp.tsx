@@ -943,15 +943,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       </label>
                       <canvas
                         ref={canvasRef}
-                        className="w-full border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair"
-                        style={
-                          {
-                            touchAction: "none",
-                            WebkitUserSelect: "none",
-                            userSelect: "none",
-                            display: "block",
-                          } as any
-                        }
+                        className="w-full h-32 border-2 border-slate-600 rounded bg-slate-900"
+                        style={{
+                          touchAction: "none",
+                          WebkitUserSelect: "none",
+                          userSelect: "none",
+                          display: "block",
+                        }}
                       />
                       <div className="flex gap-2 mt-2">
                         <Button
