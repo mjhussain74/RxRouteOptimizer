@@ -231,35 +231,39 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   });
 
   useEffect(() => {
+    if (!showProofModal) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Retina scaling
-    const ratio = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
+    // Wait until modal + layout are visible
+    requestAnimationFrame(() => {
+      const ratio = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
 
-    canvas.width = rect.width * ratio;
-    canvas.height = rect.height * ratio;
-    ctx.scale(ratio, ratio);
+      if (rect.width === 0 || rect.height === 0) return;
 
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#fff";
-    ctx.fillStyle = "#111827";
-    ctx.fillRect(0, 0, rect.width, rect.height);
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+
+      // 🔑 Reset transform before scaling (important!)
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#ffffff";
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(0, 0, rect.width, rect.height);
+    });
 
     let drawing = false;
 
     const getPos = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
-      return {
-        x: e.clientX - r.left,
-        y: e.clientY - r.top,
-      };
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
 
     const start = (e: PointerEvent) => {
@@ -295,7 +299,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       canvas.removeEventListener("pointerup", end);
       canvas.removeEventListener("pointercancel", end);
     };
-  }, []);
+  }, [showProofModal]);
 
   const capturePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
