@@ -234,87 +234,66 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let isDrawing = false;
+    // Retina scaling
+    const ratio = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
 
-    const initCanvas = () => {
-      ctx.fillStyle = "#111827";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "#fff";
-    };
+    canvas.width = rect.width * ratio;
+    canvas.height = rect.height * ratio;
+    ctx.scale(ratio, ratio);
 
-    initCanvas();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#fff";
+    ctx.fillStyle = "#111827";
+    ctx.fillRect(0, 0, rect.width, rect.height);
 
-    const getCoordinates = (e: any) => {
-      const rect = canvas.getBoundingClientRect();
-      let clientX = 0, clientY = 0;
-      
-      // Pointer events provide unified interface
-      if (e.clientX !== undefined) {
-        clientX = e.clientX;
-        clientY = e.clientY;
-      } else if (e.touches && e.touches.length > 0) {
-        clientX = e.touches[0].clientX;
-        clientY = e.touches[0].clientY;
-      }
-      
-      const ratio = window.devicePixelRatio || 1;
+    let drawing = false;
+
+    const getPos = (e: PointerEvent) => {
+      const r = canvas.getBoundingClientRect();
       return {
-        x: (clientX - rect.left),
-        y: (clientY - rect.top)
+        x: e.clientX - r.left,
+        y: e.clientY - r.top,
       };
     };
-    
-    const handleStart = (e: any) => {
+
+    const start = (e: PointerEvent) => {
       e.preventDefault();
-      isDrawing = true;
-      const coords = getCoordinates(e);
+      drawing = true;
+      const { x, y } = getPos(e);
       ctx.beginPath();
-      ctx.moveTo(coords.x, coords.y);
-    };
-    
-    const handleMove = (e: any) => {
-      if (!isDrawing) return;
-      e.preventDefault();
-      const coords = getCoordinates(e);
-      ctx.lineTo(coords.x, coords.y);
-      ctx.stroke();
-    };
-    
-    const handleEnd = (e: any) => {
-      if (isDrawing) {
-        e.preventDefault();
-        isDrawing = false;
-        if (canvas.toDataURL !== undefined) {
-          setSignature(canvas.toDataURL());
-        }
-      }
+      ctx.moveTo(x, y);
     };
 
-    // Use Pointer Events for best cross-device compatibility (iOS 13+)
-    canvas.addEventListener("pointerdown", handleStart, { passive: false });
-    canvas.addEventListener("pointermove", handleMove, { passive: false });
-    canvas.addEventListener("pointerup", handleEnd, { passive: false });
-    canvas.addEventListener("pointercancel", handleEnd, { passive: false });
-    
-    // Fallback for older touch devices
-    canvas.addEventListener("touchstart", handleStart, { passive: false });
-    canvas.addEventListener("touchmove", handleMove, { passive: false });
-    canvas.addEventListener("touchend", handleEnd, { passive: false });
-    
+    const move = (e: PointerEvent) => {
+      if (!drawing) return;
+      e.preventDefault();
+      const { x, y } = getPos(e);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    };
+
+    const end = () => {
+      if (!drawing) return;
+      drawing = false;
+      setSignature(canvas.toDataURL("image/png"));
+    };
+
+    canvas.addEventListener("pointerdown", start);
+    canvas.addEventListener("pointermove", move);
+    canvas.addEventListener("pointerup", end);
+    canvas.addEventListener("pointercancel", end);
+
     return () => {
-      canvas.removeEventListener("pointerdown", handleStart);
-      canvas.removeEventListener("pointermove", handleMove);
-      canvas.removeEventListener("pointerup", handleEnd);
-      canvas.removeEventListener("pointercancel", handleEnd);
-      canvas.removeEventListener("touchstart", handleStart);
-      canvas.removeEventListener("touchmove", handleMove);
-      canvas.removeEventListener("touchend", handleEnd);
+      canvas.removeEventListener("pointerdown", start);
+      canvas.removeEventListener("pointermove", move);
+      canvas.removeEventListener("pointerup", end);
+      canvas.removeEventListener("pointercancel", end);
     };
   }, []);
 
@@ -964,8 +943,6 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       </label>
                       <canvas
                         ref={canvasRef}
-                        width={280}
-                        height={120}
                         className="w-full border-2 border-slate-600 rounded bg-slate-900 cursor-crosshair"
                         style={
                           {
