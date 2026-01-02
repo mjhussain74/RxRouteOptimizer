@@ -855,8 +855,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
 
           {showProofModal && currentStop && (
             <div
-              className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 overflow-hidden"
-              style={{ overscrollBehavior: "none" }}
+              className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4"
+              style={{ overscrollBehavior: "none", touchAction: "none" }}
             >
               <Card className="bg-slate-800 border-slate-700 max-w-md w-full max-h-[90vh] overflow-y-auto">
                 <CardHeader className="flex flex-row items-center justify-between">
