@@ -1,22 +1,16 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import {
   users, drivers, deliveryBatches, deliveries, routes, routeStops, driverLocations, deliveryProofs,
-  pharmacies, deliveryZones, driverZones, ocrLogs,
   type User, type InsertUser,
   type Driver, type InsertDriver,
   type DeliveryBatch, type InsertDeliveryBatch,
   type Delivery, type InsertDelivery,
   type Route, type InsertRoute,
   type RouteStop, type InsertRouteStop,
-  type DriverLocation,
-  type Pharmacy, type InsertPharmacy,
-  type DeliveryZone, type InsertDeliveryZone,
-  type DriverZone, type InsertDriverZone,
-  type DeliveryProof, type InsertDeliveryProof,
-  type OcrLog, type InsertOcrLog
+  type DriverLocation
 } from "@shared/schema";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -37,21 +31,6 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   
-  getPharmacies(): Promise<Pharmacy[]>;
-  getPharmacy(id: number): Promise<Pharmacy | undefined>;
-  createPharmacy(pharmacy: InsertPharmacy): Promise<Pharmacy>;
-  updatePharmacy(id: number, data: Partial<InsertPharmacy>): Promise<Pharmacy | undefined>;
-  
-  getDeliveryZones(): Promise<DeliveryZone[]>;
-  getDeliveryZone(id: number): Promise<DeliveryZone | undefined>;
-  createDeliveryZone(zone: InsertDeliveryZone): Promise<DeliveryZone>;
-  updateDeliveryZone(id: number, data: Partial<InsertDeliveryZone>): Promise<DeliveryZone | undefined>;
-  deleteDeliveryZone(id: number): Promise<boolean>;
-  
-  getDriverZones(driverId: number): Promise<DriverZone[]>;
-  assignDriverToZone(driverId: number, zoneId: number): Promise<DriverZone>;
-  removeDriverFromZone(driverId: number, zoneId: number): Promise<boolean>;
-  
   getDrivers(): Promise<Driver[]>;
   getDriver(id: number): Promise<Driver | undefined>;
   createDriver(driver: InsertDriver): Promise<Driver>;
@@ -64,12 +43,9 @@ export interface IStorage {
   updateBatchStatus(id: number, status: string): Promise<DeliveryBatch | undefined>;
   
   getDeliveriesByBatch(batchId: number): Promise<Delivery[]>;
-  getDelivery(id: number): Promise<Delivery | undefined>;
   createDelivery(delivery: InsertDelivery): Promise<Delivery>;
-  updateDelivery(id: number, data: Partial<InsertDelivery>): Promise<Delivery | undefined>;
   updateDeliveryCoordinates(id: number, lat: number, lng: number): Promise<Delivery | undefined>;
   updateDeliveryStatus(id: number, status: string): Promise<Delivery | undefined>;
-  deleteDelivery(id: number): Promise<boolean>;
   
   getRoutes(): Promise<Route[]>;
   getRoute(id: number): Promise<Route | undefined>;
@@ -78,23 +54,13 @@ export interface IStorage {
   updateRoute(id: number, data: Partial<InsertRoute>): Promise<Route | undefined>;
   assignRouteToDriver(routeId: number, driverId: number): Promise<Route | undefined>;
   dispatchRoute(routeId: number): Promise<Route | undefined>;
-  activateRoute(routeId: number): Promise<Route | undefined>;
   
   getRouteStops(routeId: number): Promise<RouteStop[]>;
-  getRouteStop(id: number): Promise<RouteStop | undefined>;
   createRouteStop(stop: InsertRouteStop): Promise<RouteStop>;
-  updateRouteStop(id: number, data: Partial<InsertRouteStop>): Promise<RouteStop | undefined>;
   updateRouteStopStatus(id: number, status: string): Promise<RouteStop | undefined>;
   completeRouteStop(id: number): Promise<RouteStop | undefined>;
-  markPackageScanned(id: number): Promise<RouteStop | undefined>;
   
   recordDriverLocation(driverId: number, lat: number, lng: number): Promise<DriverLocation>;
-  
-  createDeliveryProof(data: InsertDeliveryProof): Promise<DeliveryProof>;
-  getDeliveryProof(stopId: number): Promise<DeliveryProof | undefined>;
-  
-  createOcrLog(log: InsertOcrLog): Promise<OcrLog>;
-  getOcrLogs(deliveryId: number): Promise<OcrLog[]>;
 }
 
 export type SafeUser = Omit<User, 'password'>;
@@ -105,7 +71,6 @@ export class DatabaseStorage implements IStorage {
       id: users.id,
       username: users.username,
       role: users.role,
-      pharmacyId: users.pharmacyId,
       createdAt: users.createdAt
     }).from(users).where(eq(users.id, id));
     if (!result[0]) return undefined;
@@ -117,7 +82,6 @@ export class DatabaseStorage implements IStorage {
       id: users.id,
       username: users.username,
       role: users.role,
-      pharmacyId: users.pharmacyId,
       createdAt: users.createdAt
     }).from(users).where(eq(users.username, username));
     if (!result[0]) return undefined;
@@ -133,7 +97,6 @@ export class DatabaseStorage implements IStorage {
       id: users.id,
       username: users.username,
       role: users.role,
-      pharmacyId: users.pharmacyId,
       createdAt: users.createdAt
     });
     return { ...result[0], password: "" } as User;
@@ -148,71 +111,6 @@ export class DatabaseStorage implements IStorage {
     
     const { password: _, ...safeUser } = result[0];
     return safeUser;
-  }
-
-  async getPharmacies(): Promise<Pharmacy[]> {
-    return db.select().from(pharmacies).orderBy(desc(pharmacies.createdAt));
-  }
-
-  async getPharmacy(id: number): Promise<Pharmacy | undefined> {
-    const result = await db.select().from(pharmacies).where(eq(pharmacies.id, id));
-    return result[0];
-  }
-
-  async createPharmacy(pharmacy: InsertPharmacy): Promise<Pharmacy> {
-    const result = await db.insert(pharmacies).values(pharmacy).returning();
-    return result[0];
-  }
-
-  async updatePharmacy(id: number, data: Partial<InsertPharmacy>): Promise<Pharmacy | undefined> {
-    const result = await db.update(pharmacies)
-      .set(data)
-      .where(eq(pharmacies.id, id))
-      .returning();
-    return result[0];
-  }
-
-  async getDeliveryZones(): Promise<DeliveryZone[]> {
-    return db.select().from(deliveryZones).orderBy(desc(deliveryZones.createdAt));
-  }
-
-  async getDeliveryZone(id: number): Promise<DeliveryZone | undefined> {
-    const result = await db.select().from(deliveryZones).where(eq(deliveryZones.id, id));
-    return result[0];
-  }
-
-  async createDeliveryZone(zone: InsertDeliveryZone): Promise<DeliveryZone> {
-    const result = await db.insert(deliveryZones).values(zone).returning();
-    return result[0];
-  }
-
-  async updateDeliveryZone(id: number, data: Partial<InsertDeliveryZone>): Promise<DeliveryZone | undefined> {
-    const result = await db.update(deliveryZones)
-      .set(data)
-      .where(eq(deliveryZones.id, id))
-      .returning();
-    return result[0];
-  }
-
-  async deleteDeliveryZone(id: number): Promise<boolean> {
-    const result = await db.delete(deliveryZones).where(eq(deliveryZones.id, id)).returning();
-    return result.length > 0;
-  }
-
-  async getDriverZones(driverId: number): Promise<DriverZone[]> {
-    return db.select().from(driverZones).where(eq(driverZones.driverId, driverId));
-  }
-
-  async assignDriverToZone(driverId: number, zoneId: number): Promise<DriverZone> {
-    const result = await db.insert(driverZones).values({ driverId, zoneId }).returning();
-    return result[0];
-  }
-
-  async removeDriverFromZone(driverId: number, zoneId: number): Promise<boolean> {
-    const result = await db.delete(driverZones)
-      .where(and(eq(driverZones.driverId, driverId), eq(driverZones.zoneId, zoneId)))
-      .returning();
-    return result.length > 0;
   }
 
   async getDrivers(): Promise<Driver[]> {
@@ -271,21 +169,8 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(deliveries).where(eq(deliveries.batchId, batchId));
   }
 
-  async getDelivery(id: number): Promise<Delivery | undefined> {
-    const result = await db.select().from(deliveries).where(eq(deliveries.id, id));
-    return result[0];
-  }
-
   async createDelivery(delivery: InsertDelivery): Promise<Delivery> {
     const result = await db.insert(deliveries).values(delivery).returning();
-    return result[0];
-  }
-
-  async updateDelivery(id: number, data: Partial<InsertDelivery>): Promise<Delivery | undefined> {
-    const result = await db.update(deliveries)
-      .set(data)
-      .where(eq(deliveries.id, id))
-      .returning();
     return result[0];
   }
 
@@ -303,11 +188,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(deliveries.id, id))
       .returning();
     return result[0];
-  }
-
-  async deleteDelivery(id: number): Promise<boolean> {
-    const result = await db.delete(deliveries).where(eq(deliveries.id, id)).returning();
-    return result.length > 0;
   }
 
   async getRoutes(): Promise<Route[]> {
@@ -354,35 +234,14 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async activateRoute(routeId: number): Promise<Route | undefined> {
-    const result = await db.update(routes)
-      .set({ status: "active", activatedAt: new Date() })
-      .where(eq(routes.id, routeId))
-      .returning();
-    return result[0];
-  }
-
   async getRouteStops(routeId: number): Promise<RouteStop[]> {
     return db.select().from(routeStops)
       .where(eq(routeStops.routeId, routeId))
       .orderBy(routeStops.sequence);
   }
 
-  async getRouteStop(id: number): Promise<RouteStop | undefined> {
-    const result = await db.select().from(routeStops).where(eq(routeStops.id, id));
-    return result[0];
-  }
-
   async createRouteStop(stop: InsertRouteStop): Promise<RouteStop> {
     const result = await db.insert(routeStops).values(stop).returning();
-    return result[0];
-  }
-
-  async updateRouteStop(id: number, data: Partial<InsertRouteStop>): Promise<RouteStop | undefined> {
-    const result = await db.update(routeStops)
-      .set(data)
-      .where(eq(routeStops.id, id))
-      .returning();
     return result[0];
   }
 
@@ -402,14 +261,6 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async markPackageScanned(id: number): Promise<RouteStop | undefined> {
-    const result = await db.update(routeStops)
-      .set({ packageScanned: true })
-      .where(eq(routeStops.id, id))
-      .returning();
-    return result[0];
-  }
-
   async recordDriverLocation(driverId: number, lat: number, lng: number): Promise<DriverLocation> {
     const result = await db.insert(driverLocations).values({
       driverId,
@@ -422,25 +273,15 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async createDeliveryProof(data: InsertDeliveryProof): Promise<DeliveryProof> {
-    const result = await db.insert(deliveryProofs).values(data).returning();
+  async createDeliveryProof(stopId: number, signature: string | null, picture: string | null, notes: string | null, barcode: string | null) {
+    const result = await db.insert(deliveryProofs).values({
+      stopId,
+      signature,
+      picture,
+      notes,
+      barcode,
+    }).returning();
     return result[0];
-  }
-
-  async getDeliveryProof(stopId: number): Promise<DeliveryProof | undefined> {
-    const result = await db.select().from(deliveryProofs).where(eq(deliveryProofs.stopId, stopId));
-    return result[0];
-  }
-
-  async createOcrLog(log: InsertOcrLog): Promise<OcrLog> {
-    const result = await db.insert(ocrLogs).values(log).returning();
-    return result[0];
-  }
-
-  async getOcrLogs(deliveryId: number): Promise<OcrLog[]> {
-    return db.select().from(ocrLogs)
-      .where(eq(ocrLogs.deliveryId, deliveryId))
-      .orderBy(desc(ocrLogs.createdAt));
   }
 }
 
