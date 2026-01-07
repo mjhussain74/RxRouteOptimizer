@@ -334,6 +334,37 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/batches/:id/status", async (req, res) => {
+    try {
+      const batchId = parseInt(req.params.id);
+      const { status } = req.body;
+      
+      if (!status || !["pending", "ready", "complete", "cancelled"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be pending, ready, complete, or cancelled" });
+      }
+      
+      const batch = await storage.updateBatchStatus(batchId, status);
+      if (!batch) {
+        return res.status(404).json({ error: "Batch not found" });
+      }
+      
+      // Also update all deliveries in the batch to match
+      if (status === "complete" || status === "cancelled") {
+        const deliveriesInBatch = await storage.getDeliveriesByBatch(batchId);
+        for (const delivery of deliveriesInBatch) {
+          if (delivery.status !== "complete" && delivery.status !== "cancelled") {
+            await storage.updateDeliveryStatus(delivery.id, status);
+          }
+        }
+      }
+      
+      res.json(batch);
+    } catch (error) {
+      console.error("Error updating batch status:", error);
+      res.status(500).json({ error: "Failed to update batch status" });
+    }
+  });
+
   app.post("/api/batches/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {

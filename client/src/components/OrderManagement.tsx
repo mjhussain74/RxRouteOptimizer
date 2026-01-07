@@ -190,6 +190,22 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
     },
   });
 
+  const setBatchStatusMutation = useMutation({
+    mutationFn: async ({ batchId, status }: { batchId: number; status: string }) => {
+      const response = await fetch(`/api/batches/${batchId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error("Failed to update batch status");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
+    },
+  });
+
   const handleFileUpload = useCallback(async (file: File) => {
     const fileName = file.name.toLowerCase();
     
@@ -301,9 +317,56 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                 {(batches as any[]).map((batch: any) => (
                   <option key={batch.id} value={batch.id}>
                     {batch.name} ({batch.totalDeliveries || 0} deliveries) - {new Date(batch.createdAt).toLocaleDateString()}
+                    {batch.status === "complete" ? " ✓ Complete" : batch.status === "cancelled" ? " ✕ Cancelled" : ""}
                   </option>
                 ))}
               </select>
+              {activeBatchId && (() => {
+                const selectedBatch = (batches as any[]).find((b: any) => b.id === activeBatchId);
+                const batchStatus = selectedBatch?.status;
+                if (batchStatus === "complete" || batchStatus === "cancelled") {
+                  return (
+                    <span className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                      batchStatus === "complete" 
+                        ? "bg-green-500/20 text-green-400" 
+                        : "bg-red-500/20 text-red-400"
+                    }`}>
+                      {batchStatus === "complete" ? "Completed" : "Cancelled"}
+                    </span>
+                  );
+                }
+                return (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (confirm("Mark this entire order batch as complete? All pending deliveries will be marked complete.")) {
+                          setBatchStatusMutation.mutate({ batchId: activeBatchId, status: "complete" });
+                        }
+                      }}
+                      disabled={setBatchStatusMutation.isPending}
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      <Check className="h-4 w-4 mr-1" />
+                      Complete Order
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (confirm("Cancel this entire order batch? All pending deliveries will be cancelled.")) {
+                          setBatchStatusMutation.mutate({ batchId: activeBatchId, status: "cancelled" });
+                        }
+                      }}
+                      disabled={setBatchStatusMutation.isPending}
+                      className="border-orange-500 text-orange-400 hover:bg-orange-500/10"
+                    >
+                      <Ban className="h-4 w-4 mr-1" />
+                      Cancel Order
+                    </Button>
+                  </div>
+                );
+              })()}
             </div>
           </CardContent>
         </Card>
