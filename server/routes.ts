@@ -633,13 +633,13 @@ export async function registerRoutes(
 
       // Create the delivery proof
       console.log(`📝 Creating delivery proof for stop ${stopId} with barcode: ${barcode || 'none'}`);
-      const proof = await storage.createDeliveryProof(
+      const proof = await storage.createDeliveryProof({
         stopId,
-        signature || null,
-        picture || null,
-        notes || null,
-        barcode || null
-      );
+        signature: signature || null,
+        picture: picture || null,
+        notes: notes || null,
+        barcode: barcode || null
+      });
 
       // Automatically mark the stop as completed when proof is submitted
       console.log(`✅ Proof submitted for stop ${stopId}, marking as completed`);
@@ -652,6 +652,270 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Proof submission error:", error);
       res.status(500).json({ error: "Failed to submit proof" });
+    }
+  });
+
+  // Pharmacy endpoints
+  app.get("/api/pharmacies", async (req, res) => {
+    try {
+      const pharmacies = await storage.getPharmacies();
+      res.json(pharmacies);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch pharmacies" });
+    }
+  });
+
+  app.post("/api/pharmacies", async (req, res) => {
+    try {
+      const pharmacy = await storage.createPharmacy(req.body);
+      res.json(pharmacy);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create pharmacy" });
+    }
+  });
+
+  app.get("/api/pharmacies/:id", async (req, res) => {
+    try {
+      const pharmacy = await storage.getPharmacy(parseInt(req.params.id));
+      if (!pharmacy) {
+        return res.status(404).json({ error: "Pharmacy not found" });
+      }
+      res.json(pharmacy);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch pharmacy" });
+    }
+  });
+
+  app.put("/api/pharmacies/:id", async (req, res) => {
+    try {
+      const pharmacy = await storage.updatePharmacy(parseInt(req.params.id), req.body);
+      if (!pharmacy) {
+        return res.status(404).json({ error: "Pharmacy not found" });
+      }
+      res.json(pharmacy);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update pharmacy" });
+    }
+  });
+
+  // Delivery Zone endpoints
+  app.get("/api/zones", async (req, res) => {
+    try {
+      const zones = await storage.getDeliveryZones();
+      res.json(zones);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch zones" });
+    }
+  });
+
+  app.post("/api/zones", async (req, res) => {
+    try {
+      const zone = await storage.createDeliveryZone(req.body);
+      res.json(zone);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create zone" });
+    }
+  });
+
+  app.put("/api/zones/:id", async (req, res) => {
+    try {
+      const zone = await storage.updateDeliveryZone(parseInt(req.params.id), req.body);
+      if (!zone) {
+        return res.status(404).json({ error: "Zone not found" });
+      }
+      res.json(zone);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update zone" });
+    }
+  });
+
+  app.delete("/api/zones/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteDeliveryZone(parseInt(req.params.id));
+      if (!success) {
+        return res.status(404).json({ error: "Zone not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete zone" });
+    }
+  });
+
+  // Driver zone assignment
+  app.get("/api/drivers/:id/zones", async (req, res) => {
+    try {
+      const zones = await storage.getDriverZones(parseInt(req.params.id));
+      res.json(zones);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch driver zones" });
+    }
+  });
+
+  app.post("/api/drivers/:id/zones", async (req, res) => {
+    try {
+      const { zoneId } = req.body;
+      const driverZone = await storage.assignDriverToZone(parseInt(req.params.id), zoneId);
+      res.json(driverZone);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to assign driver to zone" });
+    }
+  });
+
+  app.delete("/api/drivers/:driverId/zones/:zoneId", async (req, res) => {
+    try {
+      const success = await storage.removeDriverFromZone(
+        parseInt(req.params.driverId),
+        parseInt(req.params.zoneId)
+      );
+      if (!success) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to remove driver from zone" });
+    }
+  });
+
+  // Enhanced delivery endpoints
+  app.get("/api/deliveries/:id", async (req, res) => {
+    try {
+      const delivery = await storage.getDelivery(parseInt(req.params.id));
+      if (!delivery) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+      res.json(delivery);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch delivery" });
+    }
+  });
+
+  app.put("/api/deliveries/:id", async (req, res) => {
+    try {
+      const delivery = await storage.updateDelivery(parseInt(req.params.id), req.body);
+      if (!delivery) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+      res.json(delivery);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update delivery" });
+    }
+  });
+
+  app.delete("/api/deliveries/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteDelivery(parseInt(req.params.id));
+      if (!success) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete delivery" });
+    }
+  });
+
+  // Route stop priority update
+  app.put("/api/routes/:routeId/stops/:stopId", async (req, res) => {
+    try {
+      const stop = await storage.updateRouteStop(parseInt(req.params.stopId), req.body);
+      if (!stop) {
+        return res.status(404).json({ error: "Stop not found" });
+      }
+      io.emit("stop_updated", stop);
+      res.json(stop);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update stop" });
+    }
+  });
+
+  // Package scanning for route activation
+  app.post("/api/routes/:routeId/stops/:stopId/scan", async (req, res) => {
+    try {
+      const stop = await storage.markPackageScanned(parseInt(req.params.stopId));
+      if (!stop) {
+        return res.status(404).json({ error: "Stop not found" });
+      }
+      io.emit("package_scanned", { stopId: stop.id, routeId: parseInt(req.params.routeId) });
+      res.json(stop);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to mark package as scanned" });
+    }
+  });
+
+  // Route activation
+  app.post("/api/routes/:id/activate", async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.id);
+      const stops = await storage.getRouteStops(routeId);
+      
+      // Check if all packages are scanned
+      const allScanned = stops.every(s => s.packageScanned);
+      if (!allScanned) {
+        return res.status(400).json({ 
+          error: "All packages must be scanned before activating route",
+          scannedCount: stops.filter(s => s.packageScanned).length,
+          totalCount: stops.length
+        });
+      }
+
+      const route = await storage.activateRoute(routeId);
+      if (!route) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+
+      io.emit("route_activated", route);
+      res.json(route);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to activate route" });
+    }
+  });
+
+  // Set stop as urgent priority
+  app.post("/api/routes/:routeId/stops/:stopId/urgent", async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.routeId);
+      const stopId = parseInt(req.params.stopId);
+      
+      // Mark this stop as urgent
+      const stop = await storage.updateRouteStop(stopId, { priority: "urgent" });
+      if (!stop) {
+        return res.status(404).json({ error: "Stop not found" });
+      }
+      
+      // Reorder stops to put urgent ones first
+      const allStops = await storage.getRouteStops(routeId);
+      const pendingStops = allStops.filter(s => s.status !== "completed");
+      const urgentStops = pendingStops.filter(s => s.priority === "urgent");
+      const normalStops = pendingStops.filter(s => s.priority !== "urgent");
+      
+      // Reorder: urgent first, then normal
+      const reorderedStops = [...urgentStops, ...normalStops];
+      for (let i = 0; i < reorderedStops.length; i++) {
+        await storage.updateRouteStop(reorderedStops[i].id, { stopOrder: i + 1 });
+      }
+      
+      io.emit("route_updated", { routeId });
+      res.json({ success: true, stop });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to set urgent priority" });
+    }
+  });
+
+  // OCR logging
+  app.post("/api/ocr/log", async (req, res) => {
+    try {
+      const log = await storage.createOcrLog(req.body);
+      res.json(log);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create OCR log" });
+    }
+  });
+
+  app.get("/api/deliveries/:id/ocr-logs", async (req, res) => {
+    try {
+      const logs = await storage.getOcrLogs(parseInt(req.params.id));
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch OCR logs" });
     }
   });
 

@@ -17,6 +17,10 @@ import {
   Send,
   X,
   BarChart3,
+  AlertTriangle,
+  Package,
+  Scan,
+  Play,
 } from "lucide-react";
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
 import { Button } from "./ui/button";
@@ -93,6 +97,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [scannedBarcode, setScannedBarcode] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [showDeliveryReport, setShowDeliveryReport] = useState(false);
+  const [showRouteActivation, setShowRouteActivation] = useState(false);
+  const [activationScanningStopId, setActivationScanningStopId] = useState<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -112,7 +118,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   });
 
   const activeRoute = (driverRoutes as any[]).find(
-    (r: any) => r.status === "dispatched",
+    (r: any) => r.status === "dispatched" || r.status === "active",
   );
 
   const { data: routeData, refetch: refetchRoute } = useQuery({
@@ -227,6 +233,58 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     },
     onError: (error) => {
       console.error("❌ Skip delivery error:", error);
+    },
+  });
+
+  const scanPackageMutation = useMutation({
+    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/scan`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Failed to scan package");
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchRoute();
+      setActivationScanningStopId(null);
+    },
+  });
+
+  const activateRouteMutation = useMutation({
+    mutationFn: async (routeId: number) => {
+      const response = await fetch(`/api/routes/${routeId}/activate`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to activate route");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchRoute();
+      refetchRoutes();
+      setShowRouteActivation(false);
+    },
+  });
+
+  const setUrgentPriorityMutation = useMutation({
+    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/urgent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to set priority");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchRoute();
+    },
+    onError: (error: Error) => {
+      console.error("Failed to set urgent priority:", error.message);
     },
   });
 
@@ -722,15 +780,41 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       key={stop.id}
                       className="flex items-center gap-3 p-2 rounded-lg bg-slate-900/30"
                     >
-                      <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-xs font-bold">
-                        {completedStops.length + index + 2}
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                        stop.priority === "urgent" 
+                          ? "bg-red-500/20 text-red-400"
+                          : "bg-blue-500/20 text-blue-400"
+                      }`}>
+                        {stop.priority === "urgent" ? "!" : completedStops.length + index + 2}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm truncate">
                           {stop.delivery?.addressText}
                         </p>
+                        {stop.priority === "urgent" && (
+                          <span className="text-xs text-red-400 flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" />
+                            Urgent
+                          </span>
+                        )}
                       </div>
-                      <ChevronRight className="h-4 w-4 text-slate-500" />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setUrgentPriorityMutation.mutate({
+                          routeId: activeRoute.id,
+                          stopId: stop.id
+                        })}
+                        disabled={stop.priority === "urgent" || setUrgentPriorityMutation.isPending}
+                        className={`h-7 px-2 ${
+                          stop.priority === "urgent"
+                            ? "text-slate-500"
+                            : "text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
+                        }`}
+                        title="Mark as urgent (deliver first)"
+                      >
+                        <AlertTriangle className="h-4 w-4" />
+                      </Button>
                     </div>
                   ))}
                   {pendingStops.length > 4 && (

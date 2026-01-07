@@ -21,11 +21,16 @@ A web-based route optimization application that takes multiple delivery addresse
 - **Styling**: Tailwind CSS + shadcn/ui components
 
 ### Key Features
-1. **CSV Upload**: Drag-and-drop CSV file upload with automatic address geocoding
+1. **Order Management**: CSV/Excel upload with OCR scanning via Tesseract.js and editable order table
 2. **Route Optimization**: Google Routes API with waypoint order optimization
 3. **Interactive Maps**: Leaflet maps showing routes, stops, and driver locations
-4. **Driver Mobile App**: PWA for iOS/Android with navigation and delivery tracking
+4. **Driver Mobile App**: PWA for iOS/Android with navigation, barcode scanning, and delivery tracking
 5. **Real-time Updates**: WebSocket-based live updates between dispatcher and drivers
+6. **Multi-Pharmacy Support**: Database schema supports multiple pharmacies with geo-fenced delivery zones
+7. **Geo-fenced Zones**: Interactive map for creating circular delivery zones with driver assignments
+8. **Package Scanning**: Barcode scanning required before route activation
+9. **Urgent Priority**: Mark stops as urgent to automatically reorder routes
+10. **Reporting**: PDF/CSV export of delivery reports using jsPDF
 
 ### Directory Structure
 ```
@@ -34,9 +39,12 @@ A web-based route optimization application that takes multiple delivery addresse
 │   │   ├── components/     # React components
 │   │   │   ├── Dashboard.tsx       # Main dispatcher dashboard
 │   │   │   ├── BatchUpload.tsx     # CSV upload component
+│   │   │   ├── OrderManagement.tsx # CSV/Excel upload with OCR
 │   │   │   ├── RouteOptimizer.tsx  # Route optimization UI
 │   │   │   ├── RouteMap.tsx        # Interactive map view
+│   │   │   ├── ZoneManager.tsx     # Geo-fenced delivery zones
 │   │   │   ├── DriverManager.tsx   # Driver management
+│   │   │   ├── ReportGenerator.tsx # PDF/CSV report export
 │   │   │   └── DriverApp.tsx       # Mobile driver app
 │   │   └── lib/            # Utilities and stores
 │   └── public/             # Static assets
@@ -57,16 +65,28 @@ A web-based route optimization application that takes multiple delivery addresse
 - `POST /api/routes/optimize` - Generate optimized route
 - `POST /api/routes/:id/assign` - Assign route to driver
 - `POST /api/routes/:id/dispatch` - Dispatch route to driver
+- `POST /api/routes/:id/activate` - Activate route after scanning all packages
 - `POST /api/routes/:routeId/stops/:stopId/complete` - Mark stop as completed
+- `POST /api/routes/:routeId/stops/:stopId/scan` - Mark package as scanned
+- `POST /api/routes/:routeId/stops/:stopId/urgent` - Mark stop as urgent (reorders route)
+- `GET /api/zones` - List all delivery zones
+- `POST /api/zones` - Create a delivery zone
+- `PUT /api/zones/:id` - Update a delivery zone
+- `DELETE /api/zones/:id` - Delete a delivery zone
 
 ### Database Schema
 - **users**: System users (dispatchers)
+- **pharmacies**: Multi-pharmacy support
 - **drivers**: Delivery drivers
 - **delivery_batches**: Uploaded CSV batches
 - **deliveries**: Individual delivery addresses
+- **delivery_zones**: Geo-fenced delivery areas
+- **driver_zones**: Driver-to-zone assignments
 - **routes**: Optimized routes
-- **route_stops**: Stops within a route
+- **route_stops**: Stops within a route (includes packageScanned, priority fields)
 - **driver_locations**: Driver GPS history
+- **delivery_proofs**: Proof of delivery records
+- **ocr_logs**: OCR scanning history
 
 ## Usage
 
@@ -100,11 +120,19 @@ address,customer_name,customer_phone,rx_number,notes
 - Created mobile-friendly driver PWA
 - Improved password security architecture (passwords never exposed in API)
 - Added Rx Number column to CSV upload and delivery tracking
-- Implemented Barcode scanning placeholder in driver app proof flow
+- Multi-pharmacy transformation (2026-01-07):
+  - Added OrderManagement with CSV/Excel upload and Tesseract.js OCR scanning
+  - Created ZoneManager with interactive Leaflet map for geo-fenced zones
+  - Enhanced DriverApp with package scanning for route activation
+  - Implemented urgent priority system with automatic route reordering
+  - Added ReportGenerator with PDF/CSV export functionality
+  - Added new database tables: pharmacies, delivery_zones, driver_zones, ocr_logs
 
 ## User Preferences
 - Dark theme UI preferred
 - Mobile-first approach for driver app
 
 ## Future Enhancements
-1. **Urgent Delivery Routing**: Ability to modify routes for urgent deliveries, forcing the system to prioritize specific addresses first while maintaining optimization for the remaining stops.
+1. **Pharmacy-specific filtering**: Add pharmacy selection to batch uploads and route filtering
+2. **Advanced OCR**: Integrate paid OCR service like Veryfi for better accuracy
+3. **Zone-based route optimization**: Auto-assign deliveries to zones and drivers

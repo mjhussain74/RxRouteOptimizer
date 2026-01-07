@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, MapPin, Truck, Route, Users, ChevronRight, Clock, Navigation } from "lucide-react";
+import { Upload, MapPin, Truck, Route, Users, ChevronRight, Clock, Navigation, Building2, Map, FileText } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -9,15 +9,18 @@ import BatchUpload from "./BatchUpload";
 import RouteOptimizer from "./RouteOptimizer";
 import RouteMap from "./RouteMap";
 import DriverManager from "./DriverManager";
+import OrderManagement from "./OrderManagement";
+import ZoneManager from "./ZoneManager";
+import ReportGenerator from "./ReportGenerator";
 
 interface DashboardProps {
   onOpenDriverView: (driverId: number) => void;
 }
 
-type TabType = "upload" | "optimize" | "routes" | "drivers";
+type TabType = "orders" | "optimize" | "routes" | "drivers" | "zones" | "reports";
 
 export default function Dashboard({ onOpenDriverView }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("upload");
+  const [activeTab, setActiveTab] = useState<TabType>("orders");
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
 
@@ -34,10 +37,12 @@ export default function Dashboard({ onOpenDriverView }: DashboardProps) {
   });
 
   const tabs = [
-    { id: "upload" as TabType, label: "Upload Addresses", icon: Upload },
+    { id: "orders" as TabType, label: "Orders", icon: Upload },
     { id: "optimize" as TabType, label: "Optimize Routes", icon: Route },
     { id: "routes" as TabType, label: "View Routes", icon: MapPin },
+    { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
     { id: "drivers" as TabType, label: "Drivers", icon: Users },
+    { id: "reports" as TabType, label: "Reports", icon: FileText },
   ];
 
   return (
@@ -91,8 +96,9 @@ export default function Dashboard({ onOpenDriverView }: DashboardProps) {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === "upload" && (
-          <BatchUpload 
+        {activeTab === "orders" && (
+          <OrderManagement
+            batchId={selectedBatchId}
             onBatchCreated={(batchId) => {
               setSelectedBatchId(batchId);
               setActiveTab("optimize");
@@ -122,11 +128,19 @@ export default function Dashboard({ onOpenDriverView }: DashboardProps) {
           />
         )}
 
+        {activeTab === "zones" && (
+          <ZoneManager drivers={drivers as any[]} />
+        )}
+
         {activeTab === "drivers" && (
           <DriverManager
             drivers={drivers as any[]}
             onOpenDriverView={onOpenDriverView}
           />
+        )}
+
+        {activeTab === "reports" && (
+          <ReportGenerator />
         )}
       </main>
     </div>
