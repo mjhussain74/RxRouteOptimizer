@@ -789,6 +789,17 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/deliveries", async (req, res) => {
+    try {
+      const delivery = await storage.createDelivery(req.body);
+      io.emit("delivery_created", delivery);
+      res.json(delivery);
+    } catch (error) {
+      console.error("Create delivery error:", error);
+      res.status(500).json({ error: "Failed to create delivery" });
+    }
+  });
+
   app.put("/api/deliveries/:id", async (req, res) => {
     try {
       const delivery = await storage.updateDelivery(parseInt(req.params.id), req.body);
@@ -890,7 +901,7 @@ export async function registerRoutes(
       // Reorder: urgent first, then normal
       const reorderedStops = [...urgentStops, ...normalStops];
       for (let i = 0; i < reorderedStops.length; i++) {
-        await storage.updateRouteStop(reorderedStops[i].id, { stopOrder: i + 1 });
+        await storage.updateRouteStop(reorderedStops[i].id, { sequence: i + 1 });
       }
       
       io.emit("route_updated", { routeId });

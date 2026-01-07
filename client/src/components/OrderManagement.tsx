@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, FileSpreadsheet, Camera, Edit, Trash2, Save, X, Plus, Search, AlertCircle, CheckCircle } from "lucide-react";
+import { Upload, FileSpreadsheet, Camera, Edit, Trash2, Save, X, Plus, Search, AlertCircle, CheckCircle, ChevronDown } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -32,9 +32,11 @@ interface EditingDelivery extends Partial<Delivery> {
 interface OrderManagementProps {
   batchId?: number | null;
   onBatchCreated?: (batchId: number) => void;
+  onBatchSelected?: (batchId: number | null) => void;
 }
 
-export default function OrderManagement({ batchId, onBatchCreated }: OrderManagementProps) {
+export default function OrderManagement({ batchId, onBatchCreated, onBatchSelected }: OrderManagementProps) {
+  const [selectedBatchId, setSelectedBatchId] = useState<number | null>(batchId || null);
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -56,12 +58,21 @@ export default function OrderManagement({ batchId, onBatchCreated }: OrderManage
     queryKey: ["/api/batches"],
   });
 
+  const activeBatchId = selectedBatchId || batchId;
+
   const { data: batchData } = useQuery({
-    queryKey: ["/api/batches", batchId],
-    enabled: !!batchId,
+    queryKey: ["/api/batches", activeBatchId],
+    enabled: !!activeBatchId,
   });
 
   const deliveries: Delivery[] = (batchData as any)?.deliveries || [];
+
+  const handleBatchChange = (newBatchId: number | null) => {
+    setSelectedBatchId(newBatchId);
+    if (onBatchSelected) {
+      onBatchSelected(newBatchId);
+    }
+  };
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -106,7 +117,7 @@ export default function OrderManagement({ batchId, onBatchCreated }: OrderManage
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/batches", batchId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
       setEditingDelivery(null);
     },
   });
@@ -120,7 +131,30 @@ export default function OrderManagement({ batchId, onBatchCreated }: OrderManage
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/batches", batchId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
+    },
+  });
+
+  const addDeliveryMutation = useMutation({
+    mutationFn: async (delivery: typeof newDelivery) => {
+      const response = await fetch(`/api/deliveries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...delivery,
+          batchId: activeBatchId,
+          status: "pending",
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to add order");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
+      setShowAddManual(false);
+      setNewDelivery({ addressText: "", customerName: "", customerPhone: "", rxNumber: "", notes: "" });
     },
   });
 
@@ -213,12 +247,35 @@ export default function OrderManagement({ batchId, onBatchCreated }: OrderManage
           <Button
             onClick={() => setShowAddManual(true)}
             className="bg-blue-600 hover:bg-blue-700"
+            disabled={!activeBatchId}
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Order
           </Button>
         </div>
       </div>
+
+      {(batches as any[]).length > 0 && (
+        <Card className="bg-slate-800/50 border-slate-700">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-4">
+              <Label className="text-slate-300 whitespace-nowrap">Select Batch:</Label>
+              <select
+                value={activeBatchId || ""}
+                onChange={(e) => handleBatchChange(e.target.value ? parseInt(e.target.value) : null)}
+                className="flex-1 bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2"
+              >
+                <option value="">-- Select a batch to view/edit orders --</option>
+                {(batches as any[]).map((batch: any) => (
+                  <option key={batch.id} value={batch.id}>
+                    {batch.name} ({batch.totalDeliveries || 0} deliveries) - {new Date(batch.createdAt).toLocaleDateString()}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="bg-slate-800/50 border-slate-700">
         <CardContent className="p-6">
@@ -490,14 +547,11 @@ export default function OrderManagement({ batchId, onBatchCreated }: OrderManage
               />
             </div>
             <Button
-              onClick={() => {
-                setShowAddManual(false);
-                setNewDelivery({ addressText: "", customerName: "", customerPhone: "", rxNumber: "", notes: "" });
-              }}
+              onClick={() => addDeliveryMutation.mutate(newDelivery)}
               className="w-full bg-blue-600 hover:bg-blue-700"
-              disabled={!newDelivery.addressText}
+              disabled={!newDelivery.addressText || addDeliveryMutation.isPending}
             >
-              Add Order
+              {addDeliveryMutation.isPending ? "Adding..." : "Add Order"}
             </Button>
           </div>
         </DialogContent>
