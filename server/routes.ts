@@ -890,6 +890,25 @@ export async function registerRoutes(
     }
   });
 
+  // Get all active deliveries (excluding complete/cancelled) - MUST be before :id routes
+  app.get("/api/deliveries/active", async (req, res) => {
+    try {
+      const zoneId = req.query.zoneId ? parseInt(req.query.zoneId as string) : null;
+      let activeDeliveries;
+      
+      if (zoneId) {
+        activeDeliveries = await storage.getActiveDeliveriesByZone(zoneId);
+      } else {
+        activeDeliveries = await storage.getActiveDeliveries();
+      }
+      
+      res.json(activeDeliveries);
+    } catch (error) {
+      console.error("Get active deliveries error:", error);
+      res.status(500).json({ error: "Failed to get active deliveries" });
+    }
+  });
+
   // Enhanced delivery endpoints
   app.get("/api/deliveries/:id", async (req, res) => {
     try {
@@ -935,25 +954,6 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete delivery" });
-    }
-  });
-
-  // Get all active deliveries (excluding complete/cancelled)
-  app.get("/api/deliveries/active", async (req, res) => {
-    try {
-      const zoneId = req.query.zoneId ? parseInt(req.query.zoneId as string) : null;
-      let activeDeliveries;
-      
-      if (zoneId) {
-        activeDeliveries = await storage.getActiveDeliveriesByZone(zoneId);
-      } else {
-        activeDeliveries = await storage.getActiveDeliveries();
-      }
-      
-      res.json(activeDeliveries);
-    } catch (error) {
-      console.error("Get active deliveries error:", error);
-      res.status(500).json({ error: "Failed to get active deliveries" });
     }
   });
 
