@@ -61,7 +61,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
   const activeBatchId = selectedBatchId || batchId;
 
   const { data: batchData } = useQuery({
-    queryKey: ["/api/batches", activeBatchId],
+    queryKey: [`/api/batches/${activeBatchId}`],
     enabled: !!activeBatchId,
   });
 
@@ -117,7 +117,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
       setEditingDelivery(null);
     },
   });
@@ -131,7 +131,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
     },
   });
@@ -152,7 +152,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
       setShowAddManual(false);
       setNewDelivery({ addressText: "", customerName: "", customerPhone: "", rxNumber: "", notes: "" });
@@ -170,7 +170,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
     },
   });
 
