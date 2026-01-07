@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, FileSpreadsheet, Camera, Edit, Trash2, Save, X, Plus, Search, AlertCircle, CheckCircle, ChevronDown, AlertTriangle } from "lucide-react";
+import { Upload, FileSpreadsheet, Camera, Edit, Trash2, Save, X, Plus, Search, AlertCircle, CheckCircle, ChevronDown, AlertTriangle, Ban, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -171,6 +171,22 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
+    },
+  });
+
+  const setStatusMutation = useMutation({
+    mutationFn: async ({ deliveryId, status }: { deliveryId: number; status: string }) => {
+      const response = await fetch(`/api/deliveries/${deliveryId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error("Failed to update status");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
     },
   });
 
@@ -415,14 +431,24 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          {delivery.lat && delivery.lng ? (
+                          {delivery.status === "complete" ? (
                             <CheckCircle className="h-4 w-4 text-green-400" />
+                          ) : delivery.status === "cancelled" ? (
+                            <Ban className="h-4 w-4 text-red-400" />
+                          ) : delivery.lat && delivery.lng ? (
+                            <CheckCircle className="h-4 w-4 text-blue-400" />
                           ) : (
                             <AlertCircle className="h-4 w-4 text-yellow-400" />
                           )}
                           <span className={`text-xs px-2 py-1 rounded ${
-                            delivery.status === "geocoded" 
+                            delivery.status === "complete" 
                               ? "bg-green-500/20 text-green-400"
+                              : delivery.status === "cancelled"
+                              ? "bg-red-500/20 text-red-400"
+                              : delivery.status === "active"
+                              ? "bg-blue-500/20 text-blue-400"
+                              : delivery.status === "geocoded" 
+                              ? "bg-emerald-500/20 text-emerald-400"
                               : "bg-yellow-500/20 text-yellow-400"
                           }`}>
                             {delivery.status}
@@ -505,13 +531,31 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                                 <X className="h-4 w-4" />
                               </Button>
                             </>
+                          ) : delivery.status === "complete" || delivery.status === "cancelled" ? (
+                            <span className="text-xs text-slate-500">
+                              {delivery.status === "complete" ? "Completed" : "Cancelled"}
+                            </span>
                           ) : (
                             <>
                               <Button
                                 size="sm"
                                 variant="ghost"
+                                onClick={() => {
+                                  if (confirm("Mark this order as complete?")) {
+                                    setStatusMutation.mutate({ deliveryId: delivery.id, status: "complete" });
+                                  }
+                                }}
+                                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                                title="Mark as Complete"
+                              >
+                                <Check className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
                                 onClick={() => setEditingDelivery(delivery)}
                                 className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                                title="Edit"
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -519,11 +563,25 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => {
-                                  if (confirm("Delete this order?")) {
+                                  if (confirm("Cancel this order?")) {
+                                    setStatusMutation.mutate({ deliveryId: delivery.id, status: "cancelled" });
+                                  }
+                                }}
+                                className="h-8 w-8 p-0 text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
+                                title="Cancel Order"
+                              >
+                                <Ban className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  if (confirm("Delete this order permanently?")) {
                                     deleteDeliveryMutation.mutate(delivery.id);
                                   }
                                 }}
                                 className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                title="Delete"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>

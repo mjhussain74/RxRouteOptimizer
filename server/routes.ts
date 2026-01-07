@@ -463,19 +463,32 @@ export async function registerRoutes(
 
   app.post("/api/routes/optimize", async (req, res) => {
     try {
-      const { batchId, startLat, startLng, startAddress, routeName } = req.body;
+      const { batchId, deliveryIds, zoneId, startLat, startLng, startAddress, routeName } = req.body;
 
-      if (!batchId || startLat === undefined || startLng === undefined) {
+      if (startLat === undefined || startLng === undefined) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
-      const batch = await storage.getBatch(batchId);
-      if (!batch) {
-        return res.status(404).json({ error: "Batch not found" });
+      let geocodedDeliveries: any[] = [];
+      
+      // Support both old batch-based and new deliveryIds-based approach
+      if (deliveryIds && Array.isArray(deliveryIds) && deliveryIds.length > 0) {
+        // New approach: use selected delivery IDs
+        const allDeliveries = await Promise.all(
+          deliveryIds.map(id => storage.getDelivery(id))
+        );
+        geocodedDeliveries = allDeliveries.filter(d => d && d.lat && d.lng) as any[];
+      } else if (batchId) {
+        // Old approach: use batch
+        const batch = await storage.getBatch(batchId);
+        if (!batch) {
+          return res.status(404).json({ error: "Batch not found" });
+        }
+        const deliveries = await storage.getDeliveriesByBatch(batchId);
+        geocodedDeliveries = deliveries.filter(d => d.lat && d.lng);
+      } else {
+        return res.status(400).json({ error: "Either batchId or deliveryIds is required" });
       }
-
-      const deliveries = await storage.getDeliveriesByBatch(batchId);
-      const geocodedDeliveries = deliveries.filter(d => d.lat && d.lng);
 
       if (geocodedDeliveries.length === 0) {
         return res.status(400).json({ error: "No geocoded deliveries found" });
@@ -557,7 +570,8 @@ export async function registerRoutes(
       }
 
       const route = await storage.createRoute({
-        batchId,
+        batchId: batchId || null,
+        zoneId: zoneId || null,
         name: routeName || `Route ${new Date().toLocaleTimeString()}`,
         status: "optimized",
         startLat,
@@ -569,7 +583,7 @@ export async function registerRoutes(
       });
 
       for (let i = 0; i < optimizedOrder.length; i++) {
-        const delivery = deliveries.find(d => d.id === optimizedOrder[i]);
+        const delivery = geocodedDeliveries.find(d => d.id === optimizedOrder[i]);
         await storage.createRouteStop({
           routeId: route.id,
           deliveryId: optimizedOrder[i],
@@ -577,12 +591,16 @@ export async function registerRoutes(
           status: "pending",
           priority: delivery?.priority || "normal"
         });
+        // Mark delivery as active when added to a route
+        if (delivery) {
+          await storage.updateDeliveryStatus(delivery.id, 'active');
+        }
       }
 
       const stops = await storage.getRouteStops(route.id);
       const stopsWithDeliveries = stops.map(stop => ({
         ...stop,
-        delivery: deliveries.find(d => d.id === stop.deliveryId)
+        delivery: geocodedDeliveries.find(d => d.id === stop.deliveryId)
       }));
 
       res.json({ 
