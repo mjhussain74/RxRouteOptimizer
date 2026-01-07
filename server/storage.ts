@@ -284,14 +284,45 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActiveDeliveriesByZone(zoneId: number): Promise<Delivery[]> {
-    return db.select().from(deliveries).where(
+    // Get the zone to find its center and radius
+    const zone = await this.getDeliveryZone(zoneId);
+    if (!zone) {
+      return [];
+    }
+
+    // Get all active deliveries with coordinates
+    const allActiveDeliveries = await db.select().from(deliveries).where(
       and(
-        eq(deliveries.zoneId, zoneId),
         notInArray(deliveries.status, ['complete', 'cancelled']),
         isNotNull(deliveries.lat),
         isNotNull(deliveries.lng)
       )
     );
+
+    // Filter deliveries within the zone's radius using Haversine formula
+    const centerLat = Number(zone.centerLat);
+    const centerLng = Number(zone.centerLng);
+    const radiusMeters = zone.radiusMeters;
+
+    return allActiveDeliveries.filter(delivery => {
+      if (!delivery.lat || !delivery.lng) return false;
+      
+      const deliveryLat = Number(delivery.lat);
+      const deliveryLng = Number(delivery.lng);
+      
+      // Haversine formula to calculate distance
+      const R = 6371000; // Earth's radius in meters
+      const dLat = (deliveryLat - centerLat) * Math.PI / 180;
+      const dLng = (deliveryLng - centerLng) * Math.PI / 180;
+      const a = 
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(centerLat * Math.PI / 180) * Math.cos(deliveryLat * Math.PI / 180) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distance = R * c;
+
+      return distance <= radiusMeters;
+    });
   }
 
   async getDelivery(id: number): Promise<Delivery | undefined> {
