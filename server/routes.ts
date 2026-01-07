@@ -374,6 +374,7 @@ export async function registerRoutes(
           customerPhone: row.customer_phone || row.customerPhone || row.phone || null,
           rxNumber: row.rx_number || row.rx_no || row.Rx_Number || row.RxNo || null,
           notes: row.notes || row.Notes || null,
+          priority: row.priority || "normal",
           status: geocoded ? "geocoded" : "pending"
         });
 
@@ -480,18 +481,80 @@ export async function registerRoutes(
         return res.status(400).json({ error: "No geocoded deliveries found" });
       }
 
-      // Use Google Routes API for optimization
-      const optimizationResult = await optimizeRouteWithGoogle(
-        startLat,
-        startLng,
-        geocodedDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
-      );
+      // Separate urgent and normal priority deliveries
+      const urgentDeliveries = geocodedDeliveries.filter(d => d.priority === "urgent");
+      const normalDeliveries = geocodedDeliveries.filter(d => d.priority !== "urgent");
 
-      if (!optimizationResult) {
-        return res.status(500).json({ error: "Failed to optimize route with Google Routes API" });
+      let optimizedOrder: number[] = [];
+      let totalDistance = 0;
+      let estimatedDuration = 0;
+      let currentLat = startLat;
+      let currentLng = startLng;
+
+      // Optimize urgent deliveries first (if any)
+      if (urgentDeliveries.length > 0) {
+        const urgentResult = await optimizeRouteWithGoogle(
+          currentLat,
+          currentLng,
+          urgentDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+        );
+        if (urgentResult && urgentResult.order.length > 0) {
+          optimizedOrder = [...urgentResult.order];
+          totalDistance += urgentResult.distance;
+          estimatedDuration += urgentResult.duration;
+          // Get the last urgent delivery's location for continuing to normal deliveries
+          const lastUrgentId = urgentResult.order[urgentResult.order.length - 1];
+          const lastUrgent = urgentDeliveries.find(d => d.id === lastUrgentId);
+          if (lastUrgent) {
+            currentLat = lastUrgent.lat!;
+            currentLng = lastUrgent.lng!;
+          }
+        } else {
+          // Fallback: use nearest neighbor for urgent deliveries
+          const fallbackResult = optimizeRouteFallback(
+            currentLat,
+            currentLng,
+            urgentDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+          );
+          optimizedOrder = [...fallbackResult.order];
+          totalDistance += fallbackResult.distance;
+          estimatedDuration += fallbackResult.duration;
+          const lastUrgentId = fallbackResult.order[fallbackResult.order.length - 1];
+          const lastUrgent = urgentDeliveries.find(d => d.id === lastUrgentId);
+          if (lastUrgent) {
+            currentLat = lastUrgent.lat!;
+            currentLng = lastUrgent.lng!;
+          }
+        }
       }
 
-      const { order: optimizedOrder, distance: totalDistance, duration: estimatedDuration } = optimizationResult;
+      // Optimize normal deliveries (if any)
+      if (normalDeliveries.length > 0) {
+        const normalResult = await optimizeRouteWithGoogle(
+          currentLat,
+          currentLng,
+          normalDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+        );
+        if (normalResult && normalResult.order.length > 0) {
+          optimizedOrder = [...optimizedOrder, ...normalResult.order];
+          totalDistance += normalResult.distance;
+          estimatedDuration += normalResult.duration;
+        } else {
+          // Fallback: use nearest neighbor for normal deliveries
+          const fallbackResult = optimizeRouteFallback(
+            currentLat,
+            currentLng,
+            normalDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+          );
+          optimizedOrder = [...optimizedOrder, ...fallbackResult.order];
+          totalDistance += fallbackResult.distance;
+          estimatedDuration += fallbackResult.duration;
+        }
+      }
+
+      if (optimizedOrder.length === 0) {
+        return res.status(500).json({ error: "Failed to optimize route" });
+      }
 
       const route = await storage.createRoute({
         batchId,
@@ -506,11 +569,13 @@ export async function registerRoutes(
       });
 
       for (let i = 0; i < optimizedOrder.length; i++) {
+        const delivery = deliveries.find(d => d.id === optimizedOrder[i]);
         await storage.createRouteStop({
           routeId: route.id,
           deliveryId: optimizedOrder[i],
           sequence: i + 1,
-          status: "pending"
+          status: "pending",
+          priority: delivery?.priority || "normal"
         });
       }
 

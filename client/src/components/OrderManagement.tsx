@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, FileSpreadsheet, Camera, Edit, Trash2, Save, X, Plus, Search, AlertCircle, CheckCircle, ChevronDown } from "lucide-react";
+import { Upload, FileSpreadsheet, Camera, Edit, Trash2, Save, X, Plus, Search, AlertCircle, CheckCircle, ChevronDown, AlertTriangle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -145,6 +145,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
           ...delivery,
           batchId: activeBatchId,
           status: "pending",
+          priority: "normal",
         }),
       });
       if (!response.ok) throw new Error("Failed to add order");
@@ -155,6 +156,21 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
       setShowAddManual(false);
       setNewDelivery({ addressText: "", customerName: "", customerPhone: "", rxNumber: "", notes: "" });
+    },
+  });
+
+  const setPriorityMutation = useMutation({
+    mutationFn: async ({ deliveryId, priority }: { deliveryId: number; priority: string }) => {
+      const response = await fetch(`/api/deliveries/${deliveryId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority }),
+      });
+      if (!response.ok) throw new Error("Failed to update priority");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/batches", activeBatchId] });
     },
   });
 
@@ -358,6 +374,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
               <table className="w-full">
                 <thead className="bg-slate-700/50">
                   <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Priority</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">RX #</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Customer</th>
@@ -369,7 +386,33 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                 </thead>
                 <tbody className="divide-y divide-slate-700">
                   {filteredDeliveries.map((delivery) => (
-                    <tr key={delivery.id} className="hover:bg-slate-700/30">
+                    <tr key={delivery.id} className={`hover:bg-slate-700/30 ${delivery.priority === "urgent" ? "bg-red-500/5" : ""}`}>
+                      <td className="px-4 py-3">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setPriorityMutation.mutate({
+                            deliveryId: delivery.id,
+                            priority: delivery.priority === "urgent" ? "normal" : "urgent"
+                          })}
+                          disabled={setPriorityMutation.isPending}
+                          className={`h-8 px-2 ${
+                            delivery.priority === "urgent"
+                              ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                              : "bg-slate-600/50 text-slate-400 hover:bg-slate-600"
+                          }`}
+                          title={delivery.priority === "urgent" ? "Click to set Normal priority" : "Click to set Urgent priority"}
+                        >
+                          {delivery.priority === "urgent" ? (
+                            <span className="flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              Urgent
+                            </span>
+                          ) : (
+                            "Normal"
+                          )}
+                        </Button>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {delivery.lat && delivery.lng ? (
