@@ -889,6 +889,47 @@ export async function registerRoutes(
     }
   });
 
+  // Get all active deliveries (excluding complete/cancelled)
+  app.get("/api/deliveries/active", async (req, res) => {
+    try {
+      const zoneId = req.query.zoneId ? parseInt(req.query.zoneId as string) : null;
+      let activeDeliveries;
+      
+      if (zoneId) {
+        activeDeliveries = await storage.getActiveDeliveriesByZone(zoneId);
+      } else {
+        activeDeliveries = await storage.getActiveDeliveries();
+      }
+      
+      res.json(activeDeliveries);
+    } catch (error) {
+      console.error("Get active deliveries error:", error);
+      res.status(500).json({ error: "Failed to get active deliveries" });
+    }
+  });
+
+  // Update delivery status (complete/cancelled)
+  app.patch("/api/deliveries/:id/status", async (req, res) => {
+    try {
+      const { status } = req.body;
+      const validStatuses = ['pending', 'geocoded', 'active', 'complete', 'cancelled'];
+      
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+      }
+      
+      const delivery = await storage.updateDeliveryStatus(parseInt(req.params.id), status);
+      if (!delivery) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+      
+      io.emit("delivery_status_updated", delivery);
+      res.json(delivery);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update delivery status" });
+    }
+  });
+
   // Route stop priority update
   app.put("/api/routes/:routeId/stops/:stopId", async (req, res) => {
     try {

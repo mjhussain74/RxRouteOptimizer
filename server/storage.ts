@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, notInArray, isNotNull } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import {
   users, drivers, deliveryBatches, deliveries, routes, routeStops, driverLocations, deliveryProofs,
@@ -64,6 +64,8 @@ export interface IStorage {
   updateBatchStatus(id: number, status: string): Promise<DeliveryBatch | undefined>;
   
   getDeliveriesByBatch(batchId: number): Promise<Delivery[]>;
+  getActiveDeliveries(): Promise<Delivery[]>;
+  getActiveDeliveriesByZone(zoneId: number): Promise<Delivery[]>;
   getDelivery(id: number): Promise<Delivery | undefined>;
   createDelivery(delivery: InsertDelivery): Promise<Delivery>;
   updateDelivery(id: number, data: Partial<InsertDelivery>): Promise<Delivery | undefined>;
@@ -269,6 +271,27 @@ export class DatabaseStorage implements IStorage {
 
   async getDeliveriesByBatch(batchId: number): Promise<Delivery[]> {
     return db.select().from(deliveries).where(eq(deliveries.batchId, batchId));
+  }
+
+  async getActiveDeliveries(): Promise<Delivery[]> {
+    return db.select().from(deliveries).where(
+      and(
+        notInArray(deliveries.status, ['complete', 'cancelled']),
+        isNotNull(deliveries.lat),
+        isNotNull(deliveries.lng)
+      )
+    );
+  }
+
+  async getActiveDeliveriesByZone(zoneId: number): Promise<Delivery[]> {
+    return db.select().from(deliveries).where(
+      and(
+        eq(deliveries.zoneId, zoneId),
+        notInArray(deliveries.status, ['complete', 'cancelled']),
+        isNotNull(deliveries.lat),
+        isNotNull(deliveries.lng)
+      )
+    );
   }
 
   async getDelivery(id: number): Promise<Delivery | undefined> {

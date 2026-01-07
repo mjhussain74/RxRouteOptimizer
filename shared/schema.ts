@@ -70,6 +70,7 @@ export const deliveries = pgTable("deliveries", {
   id: serial("id").primaryKey(),
   batchId: integer("batch_id").references(() => deliveryBatches.id),
   pharmacyId: integer("pharmacy_id").references(() => pharmacies.id),
+  zoneId: integer("zone_id").references(() => deliveryZones.id),
   addressText: text("address_text").notNull(),
   lat: real("lat"),
   lng: real("lng"),
@@ -190,6 +191,7 @@ export const deliveryBatchesRelations = relations(deliveryBatches, ({ one, many 
 export const deliveriesRelations = relations(deliveries, ({ one, many }) => ({
   batch: one(deliveryBatches, { fields: [deliveries.batchId], references: [deliveryBatches.id] }),
   pharmacy: one(pharmacies, { fields: [deliveries.pharmacyId], references: [pharmacies.id] }),
+  zone: one(deliveryZones, { fields: [deliveries.zoneId], references: [deliveryZones.id] }),
   routeStops: many(routeStops),
   ocrLogs: many(ocrLogs),
 }));
