@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MapContainer, TileLayer, Circle, useMapEvents, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Circle, useMapEvents, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
-import { Plus, Trash2, Edit, Save, X, Users, MapPin } from "lucide-react";
+import { Plus, Trash2, Edit, Save, X, Users, MapPin, Search, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -50,6 +50,18 @@ function ZoneCreator({ onZoneCreated }: { onZoneCreated: (lat: number, lng: numb
   return null;
 }
 
+function MapController({ center, zoom }: { center: [number, number] | null; zoom?: number }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (center) {
+      map.flyTo(center, zoom || 13, { duration: 1 });
+    }
+  }, [center, zoom, map]);
+  
+  return null;
+}
+
 export default function ZoneManager({ drivers }: ZoneManagerProps) {
   const queryClient = useQueryClient();
   const [isCreating, setIsCreating] = useState(false);
@@ -63,6 +75,39 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
     color: "#3B82F6",
   });
   const [mapCenter] = useState<[number, number]>([40.7128, -74.0060]);
+  const [zipCodeSearch, setZipCodeSearch] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [focusCenter, setFocusCenter] = useState<[number, number] | null>(null);
+
+  const searchZipCode = async () => {
+    if (!zipCodeSearch.trim()) return;
+    
+    setIsSearching(true);
+    setSearchError("");
+    
+    try {
+      const response = await fetch(`/api/geocode?address=${encodeURIComponent(zipCodeSearch.trim())}`);
+      if (!response.ok) {
+        throw new Error("Geocoding failed");
+      }
+      const data = await response.json();
+      
+      if (data.lat && data.lng) {
+        setFocusCenter([data.lat, data.lng]);
+        if (isCreating) {
+          setNewZone(prev => ({ ...prev, centerLat: data.lat, centerLng: data.lng }));
+        }
+      } else {
+        setSearchError("Zip code not found");
+      }
+    } catch (error) {
+      console.error("Zip code search error:", error);
+      setSearchError("Could not find location");
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   const { data: zones = [] } = useQuery<DeliveryZone[]>({
     queryKey: ["/api/zones"],
@@ -167,6 +212,42 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
         </Button>
       </div>
 
+      <Card className="bg-slate-800/50 border-slate-700 mb-4">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Enter zip code to focus map..."
+                  value={zipCodeSearch}
+                  onChange={(e) => {
+                    setZipCodeSearch(e.target.value);
+                    setSearchError("");
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && searchZipCode()}
+                  className="pl-9 bg-slate-700 border-slate-600 text-white"
+                />
+              </div>
+            </div>
+            <Button
+              onClick={searchZipCode}
+              disabled={isSearching || !zipCodeSearch.trim()}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isSearching ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Search"
+              )}
+            </Button>
+          </div>
+          {searchError && (
+            <p className="text-red-400 text-sm mt-2">{searchError}</p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           <Card className="bg-slate-800/50 border-slate-700">
@@ -182,6 +263,7 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                     url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                   />
+                  <MapController center={focusCenter} />
                   
                   {isCreating && <ZoneCreator onZoneCreated={handleMapClick} />}
                   
