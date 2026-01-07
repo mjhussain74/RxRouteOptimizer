@@ -314,10 +314,11 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                 className="flex-1 bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2"
               >
                 <option value="">-- Select a batch to view/edit orders --</option>
-                {(batches as any[]).map((batch: any) => (
+                {(batches as any[])
+                  .filter((batch: any) => batch.status !== "complete" && batch.status !== "cancelled")
+                  .map((batch: any) => (
                   <option key={batch.id} value={batch.id}>
                     {batch.name} ({batch.totalDeliveries || 0} deliveries) - {new Date(batch.createdAt).toLocaleDateString()}
-                    {batch.status === "complete" ? " ✓ Complete" : batch.status === "cancelled" ? " ✕ Cancelled" : ""}
                   </option>
                 ))}
               </select>
