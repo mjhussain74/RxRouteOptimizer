@@ -842,33 +842,87 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
       // Parse RX number - look for RX followed by numbers, or standalone 7+ digit numbers
       const rxMatch = text.match(/RX[:\s#-]*(\d+)/i) || text.match(/Rx\s*#?\s*(\d{6,})/i) || text.match(/(\d{7,})/);
 
-      // Parse patient name - try multiple patterns
+      // Parse patient name - try multiple patterns including multi-line
       let patientName = "";
-      const namePatterns = [
-        /(?:Patient|Name|PT)[:\s]+([A-Za-z]+[,\s]+[A-Za-z]+)/i,
-        /(?:Patient|Name|PT)[:\s]+([A-Za-z\s]{3,30})/i,
-        /^([A-Z][a-z]+[,\s]+[A-Z][a-z]+)/m,
-      ];
-      for (const pattern of namePatterns) {
-        const match = text.match(pattern);
-        if (match?.[1]) {
-          patientName = match[1].trim();
-          break;
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      
+      // Look for name on line after label (common on RX labels)
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i].toUpperCase();
+        if (line.includes('PATIENT') || line.includes('NAME') || line === 'PT' || line === 'PT:') {
+          // Check if the value is on the same line or next line
+          const sameLine = lines[i].match(/(?:PATIENT|NAME|PT)[:\s]+([A-Za-z][A-Za-z\s,'-]{2,30})/i);
+          if (sameLine?.[1]) {
+            patientName = sameLine[1].trim();
+            break;
+          }
+          // Check next line for a name
+          const nextLine = lines[i + 1];
+          if (nextLine && /^[A-Za-z][A-Za-z\s,'-]{2,30}$/.test(nextLine) && !nextLine.match(/^\d/)) {
+            patientName = nextLine.trim();
+            break;
+          }
+        }
+      }
+      
+      // Fallback patterns if not found
+      if (!patientName) {
+        const namePatterns = [
+          /(?:Patient|Name|PT)[:\s]+([A-Za-z]+[,\s]+[A-Za-z]+)/i,
+          /(?:Patient|Name|PT)[:\s]+([A-Za-z][A-Za-z\s]{2,25})/i,
+          /^([A-Z][a-z]+[,\s]+[A-Z][a-z]+)/m,
+          // Try "LASTNAME, FIRSTNAME" format common on RX labels
+          /^([A-Z]+,\s*[A-Z][a-z]+)/m,
+        ];
+        for (const pattern of namePatterns) {
+          const match = text.match(pattern);
+          if (match?.[1]) {
+            patientName = match[1].trim();
+            break;
+          }
         }
       }
 
       // Parse address - handle multi-line addresses
       let fullAddress = "";
       
+      // Common Michigan cities for detection
+      const michiganCities = [
+        'Hamtramck', 'Detroit', 'Warren', 'Troy', 'Sterling Heights', 'Dearborn', 
+        'Livonia', 'Ann Arbor', 'Flint', 'Grand Rapids', 'Lansing', 'Clinton Township',
+        'Canton', 'Farmington', 'Southfield', 'Royal Oak', 'Westland', 'Pontiac',
+        'Taylor', 'St. Clair Shores', 'Roseville', 'Madison Heights', 'Ferndale',
+        'Oak Park', 'Hazel Park', 'Highland Park', 'Redford', 'Lincoln Park',
+        'Dearborn Heights', 'Allen Park', 'Inkster', 'Romulus', 'Wyandotte',
+        'Grosse Pointe', 'Harper Woods', 'Eastpointe', 'Fraser', 'Center Line'
+      ];
+      const cityRegex = new RegExp(`\\b(${michiganCities.join('|')})\\b`, 'i');
+      
       // Try to find complete address on one line first
-      const singleLineMatch = text.match(/(\d+\s+[A-Za-z0-9\s]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Ct|Court|Way|Pl|Place)[.,]?\s*[A-Za-z\s]+[,.\s]+[A-Z]{2}[,.\s]+\d{5}(?:-\d{4})?)/i);
+      const singleLineMatch = text.match(/(\d+\s+[A-Za-z0-9\s]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Ct|Court|Way|Pl|Place)[.,]?\s*[A-Za-z\s]+[,.\s]*[A-Z]{2}[,.\s]*\d{5}(?:-\d{4})?)/i);
       
       if (singleLineMatch) {
         fullAddress = singleLineMatch[1];
       } else {
         // Try to extract address components separately
         const streetMatch = text.match(/(\d+\s+[A-Za-z0-9\s]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Ct|Court|Way|Pl|Place)\.?)/i);
-        const cityStateZipMatch = text.match(/([A-Za-z\s]+)[,.\s]+([A-Z]{2})[,.\s]+(\d{5}(?:-\d{4})?)/i);
+        
+        // More flexible city/state/zip patterns
+        const cityStateZipPatterns = [
+          // Standard format: City, ST 12345 or City, ST 12345-6789
+          /([A-Za-z\s]+)[,.\s]+([A-Z]{2})[,.\s]+(\d{5}(?:-\d{4})?)/i,
+          // No comma: City ST 12345 (common on labels)
+          /([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/,
+          // Comma no space: City,ST 12345
+          /([A-Za-z\s]+),([A-Z]{2})\s*(\d{5}(?:-\d{4})?)/i,
+        ];
+        
+        let cityStateZipMatch = null;
+        for (const pattern of cityStateZipPatterns) {
+          cityStateZipMatch = text.match(pattern);
+          if (cityStateZipMatch) break;
+        }
+        
         const zipMatch = text.match(/\b(\d{5}(?:-\d{4})?)\b/);
         const stateMatch = text.match(/\b(MI|OH|IN|IL|WI|NY|CA|TX|FL|PA|AZ|GA|NC|NJ|VA|WA|MA|TN|MD|MN|MO|CO|AL|SC|LA|KY|OR|OK|CT|IA|MS|AR|KS|UT|NV|NM|WV|NE|ID|HI|NH|ME|MT|RI|DE|SD|ND|AK|VT|WY|DC)\b/);
         
@@ -881,14 +935,33 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
             const zip = cityStateZipMatch[3];
             fullAddress += `, ${city}, ${state} ${zip}`;
           } else {
-            // Try to piece together from separate matches
-            const cityMatch = text.match(/\b(Hamtramck|Detroit|Warren|Troy|Sterling Heights|Dearborn|Livonia|Ann Arbor|Flint|Grand Rapids|Lansing|Clinton Township|Canton|Farmington|Southfield|Royal Oak|Westland|Pontiac|Taylor|St\. Clair Shores)\b/i);
+            // Try to piece together from separate matches using city list
+            const cityMatch = text.match(cityRegex);
             if (cityMatch && stateMatch && zipMatch) {
               fullAddress += `, ${cityMatch[1]}, ${stateMatch[1]} ${zipMatch[1]}`;
             } else if (stateMatch && zipMatch) {
               fullAddress += `, ${stateMatch[1]} ${zipMatch[1]}`;
             } else if (zipMatch) {
               fullAddress += `, MI ${zipMatch[1]}`;
+            }
+          }
+        } else if (cityStateZipMatch || zipMatch) {
+          // No street found but have city/state/zip - look for address line-by-line
+          for (const line of lines) {
+            const addrMatch = line.match(/^(\d+\s+[A-Za-z0-9\s]+)/);
+            if (addrMatch && addrMatch[1].length > 5) {
+              fullAddress = addrMatch[1].trim();
+              if (cityStateZipMatch) {
+                fullAddress += `, ${cityStateZipMatch[1].trim()}, ${cityStateZipMatch[2]} ${cityStateZipMatch[3]}`;
+              } else if (zipMatch) {
+                const cityMatch = text.match(cityRegex);
+                if (cityMatch) {
+                  fullAddress += `, ${cityMatch[1]}, MI ${zipMatch[1]}`;
+                } else {
+                  fullAddress += `, MI ${zipMatch[1]}`;
+                }
+              }
+              break;
             }
           }
         }
