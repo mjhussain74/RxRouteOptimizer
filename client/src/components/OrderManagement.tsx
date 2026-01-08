@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
 import * as XLSX from "xlsx";
 
 interface Delivery {
@@ -53,6 +54,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
     rxNumber: "",
     notes: "",
   });
+  const [confirmAction, setConfirmAction] = useState<{ type: "complete" | "cancel" | "delete"; batchId?: number; deliveryId?: number } | null>(null);
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -340,11 +342,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                   <div className="flex gap-2">
                     <Button
                       size="sm"
-                      onClick={() => {
-                        if (confirm("Mark this entire order batch as complete? All pending deliveries will be marked complete.")) {
-                          setBatchStatusMutation.mutate({ batchId: activeBatchId, status: "complete" });
-                        }
-                      }}
+                      onClick={() => setConfirmAction({ type: "complete", batchId: activeBatchId })}
                       disabled={setBatchStatusMutation.isPending}
                       className="bg-green-600 hover:bg-green-700 text-white"
                     >
@@ -354,11 +352,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => {
-                        if (confirm("Cancel this entire order batch? All pending deliveries will be cancelled.")) {
-                          setBatchStatusMutation.mutate({ batchId: activeBatchId, status: "cancelled" });
-                        }
-                      }}
+                      onClick={() => setConfirmAction({ type: "cancel", batchId: activeBatchId })}
                       disabled={setBatchStatusMutation.isPending}
                       className="border-orange-500 text-orange-400 hover:bg-orange-500/10"
                     >
@@ -743,6 +737,47 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
           />
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
+        <AlertDialogContent className="bg-slate-800 border-slate-700">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">
+              {confirmAction?.type === "complete" ? "Complete Order Batch?" : 
+               confirmAction?.type === "cancel" ? "Cancel Order Batch?" : "Delete Delivery?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {confirmAction?.type === "complete" 
+                ? "This will mark the entire order batch as complete. All pending deliveries in this batch will be marked complete."
+                : confirmAction?.type === "cancel"
+                ? "This will cancel the entire order batch. All pending deliveries in this batch will be cancelled."
+                : "This will permanently delete this delivery. This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-slate-700 border-slate-600 text-white hover:bg-slate-600">
+              Go Back
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmAction?.type === "complete" && confirmAction.batchId) {
+                  setBatchStatusMutation.mutate({ batchId: confirmAction.batchId, status: "complete" });
+                } else if (confirmAction?.type === "cancel" && confirmAction.batchId) {
+                  setBatchStatusMutation.mutate({ batchId: confirmAction.batchId, status: "cancelled" });
+                } else if (confirmAction?.type === "delete" && confirmAction.deliveryId) {
+                  deleteDeliveryMutation.mutate(confirmAction.deliveryId);
+                }
+                setConfirmAction(null);
+              }}
+              className={confirmAction?.type === "complete" 
+                ? "bg-green-600 hover:bg-green-700 text-white" 
+                : "bg-red-600 hover:bg-red-700 text-white"}
+            >
+              {confirmAction?.type === "complete" ? "Complete Batch" : 
+               confirmAction?.type === "cancel" ? "Cancel Batch" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
