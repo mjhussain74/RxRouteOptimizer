@@ -1,12 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X } from "lucide-react";
+import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X, QrCode, ScanLine, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Checkbox } from "./ui/checkbox";
+import { Html5Qrcode } from "html5-qrcode";
 
 interface DeliveryZone {
   id: number;
@@ -53,6 +54,12 @@ export default function RouteOptimizer({
   const [selectedZoneId, setSelectedZoneId] = useState<number | null>(null);
   const [selectedDeliveryIds, setSelectedDeliveryIds] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
+  const [scannedRxNumbers, setScannedRxNumbers] = useState<Set<string>>(new Set());
+  const [isScannerActive, setIsScannerActive] = useState(false);
+  const [manualRxInput, setManualRxInput] = useState("");
+  const [lastScannedRx, setLastScannedRx] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
   const queryClient = useQueryClient();
 
   const { data: zones = [] } = useQuery<DeliveryZone[]>({
@@ -87,6 +94,72 @@ export default function RouteOptimizer({
       return delivery?.priority === "urgent";
     }).length;
   }, [selectedDeliveryIds, activeDeliveries]);
+
+  // Auto-select orders when their RX is scanned
+  useEffect(() => {
+    if (lastScannedRx) {
+      const matchingDelivery = activeDeliveries.find(
+        d => d.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()
+      );
+      if (matchingDelivery) {
+        setSelectedDeliveryIds(prev => new Set([...prev, matchingDelivery.id]));
+        setScanError(null);
+      } else {
+        setScanError(`RX ${lastScannedRx} not found in active orders`);
+      }
+      setLastScannedRx(null);
+    }
+  }, [lastScannedRx, activeDeliveries]);
+
+  // Cleanup scanner on unmount
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {});
+      }
+    };
+  }, []);
+
+  const startScanner = async () => {
+    try {
+      setScanError(null);
+      const html5Qrcode = new Html5Qrcode("rx-scanner");
+      scannerRef.current = html5Qrcode;
+      
+      await html5Qrcode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 100 } },
+        (decodedText) => {
+          // Add to scanned set and trigger auto-select
+          const rxNumber = decodedText.trim();
+          setScannedRxNumbers(prev => new Set([...prev, rxNumber]));
+          setLastScannedRx(rxNumber);
+        },
+        () => {} // Ignore scan failures
+      );
+      
+      setIsScannerActive(true);
+    } catch (err) {
+      console.error("Scanner error:", err);
+      setScanError("Could not start camera. Please check permissions.");
+    }
+  };
+
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      await scannerRef.current.stop();
+      scannerRef.current = null;
+    }
+    setIsScannerActive(false);
+  };
+
+  const handleManualRxAdd = () => {
+    if (!manualRxInput.trim()) return;
+    const rxNumber = manualRxInput.trim();
+    setScannedRxNumbers(prev => new Set([...prev, rxNumber]));
+    setLastScannedRx(rxNumber);
+    setManualRxInput("");
+  };
 
   const optimizeMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -154,8 +227,14 @@ export default function RouteOptimizer({
 
   const selectAllVisible = () => {
     const newSet = new Set(selectedDeliveryIds);
-    filteredDeliveries.forEach(d => newSet.add(d.id));
+    filteredDeliveries
+      .filter(d => d.rxNumber && scannedRxNumbers.has(d.rxNumber))
+      .forEach(d => newSet.add(d.id));
     setSelectedDeliveryIds(newSet);
+  };
+
+  const isDeliveryScanned = (delivery: Delivery) => {
+    return delivery.rxNumber ? scannedRxNumbers.has(delivery.rxNumber) : false;
   };
 
   const clearSelection = () => {
@@ -170,6 +249,107 @@ export default function RouteOptimizer({
           Select orders from active deliveries and generate an optimized route.
         </p>
       </div>
+
+      <Card className="bg-slate-800/50 border-slate-700 mb-6">
+        <CardHeader>
+          <CardTitle className="text-white flex items-center gap-2">
+            <ScanLine className="h-5 w-5 text-green-400" />
+            Scan RX Barcodes to Add Orders
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-slate-400 text-sm mb-4">
+            Scan the RX barcode on each package to add it to the route. Only scanned orders will be included.
+          </p>
+          
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div>
+              <div id="rx-scanner" className={`w-full h-48 bg-slate-900 rounded-lg overflow-hidden ${!isScannerActive ? 'flex items-center justify-center' : ''}`}>
+                {!isScannerActive && (
+                  <div className="text-center">
+                    <QrCode className="h-12 w-12 text-slate-600 mx-auto mb-2" />
+                    <p className="text-slate-500 text-sm">Camera inactive</p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex gap-2 mt-3">
+                {!isScannerActive ? (
+                  <Button onClick={startScanner} className="flex-1 bg-green-600 hover:bg-green-700">
+                    <ScanLine className="h-4 w-4 mr-2" />
+                    Start Scanner
+                  </Button>
+                ) : (
+                  <Button onClick={stopScanner} variant="outline" className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-700">
+                    <X className="h-4 w-4 mr-2" />
+                    Stop Scanner
+                  </Button>
+                )}
+              </div>
+            </div>
+            
+            <div>
+              <Label className="text-slate-300">Or enter RX number manually:</Label>
+              <div className="flex gap-2 mt-1">
+                <Input
+                  placeholder="Enter RX number..."
+                  value={manualRxInput}
+                  onChange={(e) => setManualRxInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleManualRxAdd()}
+                  className="bg-slate-900/50 border-slate-600 text-white"
+                />
+                <Button onClick={handleManualRxAdd} disabled={!manualRxInput.trim()} className="bg-blue-600 hover:bg-blue-700">
+                  Add
+                </Button>
+              </div>
+              
+              {scanError && (
+                <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  {scanError}
+                </div>
+              )}
+              
+              <div className="mt-4">
+                <p className="text-slate-400 text-xs mb-2">Scanned RX Numbers ({scannedRxNumbers.size}):</p>
+                {scannedRxNumbers.size === 0 ? (
+                  <p className="text-slate-500 text-sm">No packages scanned yet</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                    {Array.from(scannedRxNumbers).map((rx) => (
+                      <span key={rx} className="inline-flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-400 rounded text-xs font-mono group">
+                        <Check className="h-3 w-3" />
+                        {rx}
+                        <button 
+                          onClick={() => {
+                            setScannedRxNumbers(prev => {
+                              const newSet = new Set(prev);
+                              newSet.delete(rx);
+                              return newSet;
+                            });
+                            // Also deselect any delivery with this RX
+                            const delivery = activeDeliveries.find(d => d.rxNumber === rx);
+                            if (delivery) {
+                              setSelectedDeliveryIds(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(delivery.id);
+                                return newSet;
+                              });
+                            }
+                          }}
+                          className="ml-1 opacity-50 hover:opacity-100 text-red-400"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="bg-slate-800/50 border-slate-700 lg:col-span-1">
@@ -324,9 +504,10 @@ export default function RouteOptimizer({
                   variant="outline"
                   size="sm"
                   onClick={selectAllVisible}
+                  disabled={scannedRxNumbers.size === 0}
                   className="border-slate-600 text-slate-300 hover:bg-slate-700"
                 >
-                  Select All
+                  Select All Scanned
                 </Button>
                 {selectedDeliveryIds.size > 0 && (
                   <Button
@@ -367,43 +548,56 @@ export default function RouteOptimizer({
               </div>
             ) : (
               <div className="max-h-[500px] overflow-y-auto space-y-2">
-                {filteredDeliveries.map((delivery) => (
-                  <div
-                    key={delivery.id}
-                    onClick={() => toggleDeliverySelection(delivery.id)}
-                    className={`flex items-start gap-3 rounded-lg p-3 cursor-pointer transition-colors ${
-                      selectedDeliveryIds.has(delivery.id)
-                        ? "bg-blue-500/20 border border-blue-500/50"
-                        : "bg-slate-900/30 hover:bg-slate-900/50 border border-transparent"
-                    } ${delivery.priority === "urgent" ? "border-l-4 border-l-red-500" : ""}`}
-                  >
-                    <Checkbox
-                      checked={selectedDeliveryIds.has(delivery.id)}
-                      onCheckedChange={() => toggleDeliverySelection(delivery.id)}
-                      className="mt-1"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-white text-sm truncate">{delivery.addressText}</p>
-                        {delivery.priority === "urgent" && (
-                          <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" />
-                            Urgent
-                          </span>
-                        )}
+                {filteredDeliveries.map((delivery) => {
+                  const isScanned = isDeliveryScanned(delivery);
+                  return (
+                    <div
+                      key={delivery.id}
+                      onClick={() => isScanned && toggleDeliverySelection(delivery.id)}
+                      className={`flex items-start gap-3 rounded-lg p-3 transition-colors ${
+                        !isScanned 
+                          ? "bg-slate-900/20 opacity-50 cursor-not-allowed border border-slate-700/50"
+                          : selectedDeliveryIds.has(delivery.id)
+                          ? "bg-blue-500/20 border border-blue-500/50 cursor-pointer"
+                          : "bg-slate-900/30 hover:bg-slate-900/50 border border-transparent cursor-pointer"
+                      } ${delivery.priority === "urgent" ? "border-l-4 border-l-red-500" : ""}`}
+                    >
+                      <Checkbox
+                        checked={selectedDeliveryIds.has(delivery.id)}
+                        onCheckedChange={() => isScanned && toggleDeliverySelection(delivery.id)}
+                        disabled={!isScanned}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-white text-sm truncate">{delivery.addressText}</p>
+                          {delivery.priority === "urgent" && (
+                            <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              Urgent
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2 mt-1">
+                          {delivery.customerName && (
+                            <p className="text-slate-500 text-xs">{delivery.customerName}</p>
+                          )}
+                          {delivery.rxNumber && (
+                            <p className={`text-xs font-mono ${isScanned ? 'text-green-400' : 'text-slate-500'}`}>
+                              RX: {delivery.rxNumber}
+                              {isScanned && <Check className="h-3 w-3 inline ml-1" />}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex gap-2 mt-1">
-                        {delivery.customerName && (
-                          <p className="text-slate-500 text-xs">{delivery.customerName}</p>
-                        )}
-                        {delivery.rxNumber && (
-                          <p className="text-blue-400 text-xs font-mono">RX: {delivery.rxNumber}</p>
-                        )}
-                      </div>
+                      {isScanned ? (
+                        <CheckCircle className="h-4 w-4 text-green-400 flex-shrink-0" />
+                      ) : (
+                        <QrCode className="h-4 w-4 text-slate-500 flex-shrink-0" />
+                      )}
                     </div>
-                    <CheckCircle className="h-4 w-4 text-green-400 flex-shrink-0" />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>

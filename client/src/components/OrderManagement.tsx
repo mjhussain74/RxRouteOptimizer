@@ -681,10 +681,11 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
                 />
               </div>
               <div>
-                <Label className="text-slate-300">RX Number</Label>
+                <Label className="text-slate-300">RX Number <span className="text-red-400">*</span></Label>
                 <Input
                   value={newDelivery.rxNumber}
                   onChange={(e) => setNewDelivery({ ...newDelivery, rxNumber: e.target.value })}
+                  placeholder="Required"
                   className="bg-slate-700 border-slate-600 text-white"
                 />
               </div>
@@ -708,7 +709,7 @@ export default function OrderManagement({ batchId, onBatchCreated, onBatchSelect
             <Button
               onClick={() => addDeliveryMutation.mutate(newDelivery)}
               className="w-full bg-blue-600 hover:bg-blue-700"
-              disabled={!newDelivery.addressText || addDeliveryMutation.isPending}
+              disabled={!newDelivery.addressText || !newDelivery.rxNumber || addDeliveryMutation.isPending}
             >
               {addDeliveryMutation.isPending ? "Adding..." : "Add Order"}
             </Button>

@@ -388,11 +388,25 @@ export async function registerRoutes(
       });
 
       const deliveries: any[] = [];
+      let skippedCount = 0;
+      const skippedReasons: string[] = [];
+      
       for (const row of parsed.data as any[]) {
         const addressText = row.address || row.Address || row.ADDRESS || 
                            `${row.street || ''} ${row.city || ''} ${row.state || ''} ${row.zip || ''}`.trim();
         
-        if (!addressText) continue;
+        if (!addressText) {
+          skippedCount++;
+          skippedReasons.push("Missing address");
+          continue;
+        }
+
+        const rxNumber = row.rx_number || row.rx_no || row.Rx_Number || row.RxNo || row.rxNumber || row.RX || row.rx || null;
+        if (!rxNumber) {
+          skippedCount++;
+          skippedReasons.push(`Missing RX number for address: ${addressText.substring(0, 30)}...`);
+          continue;
+        }
 
         const geocoded = await geocodeAddress(addressText);
         
@@ -403,7 +417,7 @@ export async function registerRoutes(
           lng: geocoded?.lng || null,
           customerName: row.customer_name || row.customerName || row.name || null,
           customerPhone: row.customer_phone || row.customerPhone || row.phone || null,
-          rxNumber: row.rx_number || row.rx_no || row.Rx_Number || row.RxNo || null,
+          rxNumber,
           notes: row.notes || row.Notes || null,
           priority: row.priority || "normal",
           status: geocoded ? "geocoded" : "pending"
@@ -420,7 +434,9 @@ export async function registerRoutes(
         batch,
         deliveries,
         geocodedCount: deliveries.filter(d => d.lat && d.lng).length,
-        totalCount: deliveries.length
+        totalCount: deliveries.length,
+        skippedCount,
+        skippedReasons: skippedReasons.slice(0, 5) // Limit to first 5 reasons
       });
     } catch (error) {
       console.error("Upload error:", error);
@@ -924,6 +940,12 @@ export async function registerRoutes(
 
   app.post("/api/deliveries", async (req, res) => {
     try {
+      if (!req.body.rxNumber) {
+        return res.status(400).json({ error: "RX number is required" });
+      }
+      if (!req.body.addressText) {
+        return res.status(400).json({ error: "Address is required" });
+      }
       const delivery = await storage.createDelivery(req.body);
       io.emit("delivery_created", delivery);
       res.json(delivery);
