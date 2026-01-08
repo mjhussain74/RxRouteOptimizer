@@ -121,28 +121,32 @@ export default function RouteOptimizer({
   }, []);
 
   const startScanner = async () => {
-    try {
-      setScanError(null);
-      const html5Qrcode = new Html5Qrcode("rx-scanner");
-      scannerRef.current = html5Qrcode;
-      
-      await html5Qrcode.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 100 } },
-        (decodedText) => {
-          // Add to scanned set and trigger auto-select
-          const rxNumber = decodedText.trim();
-          setScannedRxNumbers(prev => new Set([...prev, rxNumber]));
-          setLastScannedRx(rxNumber);
-        },
-        () => {} // Ignore scan failures
-      );
-      
-      setIsScannerActive(true);
-    } catch (err) {
-      console.error("Scanner error:", err);
-      setScanError("Could not start camera. Please check permissions.");
-    }
+    setScanError(null);
+    setIsScannerActive(true);
+    
+    // Use setTimeout to ensure DOM element is ready (same approach as DriverApp)
+    setTimeout(async () => {
+      try {
+        const html5Qrcode = new Html5Qrcode("rx-scanner");
+        scannerRef.current = html5Qrcode;
+        
+        await html5Qrcode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 100 } },
+          (decodedText) => {
+            // Add to scanned set and trigger auto-select
+            const rxNumber = decodedText.trim();
+            setScannedRxNumbers(prev => new Set([...prev, rxNumber]));
+            setLastScannedRx(rxNumber);
+          },
+          () => {} // Ignore scan failures
+        );
+      } catch (err) {
+        console.error("Scanner error:", err);
+        setScanError("Could not start camera. Please check permissions.");
+        setIsScannerActive(false);
+      }
+    }, 300);
   };
 
   const stopScanner = async () => {
