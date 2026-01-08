@@ -838,14 +838,65 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
 
       setExtractedText(text);
 
-      const rxMatch = text.match(/RX[:\s#]*(\d+)/i) || text.match(/(\d{7,})/);
-      const nameMatch = text.match(/(?:Patient|Name)[:\s]*([A-Za-z\s]+)/i);
-      const addressMatch = text.match(/(\d+\s+[A-Za-z\s]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Dr|Drive)[,.\s]+[A-Za-z\s]+[,.\s]+[A-Z]{2}[,.\s]+\d{5})/i);
+      // Parse RX number - look for RX followed by numbers, or standalone 7+ digit numbers
+      const rxMatch = text.match(/RX[:\s#-]*(\d+)/i) || text.match(/Rx\s*#?\s*(\d{6,})/i) || text.match(/(\d{7,})/);
+
+      // Parse patient name - try multiple patterns
+      let patientName = "";
+      const namePatterns = [
+        /(?:Patient|Name|PT)[:\s]+([A-Za-z]+[,\s]+[A-Za-z]+)/i,
+        /(?:Patient|Name|PT)[:\s]+([A-Za-z\s]{3,30})/i,
+        /^([A-Z][a-z]+[,\s]+[A-Z][a-z]+)/m,
+      ];
+      for (const pattern of namePatterns) {
+        const match = text.match(pattern);
+        if (match?.[1]) {
+          patientName = match[1].trim();
+          break;
+        }
+      }
+
+      // Parse address - handle multi-line addresses
+      let fullAddress = "";
+      
+      // Try to find complete address on one line first
+      const singleLineMatch = text.match(/(\d+\s+[A-Za-z0-9\s]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Ct|Court|Way|Pl|Place)[.,]?\s*[A-Za-z\s]+[,.\s]+[A-Z]{2}[,.\s]+\d{5}(?:-\d{4})?)/i);
+      
+      if (singleLineMatch) {
+        fullAddress = singleLineMatch[1];
+      } else {
+        // Try to extract address components separately
+        const streetMatch = text.match(/(\d+\s+[A-Za-z0-9\s]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Ct|Court|Way|Pl|Place)\.?)/i);
+        const cityStateZipMatch = text.match(/([A-Za-z\s]+)[,.\s]+([A-Z]{2})[,.\s]+(\d{5}(?:-\d{4})?)/i);
+        const zipMatch = text.match(/\b(\d{5}(?:-\d{4})?)\b/);
+        const stateMatch = text.match(/\b(MI|OH|IN|IL|WI|NY|CA|TX|FL|PA|AZ|GA|NC|NJ|VA|WA|MA|TN|MD|MN|MO|CO|AL|SC|LA|KY|OR|OK|CT|IA|MS|AR|KS|UT|NV|NM|WV|NE|ID|HI|NH|ME|MT|RI|DE|SD|ND|AK|VT|WY|DC)\b/);
+        
+        if (streetMatch) {
+          fullAddress = streetMatch[1].trim();
+          
+          if (cityStateZipMatch) {
+            const city = cityStateZipMatch[1].trim();
+            const state = cityStateZipMatch[2];
+            const zip = cityStateZipMatch[3];
+            fullAddress += `, ${city}, ${state} ${zip}`;
+          } else {
+            // Try to piece together from separate matches
+            const cityMatch = text.match(/\b(Hamtramck|Detroit|Warren|Troy|Sterling Heights|Dearborn|Livonia|Ann Arbor|Flint|Grand Rapids|Lansing|Clinton Township|Canton|Farmington|Southfield|Royal Oak|Westland|Pontiac|Taylor|St\. Clair Shores)\b/i);
+            if (cityMatch && stateMatch && zipMatch) {
+              fullAddress += `, ${cityMatch[1]}, ${stateMatch[1]} ${zipMatch[1]}`;
+            } else if (stateMatch && zipMatch) {
+              fullAddress += `, ${stateMatch[1]} ${zipMatch[1]}`;
+            } else if (zipMatch) {
+              fullAddress += `, MI ${zipMatch[1]}`;
+            }
+          }
+        }
+      }
 
       onComplete({
         rxNumber: rxMatch?.[1] || "",
-        patientName: nameMatch?.[1]?.trim() || "",
-        address: addressMatch?.[1] || "",
+        patientName: patientName,
+        address: fullAddress,
       });
     } catch (err) {
       setError("Failed to process image. Please try again.");
