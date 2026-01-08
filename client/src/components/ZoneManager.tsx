@@ -99,10 +99,10 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
           setNewZone(prev => ({ ...prev, centerLat: data.lat, centerLng: data.lng }));
         }
       } else {
-        setSearchError("Zip code not found");
+        setSearchError("Location not found");
       }
     } catch (error) {
-      console.error("Zip code search error:", error);
+      console.error("Location search error:", error);
       setSearchError("Could not find location");
     } finally {
       setIsSearching(false);
@@ -219,7 +219,7 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input
-                  placeholder="Enter zip code to focus map..."
+                  placeholder="Enter zip code or city name..."
                   value={zipCodeSearch}
                   onChange={(e) => {
                     setZipCodeSearch(e.target.value);
