@@ -127,6 +127,14 @@ address,customer_name,customer_phone,rx_number,notes
   - Implemented urgent priority system with automatic route reordering
   - Added ReportGenerator with PDF/CSV export functionality
   - Added new database tables: pharmacies, delivery_zones, driver_zones, ocr_logs
+- Delivery-prescription consolidation (2026-01-09):
+  - New prescriptions table with one-to-many relationship to deliveries
+  - Address normalization with SHA256 hashing for consistent address matching
+  - Deliveries now consolidate multiple prescriptions by normalized address
+  - Delivery ID generation (DEL-YYYY-NNNNNN format)
+  - DriverApp barcode verification supports multiple prescriptions per delivery
+  - Enhanced ReportGenerator with delivery-level and prescription-level views
+  - Added split/merge delivery functionality for manual override capabilities
 
 ## User Preferences
 - Dark theme UI preferred
