@@ -1,0 +1,200 @@
+1. Objective
+The pharmacy delivery application shall enable the consolidation of multiple prescriptions (Rx)—including prescriptions for multiple patients residing at the same address—into a single delivery package. Each consolidated delivery shall be identified by a unique Delivery ID, while preserving full visibility, reporting, and auditability of each individual prescription associated with that delivery.
+________________________________________
+2. Data Input Requirements
+2.1 Supported File Formats
+The Order Management page shall accept the following file formats for bulk delivery ingestion:
+•	Microsoft Excel (.xlsx)
+•	Comma-Separated Values (.csv)
+________________________________________
+2.2 Required Data Columns
+Uploaded files must contain the following required columns:
+Field Name	Description
+rxno	Prescription number
+patientname	Patient full name
+patientaddress	Street address
+patcity	City
+patstate	State
+patzip	ZIP code
+patphone	Patient phone number
+delivery	Delivery flag (Yes/No or equivalent)
+Records missing required fields shall be flagged for review.
+________________________________________
+3. Delivery Grouping Logic
+3.1 Address Normalization
+Prior to delivery grouping, the system shall normalize address data to ensure accurate and consistent matching. Address normalization shall include, at minimum:
+•	Trimming leading and trailing whitespace
+•	Standardizing letter casing
+•	Normalizing common address abbreviations (e.g., “St” → “Street”, “Ave” → “Avenue”)
+•	Constructing a canonical address key using the following fields:
+patientaddress + patcity + patstate + patzip
+________________________________________
+3.2 Delivery Grouping Rules
+•	The system shall group all prescriptions marked for delivery by their normalized address.
+•	A single Delivery ID shall be generated for each unique normalized address.
+•	Delivery grouping shall not depend on patient name.
+This logic shall support the following scenarios:
+•	One patient with multiple prescriptions → one delivery
+•	Multiple patients at the same address → one delivery
+•	Multiple prescriptions across multiple patients → one delivery package
+________________________________________
+3.3 Delivery ID Generation
+•	For each grouped delivery address, the system shall generate a unique Delivery ID.
+•	Delivery IDs must be unique within their defined scope (see Section 11).
+•	Once created, a Delivery ID shall be immutable.
+Delivery ID format is implementation-dependent and may include:
+•	Sequential IDs (e.g., DEL-2026-000123)
+•	Universally Unique Identifiers (UUIDs)
+•	Hash-based identifiers
+________________________________________
+4. Prescription-to-Delivery Mapping
+4.1 Prescription Association
+•	Each prescription record shall be associated with exactly one Delivery ID.
+•	The system shall support a one-to-many relationship:
+Delivery ID → Multiple Rx Numbers
+________________________________________
+4.2 Data Persistence
+The system shall persist the following information:
+•	Delivery ID
+•	Delivery address details
+•	Associated prescription numbers
+•	Associated patient names (for reporting purposes)
+•	Delivery status and timestamps
+________________________________________
+5. Routing Requirements
+5.1 Routing Unit
+•	The routing engine shall operate exclusively on Delivery IDs.
+•	Each Delivery ID shall represent:
+o	One physical delivery stop
+o	One delivery package
+________________________________________
+5.2 Route Optimization
+•	Routes shall be generated using:
+o	The delivery address associated with each Delivery ID
+o	Google Maps API or an equivalent routing service
+•	Multiple prescriptions associated with the same Delivery ID shall never result in multiple route stops.
+________________________________________
+6. Driver Application Requirements
+6.1 Delivery Identification
+The driver application shall display, for each assigned delivery:
+•	Delivery ID
+•	Delivery address
+•	List of associated prescription numbers
+•	Patient names (optional and configurable)
+________________________________________
+6.2 Proof of Delivery
+•	Proof of delivery (e.g., signature capture, photo, barcode scan) shall be collected once per Delivery ID.
+•	Proof of delivery shall apply to all prescriptions associated with that Delivery ID.
+________________________________________
+7. Reporting and Audit Requirements
+7.1 Delivery-Level Reporting
+The system shall support delivery-level reports that include:
+•	Delivery ID
+•	Delivery date
+•	Delivery status
+•	Delivery address
+•	Number of prescriptions included
+________________________________________
+7.2 Prescription-Level Reporting
+The system shall support prescription-level reports that include:
+•	Prescription number
+•	Associated Delivery ID
+•	Patient name
+•	Delivery status and delivery timestamp
+________________________________________
+8. Exception Handling
+8.1 Address Validation Errors
+If delivery address data is incomplete, invalid, or ambiguous:
+•	The system shall flag the record
+•	Automatic delivery grouping shall be suspended
+•	Manual review shall be required before proceeding
+________________________________________
+8.2 Manual Overrides
+Authorized users shall be able to:
+•	Split a Delivery ID into multiple deliveries
+•	Merge deliveries associated with the same address
+•	Reassign prescriptions to a different Delivery ID
+All manual overrides shall be fully audit-logged.
+________________________________________
+11. Delivery ID Scope and Uniqueness
+11.1 Pharmacy-Scoped Delivery IDs
+•	Delivery IDs shall be unique per pharmacy and per order batch.
+•	A Delivery ID shall only be valid within the context of:
+o	A single pharmacy
+o	A single order upload or order creation session
+Clarifications
+•	If the same address appears in:
+o	Multiple uploads, or
+o	Uploads occurring on different dates or times
+→ the system shall generate a new Delivery ID.
+•	Delivery IDs shall not be reused across:
+o	Different pharmacies
+o	Different order batches
+o	Different upload sessions
+________________________________________
+11.2 Order Batch Definition
+An Order Batch is defined as:
+•	A single CSV or Excel file upload, or
+•	A single manual or scan-based delivery creation session
+Each order batch shall:
+•	Have a unique batch identifier
+•	Serve as the scope within which Delivery IDs are generated
+________________________________________
+12. Manual and Scan-Based Delivery Creation
+12.1 Delivery Creation Methods
+The system shall support delivery creation using:
+1.	File upload (CSV or Excel)
+2.	Rx label barcode or OCR scanning
+3.	Manual data entry via a user interface
+All creation methods shall follow the same address normalization and delivery grouping rules.
+________________________________________
+12.2 Rx Label Scan Workflow
+When an Rx label is scanned:
+•	The system shall extract, when available:
+o	Prescription number
+o	Patient name
+o	Street address
+o	City, State, ZIP
+o	Phone number
+•	The extracted address shall be normalized using the same rules defined in Section 3.1.
+________________________________________
+12.3 Manual Entry Workflow
+When a user manually enters delivery data:
+•	The following fields shall be required:
+o	Prescription number
+o	Patient name
+o	Full delivery address
+•	Address normalization shall occur before delivery matching.
+________________________________________
+12.4 Dynamic Delivery ID Matching
+After scanning or manual entry, the system shall check for an existing Delivery ID that matches:
+•	The same pharmacy
+•	The same active order batch
+•	The same normalized address
+Matching outcomes:
+Case 1: Matching Delivery Exists
+•	The prescription shall be added to the existing Delivery ID
+•	No new Delivery ID shall be created
+Case 2: No Matching Delivery Exists
+•	A new Delivery ID shall be generated
+•	The prescription shall be associated with the new Delivery ID
+________________________________________
+12.5 Real-Time Delivery Consolidation
+The system shall support real-time consolidation, such that:
+•	File uploads, scans, and manual entries may occur in any order
+•	Deliveries for the same normalized address within an order batch are automatically merged as data is added
+________________________________________
+13. Data Integrity and Audit Controls
+13.1 Change Tracking
+The system shall log:
+•	Delivery ID creation timestamp
+•	Method of prescription entry (upload, scan, manual)
+•	User responsible for the action
+•	Timestamp of each prescription addition or modification
+________________________________________
+13.2 Conflict Resolution
+If address data is ambiguous or partially missing:
+•	The system shall flag the entry
+•	The user shall be prompted to:
+o	Confirm association with an existing Delivery ID, or
+o	Create a new delivery
