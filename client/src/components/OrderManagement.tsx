@@ -1060,14 +1060,17 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
     setCameraActive(false);
   };
 
-  // OCR IMPROVEMENT: image preprocessing
+  // OCR IMPROVEMENT: image preprocessing - convert to grayscale with contrast boost
   const preprocess = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
     const img = ctx.getImageData(0, 0, w, h);
     const d = img.data;
     for (let i = 0; i < d.length; i += 4) {
+      // Convert to grayscale
       const gray = d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
-      const bw = gray > 145 ? 255 : 0;
-      d[i] = d[i + 1] = d[i + 2] = bw;
+      // Apply contrast enhancement instead of harsh binarization
+      const contrast = 1.5;
+      const enhanced = Math.min(255, Math.max(0, (gray - 128) * contrast + 128));
+      d[i] = d[i + 1] = d[i + 2] = enhanced;
     }
     ctx.putImageData(img, 0, 0);
   };
@@ -1092,23 +1095,28 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
 
     try {
       const Tesseract = await import("tesseract.js");
-      const worker = await Tesseract.createWorker("eng");
+      
+      // Create worker with explicit logger for debugging
+      const worker = await Tesseract.createWorker("eng", 1, {
+        logger: (m: any) => console.log('[Tesseract]', m),
+      });
 
+      // Use less restrictive parameters for better recognition
       await worker.setParameters({
-        tessedit_char_whitelist:
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#-/:,. ",
         preserve_interword_spaces: "1",
       });
 
+      console.log('[OCR] Starting recognition...');
       const result = await worker.recognize(canvas);
       await worker.terminate();
 
       const ocrData = result.data as any;
-      const text = ocrData.text;
-      setDebugText(text);
+      const text = ocrData.text || "";
+      console.log('[OCR] Raw text:', text);
+      setDebugText(text || "No text detected");
 
-      // Filter high-confidence words if available
-      const words = ocrData.words?.filter((w: any) => w.confidence > 70) || [];
+      // Use all text if no high-confidence words found
+      const words = ocrData.words?.filter((w: any) => w.confidence > 60) || [];
       const cleanText = words.length > 0 
         ? words.map((w: any) => w.text).join(" ")
         : text;
