@@ -156,13 +156,25 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       routeId: number;
       stopId: number;
     }) => {
-      // Barcode verification
-      if (
-        currentStop?.delivery?.rxNumber &&
-        scannedBarcode &&
-        scannedBarcode.trim() !== currentStop.delivery.rxNumber.trim()
-      ) {
-        throw new Error("Scanned barcode does not match prescription number");
+      // Barcode verification - check against prescriptions array or legacy rxNumber
+      if (scannedBarcode) {
+        const trimmedBarcode = scannedBarcode.trim().toLowerCase();
+        const delivery = currentStop?.delivery;
+        
+        // Check if barcode matches any prescription or legacy rxNumber
+        let barcodeValid = false;
+        
+        if (delivery?.prescriptions && delivery.prescriptions.length > 0) {
+          barcodeValid = delivery.prescriptions.some(
+            (rx: any) => rx.rxNumber?.toLowerCase() === trimmedBarcode
+          );
+        } else if (delivery?.rxNumber) {
+          barcodeValid = delivery.rxNumber.trim().toLowerCase() === trimmedBarcode;
+        }
+        
+        if (!barcodeValid && (delivery?.prescriptions?.length > 0 || delivery?.rxNumber)) {
+          throw new Error("Scanned barcode does not match any prescription number for this delivery");
+        }
       }
 
       const response = await fetch(
@@ -700,12 +712,32 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                           {currentStop.delivery.customerName}
                         </p>
                       )}
-                      {currentStop.delivery?.rxNumber && (
-                        <p className="text-blue-400 text-sm font-mono">
-                          RX: {currentStop.delivery.rxNumber}
-                        </p>
+                      {currentStop.delivery?.deliveryIdentifier && (
+                        <span className="text-blue-400 text-sm font-medium">
+                          {currentStop.delivery.deliveryIdentifier}
+                        </span>
                       )}
                     </div>
+                    {/* Show prescriptions */}
+                    {currentStop.delivery?.prescriptions && currentStop.delivery.prescriptions.length > 0 ? (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-slate-500 text-xs font-medium">Prescriptions:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {currentStop.delivery.prescriptions.map((rx: any) => (
+                            <span
+                              key={rx.id}
+                              className="inline-flex items-center px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono"
+                            >
+                              {rx.rxNumber}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : currentStop.delivery?.rxNumber ? (
+                      <p className="text-blue-400 text-sm font-mono mt-1">
+                        RX: {currentStop.delivery.rxNumber}
+                      </p>
+                    ) : null}
                   </div>
 
                   <div className="flex gap-2">
@@ -966,7 +998,9 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                           Scan Barcode (Rx Number)
                         </Label>
                         <span className="text-xs font-mono text-blue-400">
-                          {currentStop?.delivery?.rxNumber || "N/A"}
+                          {currentStop?.delivery?.prescriptions && currentStop.delivery.prescriptions.length > 0 
+                            ? currentStop.delivery.prescriptions.map((rx: any) => rx.rxNumber).join(", ")
+                            : currentStop?.delivery?.rxNumber || "N/A"}
                         </span>
                       </div>
 

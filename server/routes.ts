@@ -4,6 +4,7 @@ import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
 import Papa from "papaparse";
 import { storage } from "./storage";
+import { normalizeAddress, generateDeliveryIdentifier } from "../shared/addressUtils";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -388,44 +389,103 @@ export async function registerRoutes(
       });
 
       const deliveries: any[] = [];
+      const prescriptions: any[] = [];
       let skippedCount = 0;
       const skippedReasons: string[] = [];
       
+      // Map to track deliveries by normalized address hash
+      const addressDeliveryMap = new Map<string, any>();
+      
       for (const row of parsed.data as any[]) {
-        const addressText = row.address || row.Address || row.ADDRESS || 
-                           `${row.street || ''} ${row.city || ''} ${row.state || ''} ${row.zip || ''}`.trim();
+        // Support both old format (address column) and new format (separate address fields)
+        const streetAddress = row.patientaddress || row.street || row.Street || '';
+        const city = row.patcity || row.city || row.City || '';
+        const state = row.patstate || row.state || row.State || '';
+        const zipCode = row.patzip || row.zip || row.Zip || row.zipcode || '';
         
-        if (!addressText) {
+        // Check if we have component address fields or a full address
+        let addressText: string;
+        let normalizedData: { streetAddress: string; city: string; state: string; zipCode: string; normalizedHash: string; fullAddress: string } | null = null;
+        
+        if (streetAddress && city && state) {
+          // New format with separate fields
+          normalizedData = normalizeAddress(streetAddress, city, state, zipCode);
+          addressText = normalizedData.fullAddress;
+        } else {
+          // Old format with single address column
+          addressText = row.address || row.Address || row.ADDRESS || '';
+        }
+        
+        if (!addressText || addressText.trim() === '') {
           skippedCount++;
           skippedReasons.push("Missing address");
           continue;
         }
 
-        const rxNumber = row.rx_number || row.rx_no || row.Rx_Number || row.RxNo || row.rxNumber || row.RX || row.rx || null;
+        // Get RX number (required field)
+        const rxNumber = row.rxno || row.rx_number || row.rx_no || row.Rx_Number || row.RxNo || row.rxNumber || row.RX || row.rx || null;
         if (!rxNumber) {
           skippedCount++;
           skippedReasons.push(`Missing RX number for address: ${addressText.substring(0, 30)}...`);
           continue;
         }
 
-        const geocoded = await geocodeAddress(addressText);
+        // Get customer info
+        const customerName = row.patientname || row.customer_name || row.customerName || row.name || null;
+        const customerPhone = row.patphone || row.customer_phone || row.customerPhone || row.phone || null;
+        const notes = row.delivery || row.notes || row.Notes || null;
         
-        const delivery = await storage.createDelivery({
+        // Check if we already have a delivery for this address (address consolidation)
+        let delivery: any;
+        const addressKey = normalizedData?.normalizedHash || addressText.toLowerCase().trim();
+        
+        if (addressDeliveryMap.has(addressKey)) {
+          // Use existing delivery
+          delivery = addressDeliveryMap.get(addressKey);
+        } else {
+          // Create new delivery
+          const geocoded = await geocodeAddress(addressText);
+          const sequence = await storage.getNextDeliverySequence(batch.id);
+          const deliveryIdentifier = generateDeliveryIdentifier(batch.id, sequence);
+          
+          delivery = await storage.createDelivery({
+            batchId: batch.id,
+            deliveryIdentifier,
+            addressText,
+            streetAddress: normalizedData?.streetAddress || null,
+            city: normalizedData?.city || null,
+            state: normalizedData?.state || null,
+            zipCode: normalizedData?.zipCode || null,
+            normalizedAddressHash: normalizedData?.normalizedHash || null,
+            lat: geocoded?.lat || null,
+            lng: geocoded?.lng || null,
+            customerName,
+            customerPhone,
+            rxNumber: null, // No longer storing single RX on delivery
+            notes,
+            priority: row.priority || "normal",
+            status: geocoded ? "geocoded" : "pending"
+          });
+          
+          deliveries.push(delivery);
+          addressDeliveryMap.set(addressKey, delivery);
+          
+          // Small delay to avoid rate limiting on geocoding
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // Create prescription linked to delivery
+        const prescription = await storage.createPrescription({
+          deliveryId: delivery.id,
           batchId: batch.id,
-          addressText,
-          lat: geocoded?.lat || null,
-          lng: geocoded?.lng || null,
-          customerName: row.customer_name || row.customerName || row.name || null,
-          customerPhone: row.customer_phone || row.customerPhone || row.phone || null,
           rxNumber,
-          notes: row.notes || row.Notes || null,
-          priority: row.priority || "normal",
-          status: geocoded ? "geocoded" : "pending"
+          patientName: customerName,
+          patientPhone: customerPhone,
+          notes,
+          entryMethod: "upload"
         });
-
-        deliveries.push(delivery);
-
-        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        prescriptions.push(prescription);
       }
 
       await storage.updateBatchStatus(batch.id, "ready");
@@ -433,10 +493,12 @@ export async function registerRoutes(
       res.json({
         batch,
         deliveries,
-        geocodedCount: deliveries.filter(d => d.lat && d.lng).length,
-        totalCount: deliveries.length,
+        prescriptions,
+        geocodedCount: deliveries.filter((d: any) => d.lat && d.lng).length,
+        totalDeliveries: deliveries.length,
+        totalPrescriptions: prescriptions.length,
         skippedCount,
-        skippedReasons: skippedReasons.slice(0, 5) // Limit to first 5 reasons
+        skippedReasons: skippedReasons.slice(0, 5)
       });
     } catch (error) {
       console.error("Upload error:", error);
@@ -451,9 +513,79 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Batch not found" });
       }
       const deliveries = await storage.getDeliveriesByBatch(batch.id);
-      res.json({ batch, deliveries });
+      const prescriptions = await storage.getPrescriptionsByBatch(batch.id);
+      
+      // Attach prescriptions to their respective deliveries
+      const deliveriesWithPrescriptions = deliveries.map(delivery => ({
+        ...delivery,
+        prescriptions: prescriptions.filter(p => p.deliveryId === delivery.id)
+      }));
+      
+      res.json({ batch, deliveries: deliveriesWithPrescriptions, prescriptions });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch batch" });
+    }
+  });
+  
+  // Prescription endpoints
+  app.get("/api/prescriptions/batch/:batchId", async (req, res) => {
+    try {
+      const prescriptions = await storage.getPrescriptionsByBatch(parseInt(req.params.batchId));
+      res.json(prescriptions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch prescriptions" });
+    }
+  });
+  
+  app.get("/api/prescriptions/delivery/:deliveryId", async (req, res) => {
+    try {
+      const prescriptions = await storage.getPrescriptionsByDelivery(parseInt(req.params.deliveryId));
+      res.json(prescriptions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch prescriptions" });
+    }
+  });
+  
+  app.post("/api/prescriptions", async (req, res) => {
+    try {
+      if (!req.body.rxNumber) {
+        return res.status(400).json({ error: "RX number is required" });
+      }
+      if (!req.body.deliveryId) {
+        return res.status(400).json({ error: "Delivery ID is required" });
+      }
+      const prescription = await storage.createPrescription(req.body);
+      io.emit("prescription_created", prescription);
+      res.json(prescription);
+    } catch (error) {
+      console.error("Create prescription error:", error);
+      res.status(500).json({ error: "Failed to create prescription" });
+    }
+  });
+  
+  app.put("/api/prescriptions/:id", async (req, res) => {
+    try {
+      const prescription = await storage.updatePrescription(parseInt(req.params.id), req.body);
+      if (!prescription) {
+        return res.status(404).json({ error: "Prescription not found" });
+      }
+      io.emit("prescription_updated", prescription);
+      res.json(prescription);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update prescription" });
+    }
+  });
+  
+  app.delete("/api/prescriptions/:id", async (req, res) => {
+    try {
+      const success = await storage.deletePrescription(parseInt(req.params.id));
+      if (!success) {
+        return res.status(404).json({ error: "Prescription not found" });
+      }
+      io.emit("prescription_deleted", { id: parseInt(req.params.id) });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete prescription" });
     }
   });
 
@@ -497,10 +629,20 @@ export async function registerRoutes(
       const batch = route.batchId ? await storage.getBatch(route.batchId) : null;
       const deliveries = batch ? await storage.getDeliveriesByBatch(batch.id) : [];
       
-      const stopsWithDeliveries = stops.map(stop => ({
-        ...stop,
-        delivery: deliveries.find(d => d.id === stop.deliveryId)
-      }));
+      // Attach prescriptions to each delivery
+      const stopsWithDeliveries = await Promise.all(
+        stops.map(async (stop) => {
+          const delivery = deliveries.find(d => d.id === stop.deliveryId);
+          if (delivery) {
+            const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
+            return {
+              ...stop,
+              delivery: { ...delivery, prescriptions }
+            };
+          }
+          return { ...stop, delivery: null };
+        })
+      );
 
       res.json({ route, stops: stopsWithDeliveries });
     } catch (error) {
@@ -696,10 +838,20 @@ export async function registerRoutes(
       const batch = route.batchId ? await storage.getBatch(route.batchId) : null;
       const deliveries = batch ? await storage.getDeliveriesByBatch(batch.id) : [];
 
-      const stopsWithDeliveries = stops.map(stop => ({
-        ...stop,
-        delivery: deliveries.find(d => d.id === stop.deliveryId)
-      }));
+      // Attach prescriptions to each delivery
+      const stopsWithDeliveries = await Promise.all(
+        stops.map(async (stop) => {
+          const delivery = deliveries.find(d => d.id === stop.deliveryId);
+          if (delivery) {
+            const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
+            return {
+              ...stop,
+              delivery: { ...delivery, prescriptions }
+            };
+          }
+          return { ...stop, delivery: null };
+        })
+      );
 
       const driverSocketId = driverSockets.get(route.driverId);
       if (driverSocketId) {
@@ -918,7 +1070,15 @@ export async function registerRoutes(
         activeDeliveries = await storage.getActiveDeliveries();
       }
       
-      res.json(activeDeliveries);
+      // Attach prescriptions to each delivery
+      const deliveriesWithPrescriptions = await Promise.all(
+        activeDeliveries.map(async (delivery) => {
+          const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
+          return { ...delivery, prescriptions };
+        })
+      );
+      
+      res.json(deliveriesWithPrescriptions);
     } catch (error) {
       console.error("Get active deliveries error:", error);
       res.status(500).json({ error: "Failed to get active deliveries" });
@@ -946,9 +1106,41 @@ export async function registerRoutes(
       if (!req.body.addressText) {
         return res.status(400).json({ error: "Address is required" });
       }
-      const delivery = await storage.createDelivery(req.body);
-      io.emit("delivery_created", delivery);
-      res.json(delivery);
+      
+      // Generate delivery identifier
+      const batchId = req.body.batchId;
+      let deliveryIdentifier = null;
+      if (batchId) {
+        const sequence = await storage.getNextDeliverySequence(batchId);
+        deliveryIdentifier = generateDeliveryIdentifier(batchId, sequence);
+      }
+      
+      // Create the delivery (rxNumber is stored on prescription, not delivery)
+      const { rxNumber, ...deliveryData } = req.body;
+      const delivery = await storage.createDelivery({
+        ...deliveryData,
+        deliveryIdentifier,
+        rxNumber: null // No longer storing RX on delivery directly
+      });
+      
+      // Create associated prescription
+      if (rxNumber) {
+        await storage.createPrescription({
+          deliveryId: delivery.id,
+          batchId: batchId || null,
+          rxNumber,
+          patientName: req.body.customerName || null,
+          patientPhone: req.body.customerPhone || null,
+          notes: req.body.notes || null,
+          entryMethod: "manual"
+        });
+      }
+      
+      // Fetch the delivery with prescriptions
+      const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
+      
+      io.emit("delivery_created", { ...delivery, prescriptions });
+      res.json({ ...delivery, prescriptions });
     } catch (error) {
       console.error("Create delivery error:", error);
       res.status(500).json({ error: "Failed to create delivery" });

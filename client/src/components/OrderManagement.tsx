@@ -34,11 +34,29 @@ import {
 } from "./ui/alert-dialog";
 import * as XLSX from "xlsx";
 
+interface Prescription {
+  id: number;
+  deliveryId: number;
+  batchId: number | null;
+  rxNumber: string;
+  patientName: string | null;
+  patientPhone: string | null;
+  notes: string | null;
+  entryMethod: string | null;
+  scannedAt: string | null;
+  createdAt: string;
+}
+
 interface Delivery {
   id: number;
   batchId: number | null;
   pharmacyId: number | null;
+  deliveryIdentifier: string | null;
   addressText: string;
+  streetAddress: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
   lat: number | null;
   lng: number | null;
   customerName: string | null;
@@ -49,6 +67,7 @@ interface Delivery {
   status: string;
   ocrConfidence: number | null;
   ocrVerified: boolean | null;
+  prescriptions?: Prescription[];
 }
 
 interface EditingDelivery extends Partial<Delivery> {
@@ -348,11 +367,20 @@ export default function OrderManagement({
   const filteredDeliveries = deliveries.filter((d) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
+    
+    // Search in prescription Rx numbers
+    const prescriptionMatch = d.prescriptions?.some(
+      (rx) => rx.rxNumber?.toLowerCase().includes(query) ||
+              rx.patientName?.toLowerCase().includes(query)
+    );
+    
     return (
       d.addressText?.toLowerCase().includes(query) ||
       d.customerName?.toLowerCase().includes(query) ||
       d.rxNumber?.toLowerCase().includes(query) ||
-      d.customerPhone?.includes(query)
+      d.customerPhone?.includes(query) ||
+      d.deliveryIdentifier?.toLowerCase().includes(query) ||
+      prescriptionMatch
     );
   });
 
@@ -576,7 +604,10 @@ export default function OrderManagement({
                       Status
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                      RX #
+                      Delivery ID
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Prescriptions
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                       Customer
@@ -665,19 +696,27 @@ export default function OrderManagement({
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-white font-mono">
-                        {editingDelivery?.id === delivery.id ? (
-                          <Input
-                            value={editingDelivery.rxNumber || ""}
-                            onChange={(e) =>
-                              setEditingDelivery({
-                                ...editingDelivery,
-                                rxNumber: e.target.value,
-                              })
-                            }
-                            className="h-8 bg-slate-700 border-slate-600 text-white"
-                          />
+                        <span className="text-blue-400 font-medium">
+                          {delivery.deliveryIdentifier || `D-${delivery.id}`}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-white">
+                        {delivery.prescriptions && delivery.prescriptions.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {delivery.prescriptions.map((rx) => (
+                              <span
+                                key={rx.id}
+                                className="inline-flex items-center px-2 py-0.5 bg-slate-700 rounded text-xs font-mono"
+                                title={rx.patientName || undefined}
+                              >
+                                {rx.rxNumber}
+                              </span>
+                            ))}
+                          </div>
                         ) : (
-                          delivery.rxNumber || "-"
+                          <span className="text-slate-500">
+                            {delivery.rxNumber || "No prescriptions"}
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-white">

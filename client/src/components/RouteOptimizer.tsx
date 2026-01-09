@@ -19,9 +19,18 @@ interface DeliveryZone {
   isActive: boolean;
 }
 
+interface Prescription {
+  id: number;
+  deliveryId: number;
+  rxNumber: string;
+  patientName: string | null;
+  patientPhone: string | null;
+}
+
 interface Delivery {
   id: number;
   batchId: number;
+  deliveryIdentifier: string | null;
   addressText: string;
   lat: number | null;
   lng: number | null;
@@ -31,6 +40,7 @@ interface Delivery {
   priority: string | null;
   status: string;
   zoneId: number | null;
+  prescriptions?: Prescription[];
 }
 
 interface RouteOptimizerProps {
@@ -81,11 +91,19 @@ export default function RouteOptimizer({
   const filteredDeliveries = useMemo(() => {
     if (!searchQuery.trim()) return activeDeliveries;
     const query = searchQuery.toLowerCase();
-    return activeDeliveries.filter(d => 
-      d.addressText?.toLowerCase().includes(query) ||
-      d.customerName?.toLowerCase().includes(query) ||
-      d.rxNumber?.toLowerCase().includes(query)
-    );
+    return activeDeliveries.filter(d => {
+      // Search in prescriptions
+      const prescriptionMatch = d.prescriptions?.some(
+        rx => rx.rxNumber?.toLowerCase().includes(query)
+      );
+      return (
+        d.addressText?.toLowerCase().includes(query) ||
+        d.customerName?.toLowerCase().includes(query) ||
+        d.rxNumber?.toLowerCase().includes(query) ||
+        d.deliveryIdentifier?.toLowerCase().includes(query) ||
+        prescriptionMatch
+      );
+    });
   }, [activeDeliveries, searchQuery]);
 
   const urgentCount = useMemo(() => {
@@ -98,9 +116,18 @@ export default function RouteOptimizer({
   // Auto-select orders when their RX is scanned
   useEffect(() => {
     if (lastScannedRx) {
-      const matchingDelivery = activeDeliveries.find(
-        d => d.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()
-      );
+      // Find delivery by RX number - check both legacy rxNumber field and prescriptions array
+      const matchingDelivery = activeDeliveries.find(d => {
+        // Check legacy rxNumber field
+        if (d.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()) {
+          return true;
+        }
+        // Check prescriptions array
+        return d.prescriptions?.some(
+          rx => rx.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()
+        );
+      });
+      
       if (matchingDelivery) {
         setSelectedDeliveryIds(prev => new Set([...prev, matchingDelivery.id]));
         setScanError(null);
@@ -232,13 +259,32 @@ export default function RouteOptimizer({
   const selectAllVisible = () => {
     const newSet = new Set(selectedDeliveryIds);
     filteredDeliveries
-      .filter(d => d.rxNumber && scannedRxNumbers.has(d.rxNumber))
+      .filter(d => isDeliveryScanned(d))
       .forEach(d => newSet.add(d.id));
     setSelectedDeliveryIds(newSet);
   };
 
   const isDeliveryScanned = (delivery: Delivery) => {
-    return delivery.rxNumber ? scannedRxNumbers.has(delivery.rxNumber) : false;
+    // Check legacy rxNumber field
+    if (delivery.rxNumber && scannedRxNumbers.has(delivery.rxNumber)) {
+      return true;
+    }
+    // Check if any prescription is scanned
+    if (delivery.prescriptions && delivery.prescriptions.length > 0) {
+      return delivery.prescriptions.some(rx => scannedRxNumbers.has(rx.rxNumber));
+    }
+    return false;
+  };
+
+  const getAllRxNumbers = (delivery: Delivery): string[] => {
+    const rxNumbers: string[] = [];
+    if (delivery.rxNumber) {
+      rxNumbers.push(delivery.rxNumber);
+    }
+    if (delivery.prescriptions) {
+      delivery.prescriptions.forEach(rx => rxNumbers.push(rx.rxNumber));
+    }
+    return rxNumbers;
   };
 
   const clearSelection = () => {
@@ -582,16 +628,41 @@ export default function RouteOptimizer({
                             </span>
                           )}
                         </div>
-                        <div className="flex gap-2 mt-1">
+                        <div className="flex flex-wrap gap-2 mt-1">
                           {delivery.customerName && (
                             <p className="text-slate-500 text-xs">{delivery.customerName}</p>
                           )}
-                          {delivery.rxNumber && (
+                          {delivery.deliveryIdentifier && (
+                            <span className="text-xs text-blue-400 font-medium">
+                              {delivery.deliveryIdentifier}
+                            </span>
+                          )}
+                          {/* Show prescriptions if available */}
+                          {delivery.prescriptions && delivery.prescriptions.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {delivery.prescriptions.map((rx) => {
+                                const rxScanned = scannedRxNumbers.has(rx.rxNumber);
+                                return (
+                                  <span
+                                    key={rx.id}
+                                    className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                                      rxScanned 
+                                        ? 'bg-green-500/20 text-green-400' 
+                                        : 'bg-slate-700 text-slate-400'
+                                    }`}
+                                  >
+                                    {rx.rxNumber}
+                                    {rxScanned && <Check className="h-2.5 w-2.5 inline ml-0.5" />}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : delivery.rxNumber ? (
                             <p className={`text-xs font-mono ${isScanned ? 'text-green-400' : 'text-slate-500'}`}>
                               RX: {delivery.rxNumber}
                               {isScanned && <Check className="h-3 w-3 inline ml-1" />}
                             </p>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                       {isScanned ? (
