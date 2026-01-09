@@ -111,6 +111,11 @@ export interface IStorage {
   // Delivery matching methods
   findDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined>;
   getNextDeliverySequence(batchId: number): Promise<number>;
+  
+  // Split/merge delivery methods
+  movePrescriptionToDelivery(prescriptionId: number, targetDeliveryId: number): Promise<Prescription | undefined>;
+  splitDelivery(sourceDeliveryId: number, prescriptionIds: number[]): Promise<Delivery | undefined>;
+  mergeDeliveries(targetDeliveryId: number, sourceDeliveryIds: number[]): Promise<Delivery | undefined>;
 }
 
 export type SafeUser = Omit<User, 'password'>;
@@ -570,6 +575,70 @@ export class DatabaseStorage implements IStorage {
     const result = await db.select().from(deliveries)
       .where(eq(deliveries.batchId, batchId));
     return result.length + 1;
+  }
+
+  // Split/merge delivery methods
+  async movePrescriptionToDelivery(prescriptionId: number, targetDeliveryId: number): Promise<Prescription | undefined> {
+    const result = await db.update(prescriptions)
+      .set({ deliveryId: targetDeliveryId })
+      .where(eq(prescriptions.id, prescriptionId))
+      .returning();
+    return result[0];
+  }
+
+  async splitDelivery(sourceDeliveryId: number, prescriptionIds: number[]): Promise<Delivery | undefined> {
+    // Get the source delivery
+    const sourceDelivery = await this.getDelivery(sourceDeliveryId);
+    if (!sourceDelivery || !sourceDelivery.batchId) return undefined;
+
+    // Get the next sequence number for the new delivery
+    const sequence = await this.getNextDeliverySequence(sourceDelivery.batchId);
+    const year = new Date().getFullYear();
+    const deliveryIdentifier = `DEL-${year}-${sequence.toString().padStart(6, '0')}`;
+
+    // Create a new delivery with the same address info
+    const newDelivery = await db.insert(deliveries).values({
+      batchId: sourceDelivery.batchId,
+      deliveryIdentifier,
+      addressText: sourceDelivery.addressText,
+      streetAddress: sourceDelivery.streetAddress,
+      city: sourceDelivery.city,
+      state: sourceDelivery.state,
+      zipCode: sourceDelivery.zipCode,
+      normalizedAddressHash: sourceDelivery.normalizedAddressHash,
+      customerName: sourceDelivery.customerName,
+      customerPhone: sourceDelivery.customerPhone,
+      lat: sourceDelivery.lat,
+      lng: sourceDelivery.lng,
+      status: sourceDelivery.status,
+    }).returning();
+
+    if (!newDelivery[0]) return undefined;
+
+    // Move the specified prescriptions to the new delivery
+    for (const prescriptionId of prescriptionIds) {
+      await this.movePrescriptionToDelivery(prescriptionId, newDelivery[0].id);
+    }
+
+    return newDelivery[0];
+  }
+
+  async mergeDeliveries(targetDeliveryId: number, sourceDeliveryIds: number[]): Promise<Delivery | undefined> {
+    // Get target delivery
+    const targetDelivery = await this.getDelivery(targetDeliveryId);
+    if (!targetDelivery) return undefined;
+
+    // Move all prescriptions from source deliveries to target
+    for (const sourceId of sourceDeliveryIds) {
+      const sourcePrescriptions = await this.getPrescriptionsByDelivery(sourceId);
+      for (const prescription of sourcePrescriptions) {
+        await this.movePrescriptionToDelivery(prescription.id, targetDeliveryId);
+      }
+      // Delete the source delivery after moving prescriptions
+      await this.deleteDelivery(sourceId);
+    }
+
+    return targetDelivery;
   }
 }
 

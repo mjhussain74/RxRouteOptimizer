@@ -16,6 +16,8 @@ import {
   AlertTriangle,
   Ban,
   Check,
+  Split,
+  Merge,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -110,6 +112,14 @@ export default function OrderManagement({
     batchId?: number;
     deliveryId?: number;
   } | null>(null);
+  
+  const [showSplitDialog, setShowSplitDialog] = useState(false);
+  const [splitDelivery, setSplitDelivery] = useState<Delivery | null>(null);
+  const [selectedPrescriptionsForSplit, setSelectedPrescriptionsForSplit] = useState<number[]>([]);
+  
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [mergeTargetDelivery, setMergeTargetDelivery] = useState<Delivery | null>(null);
+  const [selectedDeliveriesForMerge, setSelectedDeliveriesForMerge] = useState<number[]>([]);
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -296,6 +306,50 @@ export default function OrderManagement({
         queryKey: [`/api/batches/${activeBatchId}`],
       });
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
+    },
+  });
+
+  const splitDeliveryMutation = useMutation({
+    mutationFn: async ({ deliveryId, prescriptionIds }: { deliveryId: number; prescriptionIds: number[] }) => {
+      const response = await fetch(`/api/deliveries/${deliveryId}/split`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prescriptionIds }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to split delivery");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
+      setShowSplitDialog(false);
+      setSplitDelivery(null);
+      setSelectedPrescriptionsForSplit([]);
+    },
+  });
+
+  const mergeDeliveriesMutation = useMutation({
+    mutationFn: async ({ targetDeliveryId, sourceDeliveryIds }: { targetDeliveryId: number; sourceDeliveryIds: number[] }) => {
+      const response = await fetch(`/api/deliveries/${targetDeliveryId}/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceDeliveryIds }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to merge deliveries");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
+      setShowMergeDialog(false);
+      setMergeTargetDelivery(null);
+      setSelectedDeliveriesForMerge([]);
     },
   });
 
@@ -838,6 +892,32 @@ export default function OrderManagement({
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
+                              {(delivery.prescriptions?.length || 0) > 1 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setSplitDelivery(delivery);
+                                    setShowSplitDialog(true);
+                                  }}
+                                  className="h-8 w-8 p-0 text-purple-400 hover:text-purple-300 hover:bg-purple-500/10"
+                                  title="Split Delivery"
+                                >
+                                  <Split className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setMergeTargetDelivery(delivery);
+                                  setShowMergeDialog(true);
+                                }}
+                                className="h-8 w-8 p-0 text-teal-400 hover:text-teal-300 hover:bg-teal-500/10"
+                                title="Merge with other deliveries"
+                              >
+                                <Merge className="h-4 w-4" />
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -1056,6 +1136,193 @@ export default function OrderManagement({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={showSplitDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowSplitDialog(false);
+          setSplitDelivery(null);
+          setSelectedPrescriptionsForSplit([]);
+        }
+      }}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Split className="h-5 w-5 text-blue-400" />
+              Split Delivery
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-slate-400 text-sm">
+              Select prescriptions to move to a new delivery. At least one prescription must remain in the original delivery.
+            </p>
+            
+            {splitDelivery && (
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-white font-medium text-sm mb-1">
+                  {splitDelivery.deliveryIdentifier || `DEL-${splitDelivery.id}`}
+                </p>
+                <p className="text-slate-400 text-xs">{splitDelivery.addressText}</p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-slate-300">Select prescriptions to split:</Label>
+              {splitDelivery?.prescriptions?.map((rx) => (
+                <label
+                  key={rx.id}
+                  className="flex items-center gap-3 p-3 bg-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedPrescriptionsForSplit.includes(rx.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedPrescriptionsForSplit([...selectedPrescriptionsForSplit, rx.id]);
+                      } else {
+                        setSelectedPrescriptionsForSplit(selectedPrescriptionsForSplit.filter(id => id !== rx.id));
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-slate-500"
+                  />
+                  <div className="flex-1">
+                    <p className="text-white font-mono text-sm">{rx.rxNumber}</p>
+                    <p className="text-slate-400 text-xs">{rx.patientName || "No patient name"}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowSplitDialog(false);
+                  setSplitDelivery(null);
+                  setSelectedPrescriptionsForSplit([]);
+                }}
+                className="border-slate-600 text-slate-300"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (splitDelivery && selectedPrescriptionsForSplit.length > 0) {
+                    splitDeliveryMutation.mutate({
+                      deliveryId: splitDelivery.id,
+                      prescriptionIds: selectedPrescriptionsForSplit,
+                    });
+                  }
+                }}
+                disabled={
+                  selectedPrescriptionsForSplit.length === 0 ||
+                  (splitDelivery?.prescriptions?.length || 0) <= selectedPrescriptionsForSplit.length ||
+                  splitDeliveryMutation.isPending
+                }
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {splitDeliveryMutation.isPending ? "Splitting..." : "Split Delivery"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showMergeDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowMergeDialog(false);
+          setMergeTargetDelivery(null);
+          setSelectedDeliveriesForMerge([]);
+        }
+      }}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Merge className="h-5 w-5 text-green-400" />
+              Merge Deliveries
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-slate-400 text-sm">
+              Select deliveries to merge into the target delivery. Prescriptions from selected deliveries will be combined.
+            </p>
+            
+            {mergeTargetDelivery && (
+              <div className="bg-green-900/30 rounded-lg p-3 border border-green-500/30">
+                <p className="text-green-400 text-xs mb-1">Target Delivery</p>
+                <p className="text-white font-medium text-sm">
+                  {mergeTargetDelivery.deliveryIdentifier || `DEL-${mergeTargetDelivery.id}`}
+                </p>
+                <p className="text-slate-400 text-xs">{mergeTargetDelivery.addressText}</p>
+                <p className="text-slate-500 text-xs mt-1">
+                  {mergeTargetDelivery.prescriptions?.length || 0} prescription(s)
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-slate-300">Select deliveries to merge:</Label>
+              {deliveries
+                .filter(d => d.id !== mergeTargetDelivery?.id && d.status !== 'complete' && d.status !== 'cancelled')
+                .map((delivery) => (
+                <label
+                  key={delivery.id}
+                  className="flex items-center gap-3 p-3 bg-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedDeliveriesForMerge.includes(delivery.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedDeliveriesForMerge([...selectedDeliveriesForMerge, delivery.id]);
+                      } else {
+                        setSelectedDeliveriesForMerge(selectedDeliveriesForMerge.filter(id => id !== delivery.id));
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-slate-500"
+                  />
+                  <div className="flex-1">
+                    <p className="text-white font-mono text-sm">
+                      {delivery.deliveryIdentifier || `DEL-${delivery.id}`}
+                    </p>
+                    <p className="text-slate-400 text-xs truncate">{delivery.addressText}</p>
+                    <p className="text-slate-500 text-xs">
+                      {delivery.prescriptions?.length || 0} prescription(s): {delivery.prescriptions?.map(p => p.rxNumber).join(", ") || "N/A"}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowMergeDialog(false);
+                  setMergeTargetDelivery(null);
+                  setSelectedDeliveriesForMerge([]);
+                }}
+                className="border-slate-600 text-slate-300"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (mergeTargetDelivery && selectedDeliveriesForMerge.length > 0) {
+                    mergeDeliveriesMutation.mutate({
+                      targetDeliveryId: mergeTargetDelivery.id,
+                      sourceDeliveryIds: selectedDeliveriesForMerge,
+                    });
+                  }
+                }}
+                disabled={selectedDeliveriesForMerge.length === 0 || mergeDeliveriesMutation.isPending}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {mergeDeliveriesMutation.isPending ? "Merging..." : "Merge Deliveries"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

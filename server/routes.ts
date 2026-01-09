@@ -1171,6 +1171,103 @@ export async function registerRoutes(
     }
   });
 
+  // Split delivery - move prescriptions to a new delivery
+  app.post("/api/deliveries/:id/split", async (req, res) => {
+    try {
+      const sourceDeliveryId = parseInt(req.params.id);
+      const { prescriptionIds } = req.body;
+      
+      if (!prescriptionIds || !Array.isArray(prescriptionIds) || prescriptionIds.length === 0) {
+        return res.status(400).json({ error: "prescriptionIds array is required" });
+      }
+      
+      // Verify source delivery exists and has enough prescriptions
+      const sourcePrescriptions = await storage.getPrescriptionsByDelivery(sourceDeliveryId);
+      if (sourcePrescriptions.length <= prescriptionIds.length) {
+        return res.status(400).json({ error: "Cannot split all prescriptions - at least one must remain in the original delivery" });
+      }
+      
+      const newDelivery = await storage.splitDelivery(sourceDeliveryId, prescriptionIds);
+      if (!newDelivery) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+      
+      // Fetch prescriptions for the new delivery
+      const newPrescriptions = await storage.getPrescriptionsByDelivery(newDelivery.id);
+      
+      io.emit("delivery_split", { sourceDeliveryId, newDelivery, newPrescriptions });
+      res.json({ delivery: newDelivery, prescriptions: newPrescriptions });
+    } catch (error) {
+      console.error("Split delivery error:", error);
+      res.status(500).json({ error: "Failed to split delivery" });
+    }
+  });
+
+  // Merge deliveries - combine multiple deliveries into one
+  app.post("/api/deliveries/:id/merge", async (req, res) => {
+    try {
+      const targetDeliveryId = parseInt(req.params.id);
+      const { sourceDeliveryIds } = req.body;
+      
+      if (!sourceDeliveryIds || !Array.isArray(sourceDeliveryIds) || sourceDeliveryIds.length === 0) {
+        return res.status(400).json({ error: "sourceDeliveryIds array is required" });
+      }
+      
+      // Make sure target is not in source list
+      if (sourceDeliveryIds.includes(targetDeliveryId)) {
+        return res.status(400).json({ error: "Target delivery cannot be in source list" });
+      }
+      
+      const mergedDelivery = await storage.mergeDeliveries(targetDeliveryId, sourceDeliveryIds);
+      if (!mergedDelivery) {
+        return res.status(404).json({ error: "Target delivery not found" });
+      }
+      
+      // Fetch all prescriptions for the merged delivery
+      const prescriptions = await storage.getPrescriptionsByDelivery(targetDeliveryId);
+      
+      io.emit("deliveries_merged", { targetDeliveryId, sourceDeliveryIds, prescriptions });
+      res.json({ delivery: mergedDelivery, prescriptions });
+    } catch (error) {
+      console.error("Merge deliveries error:", error);
+      res.status(500).json({ error: "Failed to merge deliveries" });
+    }
+  });
+
+  // Move a single prescription to another delivery
+  app.post("/api/prescriptions/:id/move", async (req, res) => {
+    try {
+      const prescriptionId = parseInt(req.params.id);
+      const { targetDeliveryId } = req.body;
+      
+      if (!targetDeliveryId) {
+        return res.status(400).json({ error: "targetDeliveryId is required" });
+      }
+      
+      // Verify source delivery still has prescriptions after move
+      const prescription = await storage.getPrescription(prescriptionId);
+      if (!prescription) {
+        return res.status(404).json({ error: "Prescription not found" });
+      }
+      
+      const sourcePrescriptions = await storage.getPrescriptionsByDelivery(prescription.deliveryId);
+      if (sourcePrescriptions.length <= 1) {
+        return res.status(400).json({ error: "Cannot move the last prescription from a delivery. Delete the delivery instead." });
+      }
+      
+      const movedPrescription = await storage.movePrescriptionToDelivery(prescriptionId, targetDeliveryId);
+      if (!movedPrescription) {
+        return res.status(404).json({ error: "Failed to move prescription" });
+      }
+      
+      io.emit("prescription_moved", { prescriptionId, targetDeliveryId, sourceDeliveryId: prescription.deliveryId });
+      res.json(movedPrescription);
+    } catch (error) {
+      console.error("Move prescription error:", error);
+      res.status(500).json({ error: "Failed to move prescription" });
+    }
+  });
+
   // Update delivery status (complete/cancelled)
   app.patch("/api/deliveries/:id/status", async (req, res) => {
     try {
