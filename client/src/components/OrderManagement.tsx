@@ -18,6 +18,7 @@ import {
   Check,
   Split,
   Merge,
+  Download,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -624,6 +625,38 @@ export default function OrderManagement({
                 </>
               )}
             </div>
+          </div>
+          
+          <div className="mt-4 flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                const csvContent = `address,customer_name,customer_phone,rx_number,notes
+123 Main Street, New York, NY 10001,John Smith,555-0101,RX-001,Leave at front door
+123 Main Street, New York, NY 10001,John Smith,555-0101,RX-002,Leave at front door
+456 Oak Avenue, Brooklyn, NY 11201,Jane Doe,555-0202,RX-003,Ring doorbell
+456 Oak Avenue, Brooklyn, NY 11201,Jane Doe,555-0202,RX-004,Ring doorbell
+456 Oak Avenue, Brooklyn, NY 11201,Jane Doe,555-0202,RX-005,Ring doorbell
+789 Pine Road, Queens, NY 11375,Bob Johnson,555-0303,RX-006,Call on arrival
+321 Elm Street, Bronx, NY 10451,Alice Williams,555-0404,RX-007,Signature required
+321 Elm Street, Bronx, NY 10451,Alice Williams,555-0404,RX-008,Signature required`;
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'sample-orders.csv';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }}
+              className="text-slate-400 hover:text-white border-slate-600"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download Sample CSV
+            </Button>
           </div>
         </CardContent>
       </Card>
