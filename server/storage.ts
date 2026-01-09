@@ -4,7 +4,7 @@ import { eq, and, desc, inArray, notInArray, isNotNull } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import {
   users, drivers, deliveryBatches, deliveries, routes, routeStops, driverLocations, deliveryProofs,
-  pharmacies, deliveryZones, driverZones, ocrLogs,
+  pharmacies, deliveryZones, driverZones, ocrLogs, prescriptions,
   type User, type InsertUser,
   type Driver, type InsertDriver,
   type DeliveryBatch, type InsertDeliveryBatch,
@@ -16,7 +16,8 @@ import {
   type DeliveryZone, type InsertDeliveryZone,
   type DriverZone, type InsertDriverZone,
   type DeliveryProof, type InsertDeliveryProof,
-  type OcrLog, type InsertOcrLog
+  type OcrLog, type InsertOcrLog,
+  type Prescription, type InsertPrescription
 } from "@shared/schema";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -97,6 +98,19 @@ export interface IStorage {
   
   createOcrLog(log: InsertOcrLog): Promise<OcrLog>;
   getOcrLogs(deliveryId: number): Promise<OcrLog[]>;
+  
+  // Prescription methods
+  getPrescriptionsByDelivery(deliveryId: number): Promise<Prescription[]>;
+  getPrescriptionsByBatch(batchId: number): Promise<Prescription[]>;
+  getPrescription(id: number): Promise<Prescription | undefined>;
+  getPrescriptionByRxNumber(rxNumber: string, batchId: number): Promise<Prescription | undefined>;
+  createPrescription(prescription: InsertPrescription): Promise<Prescription>;
+  updatePrescription(id: number, data: Partial<InsertPrescription>): Promise<Prescription | undefined>;
+  deletePrescription(id: number): Promise<boolean>;
+  
+  // Delivery matching methods
+  findDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined>;
+  getNextDeliverySequence(batchId: number): Promise<number>;
 }
 
 export type SafeUser = Omit<User, 'password'>;
@@ -495,6 +509,67 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(ocrLogs)
       .where(eq(ocrLogs.deliveryId, deliveryId))
       .orderBy(desc(ocrLogs.createdAt));
+  }
+
+  // Prescription methods
+  async getPrescriptionsByDelivery(deliveryId: number): Promise<Prescription[]> {
+    return db.select().from(prescriptions)
+      .where(eq(prescriptions.deliveryId, deliveryId))
+      .orderBy(desc(prescriptions.createdAt));
+  }
+
+  async getPrescriptionsByBatch(batchId: number): Promise<Prescription[]> {
+    return db.select().from(prescriptions)
+      .where(eq(prescriptions.batchId, batchId))
+      .orderBy(desc(prescriptions.createdAt));
+  }
+
+  async getPrescription(id: number): Promise<Prescription | undefined> {
+    const result = await db.select().from(prescriptions).where(eq(prescriptions.id, id));
+    return result[0];
+  }
+
+  async getPrescriptionByRxNumber(rxNumber: string, batchId: number): Promise<Prescription | undefined> {
+    const result = await db.select().from(prescriptions)
+      .where(and(
+        eq(prescriptions.rxNumber, rxNumber),
+        eq(prescriptions.batchId, batchId)
+      ));
+    return result[0];
+  }
+
+  async createPrescription(prescription: InsertPrescription): Promise<Prescription> {
+    const result = await db.insert(prescriptions).values(prescription).returning();
+    return result[0];
+  }
+
+  async updatePrescription(id: number, data: Partial<InsertPrescription>): Promise<Prescription | undefined> {
+    const result = await db.update(prescriptions)
+      .set(data)
+      .where(eq(prescriptions.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deletePrescription(id: number): Promise<boolean> {
+    const result = await db.delete(prescriptions).where(eq(prescriptions.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // Delivery matching methods
+  async findDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined> {
+    const result = await db.select().from(deliveries)
+      .where(and(
+        eq(deliveries.batchId, batchId),
+        eq(deliveries.normalizedAddressHash, normalizedHash)
+      ));
+    return result[0];
+  }
+
+  async getNextDeliverySequence(batchId: number): Promise<number> {
+    const result = await db.select().from(deliveries)
+      .where(eq(deliveries.batchId, batchId));
+    return result.length + 1;
   }
 }
 

@@ -68,22 +68,46 @@ export const deliveryBatches = pgTable("delivery_batches", {
 
 export const deliveries = pgTable("deliveries", {
   id: serial("id").primaryKey(),
+  deliveryIdentifier: text("delivery_identifier"), // DEL-YYYY-NNNNNN format
   batchId: integer("batch_id").references(() => deliveryBatches.id),
   pharmacyId: integer("pharmacy_id").references(() => pharmacies.id),
   zoneId: integer("zone_id").references(() => deliveryZones.id),
+  // Full address text for display
   addressText: text("address_text").notNull(),
+  // Normalized address components for grouping
+  streetAddress: text("street_address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  normalizedAddressHash: text("normalized_address_hash"), // SHA256 for fast matching
   lat: real("lat"),
   lng: real("lng"),
-  customerName: text("customer_name"),
+  customerName: text("customer_name"), // Primary patient name (first in group)
   customerPhone: text("customer_phone"),
-  rxNumber: text("rx_number"),
+  rxNumber: text("rx_number"), // Deprecated - kept for backward compatibility
   notes: text("notes"),
   priority: text("priority").default("normal"),
   status: text("status").notNull().default("pending"),
+  prescriptionCount: integer("prescription_count").default(1), // Number of Rx in this delivery
   ocrImageUrl: text("ocr_image_url"),
   ocrConfidence: real("ocr_confidence"),
   ocrVerified: boolean("ocr_verified").default(false),
   scannedBarcode: text("scanned_barcode"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// New prescriptions table - stores individual Rx records linked to deliveries
+export const prescriptions = pgTable("prescriptions", {
+  id: serial("id").primaryKey(),
+  deliveryId: integer("delivery_id").references(() => deliveries.id).notNull(),
+  batchId: integer("batch_id").references(() => deliveryBatches.id),
+  rxNumber: text("rx_number").notNull(),
+  patientName: text("patient_name"),
+  patientPhone: text("patient_phone"),
+  notes: text("notes"),
+  entryMethod: text("entry_method").default("upload"), // upload, scan, manual
+  scannedAt: timestamp("scanned_at"),
+  createdBy: integer("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -192,8 +216,15 @@ export const deliveriesRelations = relations(deliveries, ({ one, many }) => ({
   batch: one(deliveryBatches, { fields: [deliveries.batchId], references: [deliveryBatches.id] }),
   pharmacy: one(pharmacies, { fields: [deliveries.pharmacyId], references: [pharmacies.id] }),
   zone: one(deliveryZones, { fields: [deliveries.zoneId], references: [deliveryZones.id] }),
+  prescriptions: many(prescriptions),
   routeStops: many(routeStops),
   ocrLogs: many(ocrLogs),
+}));
+
+export const prescriptionsRelations = relations(prescriptions, ({ one }) => ({
+  delivery: one(deliveries, { fields: [prescriptions.deliveryId], references: [deliveries.id] }),
+  batch: one(deliveryBatches, { fields: [prescriptions.batchId], references: [deliveryBatches.id] }),
+  createdByUser: one(users, { fields: [prescriptions.createdBy], references: [users.id] }),
 }));
 
 export const routesRelations = relations(routes, ({ one, many }) => ({
@@ -281,6 +312,11 @@ export const insertOcrLogSchema = createInsertSchema(ocrLogs).omit({
   createdAt: true,
 });
 
+export const insertPrescriptionSchema = createInsertSchema(prescriptions).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertPharmacy = z.infer<typeof insertPharmacySchema>;
@@ -304,3 +340,5 @@ export type InsertDeliveryProof = z.infer<typeof insertDeliveryProofSchema>;
 export type DeliveryProof = typeof deliveryProofs.$inferSelect;
 export type InsertOcrLog = z.infer<typeof insertOcrLogSchema>;
 export type OcrLog = typeof ocrLogs.$inferSelect;
+export type InsertPrescription = z.infer<typeof insertPrescriptionSchema>;
+export type Prescription = typeof prescriptions.$inferSelect;
