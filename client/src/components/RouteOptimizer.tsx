@@ -258,9 +258,7 @@ export default function RouteOptimizer({
 
   const selectAllVisible = () => {
     const newSet = new Set(selectedDeliveryIds);
-    filteredDeliveries
-      .filter(d => isDeliveryScanned(d))
-      .forEach(d => newSet.add(d.id));
+    filteredDeliveries.forEach(d => newSet.add(d.id));
     setSelectedDeliveryIds(newSet);
   };
 
@@ -300,6 +298,7 @@ export default function RouteOptimizer({
         </p>
       </div>
 
+      {/* Temporarily commented out - Scan RX Barcodes section
       <Card className="bg-slate-800/50 border-slate-700 mb-6">
         <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
@@ -400,6 +399,7 @@ export default function RouteOptimizer({
           </div>
         </CardContent>
       </Card>
+      */}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="bg-slate-800/50 border-slate-700 lg:col-span-1">
@@ -554,10 +554,10 @@ export default function RouteOptimizer({
                   variant="outline"
                   size="sm"
                   onClick={selectAllVisible}
-                  disabled={scannedRxNumbers.size === 0}
+                  disabled={filteredDeliveries.length === 0}
                   className="border-slate-600 text-slate-300 hover:bg-slate-700"
                 >
-                  Select All Scanned
+                  Select All
                 </Button>
                 {selectedDeliveryIds.size > 0 && (
                   <Button
