@@ -154,7 +154,7 @@ export default function AdminDashboard({ onOpenDriverView, onLogout }: AdminDash
         )}
 
         {activeTab === "reports" && (
-          <ReportGenerator />
+          <ReportGenerator isAdmin={true} />
         )}
 
         {activeTab === "pharmacies" && (

@@ -1020,6 +1020,112 @@ export async function registerRoutes(
     }
   });
 
+  // Detailed route report with delivery proofs
+  app.get("/api/routes/:id/report", requireAuth, async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
+      const route = await storage.getRoute(routeId);
+      if (!route) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+      
+      const driver = route.driverId ? await storage.getDriver(route.driverId) : null;
+      const stops = await storage.getRouteStops(route.id);
+      
+      // Build detailed stops with delivery proofs
+      const detailedStops = await Promise.all(
+        stops.map(async (stop) => {
+          const delivery = stop.deliveryId ? await storage.getDelivery(stop.deliveryId) : null;
+          const prescriptions = delivery ? await storage.getPrescriptionsByDelivery(delivery.id) : [];
+          const proof = await storage.getDeliveryProof(stop.id);
+          
+          return {
+            id: stop.id,
+            sequence: stop.sequence,
+            status: stop.status,
+            priority: stop.priority,
+            packageScanned: stop.packageScanned,
+            eta: stop.eta,
+            actualArrival: stop.actualArrival,
+            delivery: delivery ? {
+              id: delivery.id,
+              deliveryIdentifier: delivery.deliveryIdentifier,
+              addressText: delivery.addressText,
+              streetAddress: delivery.streetAddress,
+              city: delivery.city,
+              state: delivery.state,
+              zipCode: delivery.zipCode,
+              customerName: delivery.customerName,
+              customerPhone: delivery.customerPhone,
+              status: delivery.status,
+            } : null,
+            prescriptions: prescriptions.map(p => ({
+              id: p.id,
+              rxNumber: p.rxNumber,
+              patientName: p.patientName,
+              verified: stop.packageScanned || false,
+            })),
+            proof: proof ? {
+              hasSignature: !!proof.signature,
+              hasPhoto: !!proof.picture,
+              signatureData: proof.signature,
+              photoData: proof.picture,
+              notes: proof.notes,
+              timestamp: proof.createdAt,
+              barcode: proof.barcode,
+            } : null,
+          };
+        })
+      );
+      
+      // Calculate summary stats
+      const completedStops = detailedStops.filter(s => s.status === 'complete' || s.status === 'completed');
+      const pendingStops = detailedStops.filter(s => s.status === 'pending');
+      const cancelledStops = detailedStops.filter(s => s.status === 'cancelled');
+      const stopsWithProof = detailedStops.filter(s => s.proof?.hasSignature || s.proof?.hasPhoto);
+      const totalPrescriptions = detailedStops.reduce((acc, s) => acc + s.prescriptions.length, 0);
+      const verifiedPrescriptions = detailedStops.reduce((acc, s) => acc + s.prescriptions.filter(p => p.verified).length, 0);
+      
+      res.json({
+        route: {
+          id: route.id,
+          name: route.name,
+          status: route.status,
+          startAddress: route.startAddress,
+          estimatedDistance: route.estimatedDistance,
+          estimatedDuration: route.estimatedDuration,
+          createdAt: route.createdAt,
+          dispatchedAt: route.dispatchedAt,
+          completedAt: route.completedAt,
+        },
+        driver: driver ? {
+          id: driver.id,
+          name: driver.name,
+          phone: driver.phone,
+        } : null,
+        summary: {
+          totalStops: detailedStops.length,
+          completedStops: completedStops.length,
+          pendingStops: pendingStops.length,
+          cancelledStops: cancelledStops.length,
+          stopsWithProof: stopsWithProof.length,
+          totalPrescriptions,
+          verifiedPrescriptions,
+        },
+        stops: detailedStops,
+      });
+    } catch (error) {
+      console.error("Route report error:", error);
+      res.status(500).json({ error: "Failed to generate route report" });
+    }
+  });
+
   app.post("/api/routes/optimize", requireAuth, async (req, res) => {
     try {
       const { batchId, deliveryIds, zoneId, startLat, startLng, startAddress, routeName } = req.body;

@@ -130,7 +130,7 @@ export default function PharmacyDashboard({ onOpenDriverView, onLogout, pharmacy
         )}
 
         {activeTab === "reports" && (
-          <ReportGenerator />
+          <ReportGenerator pharmacyId={pharmacyId || undefined} isAdmin={false} />
         )}
       </main>
     </div>
