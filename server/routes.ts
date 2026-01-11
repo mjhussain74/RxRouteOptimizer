@@ -997,6 +997,51 @@ export async function registerRoutes(
     }
   });
 
+  // Cancel a delivery stop (can't deliver)
+  app.post("/api/routes/:routeId/stops/:stopId/cancel", async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.routeId);
+      const stopId = parseInt(req.params.stopId);
+      const { reason } = req.body;
+
+      if (!reason) {
+        return res.status(400).json({ error: "Cancellation reason is required" });
+      }
+
+      // Update the stop status to cancelled with the reason as notes
+      const cancelledStop = await storage.updateRouteStop(stopId, { 
+        status: "cancelled",
+        notes: `CANCELLED: ${reason}`
+      });
+
+      if (!cancelledStop) {
+        return res.status(404).json({ error: "Stop not found" });
+      }
+
+      // Also update the delivery status to cancelled
+      if (cancelledStop.deliveryId) {
+        await storage.updateDeliveryStatus(cancelledStop.deliveryId, "cancelled");
+      }
+
+      io.emit("stop_status_update", { stopId, status: "cancelled" });
+      console.log(`❌ Stop ${stopId} cancelled: ${reason}`);
+
+      // Check if all stops are completed or cancelled - if so, mark route as complete
+      const allStops = await storage.getRouteStops(routeId);
+      const allDone = allStops.every(s => s.status === "completed" || s.status === "cancelled");
+      if (allDone) {
+        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
+        io.emit("route_completed", { routeId });
+        console.log(`✅ All stops done - Route ${routeId} marked as complete`);
+      }
+
+      res.json({ stop: cancelledStop });
+    } catch (error) {
+      console.error("Cancel delivery error:", error);
+      res.status(500).json({ error: "Failed to cancel delivery" });
+    }
+  });
+
   // Pharmacy endpoints
   app.get("/api/pharmacies", async (req, res) => {
     try {

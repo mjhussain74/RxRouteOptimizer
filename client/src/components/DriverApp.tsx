@@ -99,6 +99,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [showDeliveryReport, setShowDeliveryReport] = useState(false);
   const [showRouteActivation, setShowRouteActivation] = useState(false);
   const [activationScanningStopId, setActivationScanningStopId] = useState<number | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -297,6 +299,32 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     },
     onError: (error: Error) => {
       console.error("Failed to set urgent priority:", error.message);
+    },
+  });
+
+  const cancelDeliveryMutation = useMutation({
+    mutationFn: async ({ routeId, stopId, reason }: { routeId: number; stopId: number; reason: string }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to cancel delivery");
+      }
+      return response.json();
+    },
+    onSuccess: async () => {
+      console.log("❌ Delivery cancelled");
+      setCancelReason("");
+      setShowCancelModal(false);
+      setShowProofModal(false);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await refetchRoute();
+    },
+    onError: (error: Error) => {
+      console.error("Failed to cancel delivery:", error.message);
     },
   });
 
@@ -1206,16 +1234,103 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                             Mark as Delivered
                           </Button>
                           <Button
-                            onClick={() => setShowProofModal(false)}
+                            onClick={() => setShowCancelModal(true)}
                             variant="outline"
                             className="flex-1 border-red-500 text-red-400 hover:bg-red-500/10"
                           >
-                            Cancel
+                            <X className="h-4 w-4 mr-2" />
+                            Can't Deliver
                           </Button>
                         </div>
                       </div>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {showCancelModal && currentStop && (
+            <div
+              className="fixed inset-0 bg-black/80 z-[10000] flex items-center justify-center p-4"
+              style={{ overscrollBehavior: "none", touchAction: "none" }}
+            >
+              <Card className="bg-slate-800 border-slate-700 max-w-md w-full">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-white text-lg flex items-center gap-2">
+                    <X className="h-5 w-5 text-red-400" />
+                    Can't Deliver
+                  </CardTitle>
+                  <button
+                    onClick={() => {
+                      setShowCancelModal(false);
+                      setCancelReason("");
+                    }}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="bg-slate-900/50 rounded-lg p-3">
+                    <p className="text-white text-sm font-medium">
+                      {currentStop.delivery?.customerName}
+                    </p>
+                    <p className="text-slate-400 text-xs">
+                      {currentStop.delivery?.addressText}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-white text-sm font-medium block mb-2">
+                      Reason for cancellation *
+                    </label>
+                    <textarea
+                      value={cancelReason}
+                      onChange={(e) => setCancelReason(e.target.value)}
+                      placeholder="e.g., Customer not home, wrong address, refused delivery..."
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-sm min-h-[80px]"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowCancelModal(false);
+                        setCancelReason("");
+                      }}
+                      className="flex-1 border-slate-600"
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        cancelDeliveryMutation.mutate({
+                          routeId: activeRoute.id,
+                          stopId: currentStop.id,
+                          reason: cancelReason,
+                        })
+                      }
+                      disabled={!cancelReason.trim() || cancelDeliveryMutation.isPending}
+                      className="flex-1 bg-red-500 hover:bg-red-600"
+                    >
+                      {cancelDeliveryMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <X className="h-4 w-4 mr-2" />
+                      )}
+                      Cancel Delivery
+                    </Button>
+                  </div>
+
+                  {cancelDeliveryMutation.isError && (
+                    <p className="text-red-400 text-xs text-center">
+                      {cancelDeliveryMutation.error instanceof Error
+                        ? cancelDeliveryMutation.error.message
+                        : "Failed to cancel delivery"}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             </div>
