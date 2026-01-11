@@ -818,17 +818,27 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     </div>
                   )}
 
-                  <Button
-                    onClick={() => {
-                      setShowProofModal(true);
-                      setScannedBarcode(null); // Reset scanned barcode when opening modal
-                      setIsScanning(false);
-                    }}
-                    className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3"
-                  >
-                    <CheckCircle className="mr-2 h-5 w-5" />
-                    Verify & Complete Delivery
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => {
+                        setShowProofModal(true);
+                        setScannedBarcode(null); // Reset scanned barcode when opening modal
+                        setIsScanning(false);
+                      }}
+                      className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3"
+                    >
+                      <CheckCircle className="mr-2 h-5 w-5" />
+                      Complete
+                    </Button>
+                    <Button
+                      onClick={() => setShowCancelModal(true)}
+                      variant="outline"
+                      className="border-red-500 text-red-400 hover:bg-red-500/10 py-3"
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Can't Deliver
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
