@@ -758,13 +758,19 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     )}
                     <Button
                       size="sm"
-                      onClick={() =>
-                        openInMaps(
-                          currentStop.delivery.lat,
-                          currentStop.delivery.lng,
-                          currentStop.delivery.addressText,
-                        )
-                      }
+                      onClick={() => {
+                        if (currentStop.delivery?.lat && currentStop.delivery?.lng) {
+                          openInMaps(
+                            currentStop.delivery.lat,
+                            currentStop.delivery.lng,
+                            currentStop.delivery.addressText,
+                          );
+                        } else {
+                          // Fallback to address-based navigation
+                          const address = encodeURIComponent(currentStop.delivery?.addressText || '');
+                          window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank');
+                        }
+                      }}
                       className="flex-1 bg-blue-500 hover:bg-blue-600"
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
