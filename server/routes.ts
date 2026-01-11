@@ -393,6 +393,13 @@ export async function registerRoutes(
       let skippedCount = 0;
       const skippedReasons: string[] = [];
       
+      // Debug: Log the column names from the first row
+      if (parsed.data.length > 0) {
+        const firstRow = parsed.data[0] as any;
+        console.log("CSV Column names detected:", Object.keys(firstRow));
+        console.log("First row sample data:", JSON.stringify(firstRow).substring(0, 500));
+      }
+      
       // Map to track deliveries by normalized address hash
       const addressDeliveryMap = new Map<string, any>();
       
