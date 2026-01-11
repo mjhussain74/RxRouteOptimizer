@@ -209,14 +209,14 @@ export default function UserManager({ pharmacies }: UserManagerProps) {
                 <div className="space-y-2">
                   <Label className="text-slate-200">Pharmacy</Label>
                   <Select
-                    value={formData.pharmacyId}
-                    onValueChange={(value) => setFormData({ ...formData, pharmacyId: value })}
+                    value={formData.pharmacyId || "none"}
+                    onValueChange={(value) => setFormData({ ...formData, pharmacyId: value === "none" ? "" : value })}
                   >
                     <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
                       <SelectValue placeholder="Select pharmacy" />
                     </SelectTrigger>
                     <SelectContent className="bg-slate-700 border-slate-600">
-                      <SelectItem value="">No Pharmacy (All Access)</SelectItem>
+                      <SelectItem value="none">No Pharmacy (All Access)</SelectItem>
                       {pharmacies.filter(p => p.isActive).map((pharmacy) => (
                         <SelectItem key={pharmacy.id} value={pharmacy.id.toString()}>
                           {pharmacy.name}
