@@ -179,6 +179,17 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         }
       }
 
+      console.log("📤 Submitting proof:", { 
+        routeId, 
+        stopId, 
+        hasSignature: !!signature, 
+        hasPicture: !!picture,
+        signatureLength: signature?.length || 0,
+        pictureLength: picture?.length || 0,
+        notes: proofNotes,
+        barcode: scannedBarcode
+      });
+
       const response = await fetch(
         `/api/routes/${routeId}/stops/${stopId}/proof`,
         {
@@ -192,8 +203,12 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
           }),
         },
       );
+      
+      console.log("📥 Proof response status:", response.status);
+      
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error("❌ Proof submission failed:", errorData);
         throw new Error(errorData.error || "Failed to submit proof");
       }
       return response.json();
@@ -512,8 +527,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
 
   const route = (routeData as any)?.route;
   const stops = (routeData as any)?.stops || [];
-  const pendingStops = stops.filter((s: any) => s.status !== "completed");
-  const completedStops = stops.filter((s: any) => s.status === "completed");
+  const pendingStops = stops.filter((s: any) => s.status !== "completed" && s.status !== "cancelled");
+  const completedStops = stops.filter((s: any) => s.status === "completed" || s.status === "cancelled");
 
   const currentStop = pendingStops[selectedStopIndex] || pendingStops[0];
 
