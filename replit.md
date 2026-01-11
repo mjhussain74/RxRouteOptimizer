@@ -135,6 +135,11 @@ address,customer_name,customer_phone,rx_number,notes
   - DriverApp barcode verification supports multiple prescriptions per delivery
   - Enhanced ReportGenerator with delivery-level and prescription-level views
   - Added split/merge delivery functionality for manual override capabilities
+- Delivery consolidation improvements (2026-01-11):
+  - New deliveries for same address only consolidate with ACTIVE deliveries
+  - Completed/cancelled deliveries are not reused for new prescriptions
+  - New orders to an already-delivered address get new delivery IDs
+  - Direct order selection in Route Optimizer (no barcode scanning required)
 
 ## User Preferences
 - Dark theme UI preferred

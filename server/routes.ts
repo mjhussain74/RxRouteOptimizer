@@ -475,15 +475,23 @@ export async function registerRoutes(
                       row.notes || row.Notes || row.NOTES ||
                       row.comments || row.Comments || row.DRUGNAME || row.drugname || '');
         
-        // Check if we already have a delivery for this address (address consolidation)
+        // Check if we already have an ACTIVE delivery for this address (address consolidation)
+        // Only consolidate with deliveries that are not completed or cancelled
         let delivery: any;
         const addressKey = normalizedData?.normalizedHash || addressText.toLowerCase().trim();
         
-        if (addressDeliveryMap.has(addressKey)) {
-          // Use existing delivery
-          delivery = addressDeliveryMap.get(addressKey);
+        // Check in-memory map first, but verify the delivery is still active
+        const cachedDelivery = addressDeliveryMap.get(addressKey);
+        const isActive = cachedDelivery && 
+          cachedDelivery.status !== 'complete' && 
+          cachedDelivery.status !== 'completed' && 
+          cachedDelivery.status !== 'cancelled';
+        
+        if (isActive) {
+          // Use existing active delivery
+          delivery = cachedDelivery;
         } else {
-          // Create new delivery
+          // Create new delivery (either no cached delivery, or cached one is completed/cancelled)
           const geocoded = await geocodeAddress(addressText);
           const sequence = await storage.getNextDeliverySequence(batch.id);
           const deliveryIdentifier = generateDeliveryIdentifier(batch.id, sequence);

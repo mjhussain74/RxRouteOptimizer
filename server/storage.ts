@@ -110,6 +110,7 @@ export interface IStorage {
   
   // Delivery matching methods
   findDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined>;
+  findActiveDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined>;
   getNextDeliverySequence(batchId: number): Promise<number>;
   
   // Split/merge delivery methods
@@ -567,6 +568,17 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(deliveries.batchId, batchId),
         eq(deliveries.normalizedAddressHash, normalizedHash)
+      ));
+    return result[0];
+  }
+
+  // Find active (non-completed, non-cancelled) delivery by normalized address - for consolidation
+  async findActiveDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined> {
+    const result = await db.select().from(deliveries)
+      .where(and(
+        eq(deliveries.batchId, batchId),
+        eq(deliveries.normalizedAddressHash, normalizedHash),
+        notInArray(deliveries.status, ['complete', 'completed', 'cancelled'])
       ));
     return result[0];
   }
