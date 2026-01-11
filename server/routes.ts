@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
@@ -7,6 +7,34 @@ import { storage } from "./storage";
 import { normalizeAddress, generateDeliveryIdentifier } from "../shared/addressUtils";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+declare module 'express-session' {
+  interface SessionData {
+    user: {
+      id: number;
+      username: string;
+      role: string;
+      pharmacyId: number | null;
+    } | null;
+  }
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  next();
+}
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  if (req.session.user.role !== 'admin') {
+    return res.status(403).json({ message: "Admin access required" });
+  }
+  next();
+}
 
 interface GeocodedAddress {
   address: string;
@@ -283,6 +311,191 @@ export async function registerRoutes(
       }
       console.log("Client disconnected:", socket.id);
     });
+  });
+
+  // Authentication endpoints
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+
+      const user = await storage.validateUserPassword(username, password);
+      
+      if (!user) {
+        return res.status(401).json({ message: "Invalid username or password" });
+      }
+
+      // Store user in session
+      req.session.user = {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        pharmacyId: user.pharmacyId
+      };
+
+      // Get pharmacy name if user has pharmacyId
+      let pharmacyName = undefined;
+      if (user.pharmacyId) {
+        const pharmacy = await storage.getPharmacy(user.pharmacyId);
+        pharmacyName = pharmacy?.name;
+      }
+
+      res.json({
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          pharmacyId: user.pharmacyId,
+          pharmacyName
+        }
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  // Logout endpoint
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ message: "Logout failed" });
+      }
+      res.clearCookie('connect.sid');
+      res.json({ message: "Logged out successfully" });
+    });
+  });
+
+  // Get current session user
+  app.get("/api/auth/me", (req, res) => {
+    if (!req.session?.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    res.json({ user: req.session.user });
+  });
+
+  app.post("/api/auth/register", requireAdmin, async (req, res) => {
+    try {
+      const { username, password, role, pharmacyId } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+
+      // Check if username already exists
+      const existingUser = await storage.getUserByUsername(username);
+      if (existingUser) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const user = await storage.createUser({
+        username,
+        password,
+        role: role || "dispatcher",
+        pharmacyId: pharmacyId || null
+      });
+
+      res.json({
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          pharmacyId: user.pharmacyId
+        }
+      });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ message: "Registration failed" });
+    }
+  });
+
+  // Setup initial admin user (only works if no users exist)
+  app.post("/api/auth/setup", async (req, res) => {
+    try {
+      const existingUsers = await storage.getUsers();
+      if (existingUsers.length > 0) {
+        return res.status(400).json({ message: "Setup already completed. Users exist." });
+      }
+
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+
+      const user = await storage.createUser({
+        username,
+        password,
+        role: "admin",
+        pharmacyId: null
+      });
+
+      res.json({
+        message: "Admin user created successfully",
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role
+        }
+      });
+    } catch (error) {
+      console.error("Setup error:", error);
+      res.status(500).json({ message: "Setup failed" });
+    }
+  });
+
+  // Check if setup is needed
+  app.get("/api/auth/needs-setup", async (req, res) => {
+    try {
+      const existingUsers = await storage.getUsers();
+      res.json({ needsSetup: existingUsers.length === 0 });
+    } catch (error) {
+      res.status(500).json({ needsSetup: false });
+    }
+  });
+
+  // Get all users (admin only)
+  app.get("/api/users", requireAdmin, async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      res.json(users);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // Update user
+  app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const { role, pharmacyId } = req.body;
+      const user = await storage.updateUser(userId, { role, pharmacyId });
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      console.error("Error updating user:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  // Delete user
+  app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const deleted = await storage.deleteUser(userId);
+      if (!deleted) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ error: "Failed to delete user" });
+    }
   });
 
   app.get("/api/drivers", async (req, res) => {
@@ -1051,8 +1264,8 @@ export async function registerRoutes(
     }
   });
 
-  // Pharmacy endpoints
-  app.get("/api/pharmacies", async (req, res) => {
+  // Pharmacy endpoints (admin only for management)
+  app.get("/api/pharmacies", requireAuth, async (req, res) => {
     try {
       const pharmacies = await storage.getPharmacies();
       res.json(pharmacies);
@@ -1061,7 +1274,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/pharmacies", async (req, res) => {
+  app.post("/api/pharmacies", requireAdmin, async (req, res) => {
     try {
       const pharmacy = await storage.createPharmacy(req.body);
       res.json(pharmacy);
@@ -1070,7 +1283,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/pharmacies/:id", async (req, res) => {
+  app.get("/api/pharmacies/:id", requireAuth, async (req, res) => {
     try {
       const pharmacy = await storage.getPharmacy(parseInt(req.params.id));
       if (!pharmacy) {
@@ -1082,7 +1295,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/pharmacies/:id", async (req, res) => {
+  app.put("/api/pharmacies/:id", requireAdmin, async (req, res) => {
     try {
       const pharmacy = await storage.updatePharmacy(parseInt(req.params.id), req.body);
       if (!pharmacy) {

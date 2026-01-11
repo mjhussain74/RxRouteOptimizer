@@ -172,6 +172,36 @@ export class DatabaseStorage implements IStorage {
     return safeUser;
   }
 
+  async getUsers(): Promise<SafeUser[]> {
+    const result = await db.select({
+      id: users.id,
+      username: users.username,
+      role: users.role,
+      pharmacyId: users.pharmacyId,
+      createdAt: users.createdAt
+    }).from(users).orderBy(desc(users.createdAt));
+    return result as SafeUser[];
+  }
+
+  async updateUser(id: number, data: { role?: string; pharmacyId?: number | null }): Promise<SafeUser | undefined> {
+    const result = await db.update(users)
+      .set(data)
+      .where(eq(users.id, id))
+      .returning({
+        id: users.id,
+        username: users.username,
+        role: users.role,
+        pharmacyId: users.pharmacyId,
+        createdAt: users.createdAt
+      });
+    return result[0] as SafeUser | undefined;
+  }
+
+  async deleteUser(id: number): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id)).returning();
+    return result.length > 0;
+  }
+
   async getPharmacies(): Promise<Pharmacy[]> {
     return db.select().from(pharmacies).orderBy(desc(pharmacies.createdAt));
   }

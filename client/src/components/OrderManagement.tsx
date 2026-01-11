@@ -80,12 +80,14 @@ interface EditingDelivery extends Partial<Delivery> {
 
 interface OrderManagementProps {
   batchId?: number | null;
+  pharmacyId?: number | null;
   onBatchCreated?: (batchId: number) => void;
   onBatchSelected?: (batchId: number | null) => void;
 }
 
 export default function OrderManagement({
   batchId,
+  pharmacyId,
   onBatchCreated,
   onBatchSelected,
 }: OrderManagementProps) {
