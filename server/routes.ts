@@ -36,6 +36,37 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+async function checkBatchOwnership(batchId: number, session: any): Promise<boolean> {
+  if (session?.user?.role === 'admin') return true;
+  if (!session?.user?.pharmacyId) return false;
+  const batch = await storage.getBatch(batchId);
+  return batch?.pharmacyId === session.user.pharmacyId;
+}
+
+async function checkDeliveryOwnership(deliveryId: number, session: any): Promise<boolean> {
+  if (session?.user?.role === 'admin') return true;
+  if (!session?.user?.pharmacyId) return false;
+  const delivery = await storage.getDelivery(deliveryId);
+  if (!delivery) return false;
+  
+  // If delivery has a batch, check batch ownership
+  if (delivery.batchId) {
+    return checkBatchOwnership(delivery.batchId, session);
+  }
+  
+  // Deliveries without batches are not accessible to pharmacy users
+  // (should not occur in normal flow since all deliveries require a batch)
+  return false;
+}
+
+async function checkRouteOwnership(routeId: number, session: any): Promise<boolean> {
+  if (session?.user?.role === 'admin') return true;
+  if (!session?.user?.pharmacyId) return false;
+  const route = await storage.getRoute(routeId);
+  if (!route?.batchId) return false;
+  return checkBatchOwnership(route.batchId, session);
+}
+
 interface GeocodedAddress {
   address: string;
   lat: number;
@@ -498,7 +529,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers", async (req, res) => {
+  app.get("/api/drivers", requireAdmin, async (req, res) => {
     try {
       const drivers = await storage.getDrivers();
       res.json(drivers);
@@ -508,7 +539,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/drivers", async (req, res) => {
+  app.post("/api/drivers", requireAdmin, async (req, res) => {
     try {
       const driver = await storage.createDriver(req.body);
       res.json(driver);
@@ -517,7 +548,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers/:id", async (req, res) => {
+  app.get("/api/drivers/:id", requireAdmin, async (req, res) => {
     try {
       const driver = await storage.getDriver(parseInt(req.params.id));
       if (!driver) {
@@ -529,7 +560,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers/:id/routes", async (req, res) => {
+  app.get("/api/drivers/:id/routes", requireAdmin, async (req, res) => {
     try {
       const routes = await storage.getRoutesByDriver(parseInt(req.params.id));
       res.json(routes);
@@ -538,9 +569,14 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/batches", async (req, res) => {
+  app.get("/api/batches", requireAuth, async (req, res) => {
     try {
-      const batches = await storage.getBatches();
+      const session = req.session as any;
+      let batches = await storage.getBatches();
+      // Non-admin users only see their pharmacy's batches
+      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
+        batches = batches.filter(b => b.pharmacyId === session.user.pharmacyId);
+      }
       res.json(batches);
     } catch (error) {
       console.error("Error fetching batches:", error);
@@ -548,9 +584,15 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/batches/:id/status", async (req, res) => {
+  app.patch("/api/batches/:id/status", requireAuth, async (req, res) => {
     try {
       const batchId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkBatchOwnership(batchId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this batch" });
+      }
+      
       const { status } = req.body;
       
       if (!status || !["pending", "ready", "complete", "cancelled"].includes(status)) {
@@ -579,7 +621,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/batches/upload", upload.single("file"), async (req, res) => {
+  app.post("/api/batches/upload", requireAuth, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -595,10 +637,15 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid CSV format", details: parsed.errors });
       }
 
+      // Get pharmacyId from session for ownership
+      const session = req.session as any;
+      const pharmacyId = session?.user?.pharmacyId || null;
+      
       const batch = await storage.createBatch({
         name: req.body.name || `Batch ${new Date().toLocaleDateString()}`,
         status: "processing",
-        totalDeliveries: parsed.data.length
+        totalDeliveries: parsed.data.length,
+        pharmacyId
       });
 
       const deliveries: any[] = [];
@@ -767,9 +814,16 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/batches/:id", async (req, res) => {
+  app.get("/api/batches/:id", requireAuth, async (req, res) => {
     try {
-      const batch = await storage.getBatch(parseInt(req.params.id));
+      const batchId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkBatchOwnership(batchId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this batch" });
+      }
+      
+      const batch = await storage.getBatch(batchId);
       if (!batch) {
         return res.status(404).json({ error: "Batch not found" });
       }
@@ -789,25 +843,39 @@ export async function registerRoutes(
   });
   
   // Prescription endpoints
-  app.get("/api/prescriptions/batch/:batchId", async (req, res) => {
+  app.get("/api/prescriptions/batch/:batchId", requireAuth, async (req, res) => {
     try {
-      const prescriptions = await storage.getPrescriptionsByBatch(parseInt(req.params.batchId));
+      const batchId = parseInt(req.params.batchId);
+      
+      // Check pharmacy ownership
+      if (!await checkBatchOwnership(batchId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this batch" });
+      }
+      
+      const prescriptions = await storage.getPrescriptionsByBatch(batchId);
       res.json(prescriptions);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch prescriptions" });
     }
   });
   
-  app.get("/api/prescriptions/delivery/:deliveryId", async (req, res) => {
+  app.get("/api/prescriptions/delivery/:deliveryId", requireAuth, async (req, res) => {
     try {
-      const prescriptions = await storage.getPrescriptionsByDelivery(parseInt(req.params.deliveryId));
+      const deliveryId = parseInt(req.params.deliveryId);
+      
+      // Check pharmacy ownership
+      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
+      const prescriptions = await storage.getPrescriptionsByDelivery(deliveryId);
       res.json(prescriptions);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch prescriptions" });
     }
   });
   
-  app.post("/api/prescriptions", async (req, res) => {
+  app.post("/api/prescriptions", requireAuth, async (req, res) => {
     try {
       if (!req.body.rxNumber) {
         return res.status(400).json({ error: "RX number is required" });
@@ -815,6 +883,12 @@ export async function registerRoutes(
       if (!req.body.deliveryId) {
         return res.status(400).json({ error: "Delivery ID is required" });
       }
+      
+      // Check delivery ownership
+      if (!await checkDeliveryOwnership(req.body.deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
       const prescription = await storage.createPrescription(req.body);
       io.emit("prescription_created", prescription);
       res.json(prescription);
@@ -824,26 +898,45 @@ export async function registerRoutes(
     }
   });
   
-  app.put("/api/prescriptions/:id", async (req, res) => {
+  app.put("/api/prescriptions/:id", requireAuth, async (req, res) => {
     try {
-      const prescription = await storage.updatePrescription(parseInt(req.params.id), req.body);
+      const prescriptionId = parseInt(req.params.id);
+      const prescription = await storage.getPrescription(prescriptionId);
       if (!prescription) {
         return res.status(404).json({ error: "Prescription not found" });
       }
-      io.emit("prescription_updated", prescription);
-      res.json(prescription);
+      
+      // Check delivery ownership
+      if (!await checkDeliveryOwnership(prescription.deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this prescription" });
+      }
+      
+      const updatedPrescription = await storage.updatePrescription(prescriptionId, req.body);
+      io.emit("prescription_updated", updatedPrescription);
+      res.json(updatedPrescription);
     } catch (error) {
       res.status(500).json({ error: "Failed to update prescription" });
     }
   });
   
-  app.delete("/api/prescriptions/:id", async (req, res) => {
+  app.delete("/api/prescriptions/:id", requireAuth, async (req, res) => {
     try {
-      const success = await storage.deletePrescription(parseInt(req.params.id));
+      const prescriptionId = parseInt(req.params.id);
+      const prescription = await storage.getPrescription(prescriptionId);
+      if (!prescription) {
+        return res.status(404).json({ error: "Prescription not found" });
+      }
+      
+      // Check delivery ownership
+      if (!await checkDeliveryOwnership(prescription.deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this prescription" });
+      }
+      
+      const success = await storage.deletePrescription(prescriptionId);
       if (!success) {
         return res.status(404).json({ error: "Prescription not found" });
       }
-      io.emit("prescription_deleted", { id: parseInt(req.params.id) });
+      io.emit("prescription_deleted", { id: prescriptionId });
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete prescription" });
@@ -869,9 +962,18 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/routes", async (req, res) => {
+  app.get("/api/routes", requireAuth, async (req, res) => {
     try {
-      const routes = await storage.getRoutes();
+      const session = req.session as any;
+      let routes = await storage.getRoutes();
+      // Non-admin users only see routes from their pharmacy's batches
+      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
+        const pharmacyBatches = await storage.getBatches();
+        const pharmacyBatchIds = pharmacyBatches
+          .filter(b => b.pharmacyId === session.user.pharmacyId)
+          .map(b => b.id);
+        routes = routes.filter(r => r.batchId && pharmacyBatchIds.includes(r.batchId));
+      }
       res.json(routes);
     } catch (error) {
       console.error("Error fetching routes:", error);
@@ -879,9 +981,16 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/routes/:id", async (req, res) => {
+  app.get("/api/routes/:id", requireAuth, async (req, res) => {
     try {
-      const route = await storage.getRoute(parseInt(req.params.id));
+      const routeId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
+      const route = await storage.getRoute(routeId);
       if (!route) {
         return res.status(404).json({ error: "Route not found" });
       }
@@ -911,7 +1020,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/optimize", async (req, res) => {
+  app.post("/api/routes/optimize", requireAuth, async (req, res) => {
     try {
       const { batchId, deliveryIds, zoneId, startLat, startLng, startAddress, routeName } = req.body;
 
@@ -924,11 +1033,23 @@ export async function registerRoutes(
       // Support both old batch-based and new deliveryIds-based approach
       if (deliveryIds && Array.isArray(deliveryIds) && deliveryIds.length > 0) {
         // New approach: use selected delivery IDs
+        // Verify ownership of all delivery IDs
+        for (const id of deliveryIds) {
+          if (!await checkDeliveryOwnership(id, req.session)) {
+            return res.status(403).json({ error: "Access denied to one or more deliveries" });
+          }
+        }
+        
         const allDeliveries = await Promise.all(
           deliveryIds.map(id => storage.getDelivery(id))
         );
         geocodedDeliveries = allDeliveries.filter(d => d && d.lat && d.lng) as any[];
       } else if (batchId) {
+        // Check batch ownership
+        if (!await checkBatchOwnership(batchId, req.session)) {
+          return res.status(403).json({ error: "Access denied to this batch" });
+        }
+        
         // Old approach: use batch
         const batch = await storage.getBatch(batchId);
         if (!batch) {
@@ -1065,10 +1186,15 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:id/assign", async (req, res) => {
+  app.post("/api/routes/:id/assign", requireAuth, async (req, res) => {
     try {
       const { driverId } = req.body;
       const routeId = parseInt(req.params.id);
+
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
 
       const route = await storage.assignRouteToDriver(routeId, driverId);
       if (!route) {
@@ -1081,9 +1207,15 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:id/dispatch", async (req, res) => {
+  app.post("/api/routes/:id/dispatch", requireAuth, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
       const route = await storage.getRoute(routeId);
 
       if (!route) {
@@ -1265,7 +1397,7 @@ export async function registerRoutes(
   });
 
   // Pharmacy endpoints (admin only for management)
-  app.get("/api/pharmacies", requireAuth, async (req, res) => {
+  app.get("/api/pharmacies", requireAdmin, async (req, res) => {
     try {
       const pharmacies = await storage.getPharmacies();
       res.json(pharmacies);
@@ -1285,7 +1417,15 @@ export async function registerRoutes(
 
   app.get("/api/pharmacies/:id", requireAuth, async (req, res) => {
     try {
-      const pharmacy = await storage.getPharmacy(parseInt(req.params.id));
+      const pharmacyId = parseInt(req.params.id);
+      const session = req.session as any;
+      
+      // Non-admin users can only access their own pharmacy
+      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId !== pharmacyId) {
+        return res.status(403).json({ error: "Access denied to this pharmacy" });
+      }
+      
+      const pharmacy = await storage.getPharmacy(pharmacyId);
       if (!pharmacy) {
         return res.status(404).json({ error: "Pharmacy not found" });
       }
@@ -1307,8 +1447,8 @@ export async function registerRoutes(
     }
   });
 
-  // Delivery Zone endpoints
-  app.get("/api/zones", async (req, res) => {
+  // Delivery Zone endpoints (admin only for global view)
+  app.get("/api/zones", requireAdmin, async (req, res) => {
     try {
       const zones = await storage.getDeliveryZones();
       res.json(zones);
@@ -1317,7 +1457,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/zones", async (req, res) => {
+  app.post("/api/zones", requireAdmin, async (req, res) => {
     try {
       const zone = await storage.createDeliveryZone(req.body);
       res.json(zone);
@@ -1326,7 +1466,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/zones/:id", async (req, res) => {
+  app.put("/api/zones/:id", requireAdmin, async (req, res) => {
     try {
       const zone = await storage.updateDeliveryZone(parseInt(req.params.id), req.body);
       if (!zone) {
@@ -1338,7 +1478,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/zones/:id", async (req, res) => {
+  app.delete("/api/zones/:id", requireAdmin, async (req, res) => {
     try {
       const success = await storage.deleteDeliveryZone(parseInt(req.params.id));
       if (!success) {
@@ -1350,8 +1490,8 @@ export async function registerRoutes(
     }
   });
 
-  // Driver zone assignment
-  app.get("/api/drivers/:id/zones", async (req, res) => {
+  // Driver zone assignment (admin only)
+  app.get("/api/drivers/:id/zones", requireAdmin, async (req, res) => {
     try {
       const zones = await storage.getDriverZones(parseInt(req.params.id));
       res.json(zones);
@@ -1360,7 +1500,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/drivers/:id/zones", async (req, res) => {
+  app.post("/api/drivers/:id/zones", requireAdmin, async (req, res) => {
     try {
       const { zoneId } = req.body;
       const driverZone = await storage.assignDriverToZone(parseInt(req.params.id), zoneId);
@@ -1370,7 +1510,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/drivers/:driverId/zones/:zoneId", async (req, res) => {
+  app.delete("/api/drivers/:driverId/zones/:zoneId", requireAdmin, async (req, res) => {
     try {
       const success = await storage.removeDriverFromZone(
         parseInt(req.params.driverId),
@@ -1386,8 +1526,9 @@ export async function registerRoutes(
   });
 
   // Get all active deliveries (excluding complete/cancelled) - MUST be before :id routes
-  app.get("/api/deliveries/active", async (req, res) => {
+  app.get("/api/deliveries/active", requireAuth, async (req, res) => {
     try {
+      const session = req.session as any;
       const zoneId = req.query.zoneId ? parseInt(req.query.zoneId as string) : null;
       let activeDeliveries;
       
@@ -1395,6 +1536,15 @@ export async function registerRoutes(
         activeDeliveries = await storage.getActiveDeliveriesByZone(zoneId);
       } else {
         activeDeliveries = await storage.getActiveDeliveries();
+      }
+      
+      // Filter by pharmacy for non-admin users
+      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
+        const pharmacyBatches = await storage.getBatches();
+        const pharmacyBatchIds = pharmacyBatches
+          .filter(b => b.pharmacyId === session.user.pharmacyId)
+          .map(b => b.id);
+        activeDeliveries = activeDeliveries.filter(d => d.batchId && pharmacyBatchIds.includes(d.batchId));
       }
       
       // Attach prescriptions to each delivery
@@ -1413,9 +1563,16 @@ export async function registerRoutes(
   });
 
   // Enhanced delivery endpoints
-  app.get("/api/deliveries/:id", async (req, res) => {
+  app.get("/api/deliveries/:id", requireAuth, async (req, res) => {
     try {
-      const delivery = await storage.getDelivery(parseInt(req.params.id));
+      const deliveryId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
+      const delivery = await storage.getDelivery(deliveryId);
       if (!delivery) {
         return res.status(404).json({ error: "Delivery not found" });
       }
@@ -1425,7 +1582,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/deliveries", async (req, res) => {
+  app.post("/api/deliveries", requireAuth, async (req, res) => {
     try {
       if (!req.body.rxNumber) {
         return res.status(400).json({ error: "RX number is required" });
@@ -1436,6 +1593,12 @@ export async function registerRoutes(
       
       // Generate delivery identifier
       const batchId = req.body.batchId;
+      
+      // Check batch ownership if batchId is provided
+      if (batchId && !await checkBatchOwnership(batchId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this batch" });
+      }
+      
       let deliveryIdentifier = null;
       if (batchId) {
         const sequence = await storage.getNextDeliverySequence(batchId);
@@ -1474,9 +1637,16 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/deliveries/:id", async (req, res) => {
+  app.put("/api/deliveries/:id", requireAuth, async (req, res) => {
     try {
-      const delivery = await storage.updateDelivery(parseInt(req.params.id), req.body);
+      const deliveryId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
+      const delivery = await storage.updateDelivery(deliveryId, req.body);
       if (!delivery) {
         return res.status(404).json({ error: "Delivery not found" });
       }
@@ -1486,9 +1656,16 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/deliveries/:id", async (req, res) => {
+  app.delete("/api/deliveries/:id", requireAuth, async (req, res) => {
     try {
-      const success = await storage.deleteDelivery(parseInt(req.params.id));
+      const deliveryId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
+      const success = await storage.deleteDelivery(deliveryId);
       if (!success) {
         return res.status(404).json({ error: "Delivery not found" });
       }
@@ -1499,9 +1676,15 @@ export async function registerRoutes(
   });
 
   // Split delivery - move prescriptions to a new delivery
-  app.post("/api/deliveries/:id/split", async (req, res) => {
+  app.post("/api/deliveries/:id/split", requireAuth, async (req, res) => {
     try {
       const sourceDeliveryId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkDeliveryOwnership(sourceDeliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
       const { prescriptionIds } = req.body;
       
       if (!prescriptionIds || !Array.isArray(prescriptionIds) || prescriptionIds.length === 0) {
@@ -1531,9 +1714,15 @@ export async function registerRoutes(
   });
 
   // Merge deliveries - combine multiple deliveries into one
-  app.post("/api/deliveries/:id/merge", async (req, res) => {
+  app.post("/api/deliveries/:id/merge", requireAuth, async (req, res) => {
     try {
       const targetDeliveryId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkDeliveryOwnership(targetDeliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
       const { sourceDeliveryIds } = req.body;
       
       if (!sourceDeliveryIds || !Array.isArray(sourceDeliveryIds) || sourceDeliveryIds.length === 0) {
@@ -1562,7 +1751,7 @@ export async function registerRoutes(
   });
 
   // Move a single prescription to another delivery
-  app.post("/api/prescriptions/:id/move", async (req, res) => {
+  app.post("/api/prescriptions/:id/move", requireAuth, async (req, res) => {
     try {
       const prescriptionId = parseInt(req.params.id);
       const { targetDeliveryId } = req.body;
@@ -1575,6 +1764,14 @@ export async function registerRoutes(
       const prescription = await storage.getPrescription(prescriptionId);
       if (!prescription) {
         return res.status(404).json({ error: "Prescription not found" });
+      }
+      
+      // Check pharmacy ownership for both source and target deliveries
+      if (!await checkDeliveryOwnership(prescription.deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to source delivery" });
+      }
+      if (!await checkDeliveryOwnership(targetDeliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to target delivery" });
       }
       
       const sourcePrescriptions = await storage.getPrescriptionsByDelivery(prescription.deliveryId);
@@ -1596,8 +1793,15 @@ export async function registerRoutes(
   });
 
   // Update delivery status (complete/cancelled)
-  app.patch("/api/deliveries/:id/status", async (req, res) => {
+  app.patch("/api/deliveries/:id/status", requireAuth, async (req, res) => {
     try {
+      const deliveryId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
       const { status } = req.body;
       const validStatuses = ['pending', 'geocoded', 'active', 'complete', 'cancelled'];
       
@@ -1618,7 +1822,7 @@ export async function registerRoutes(
   });
 
   // Route stop priority update
-  app.put("/api/routes/:routeId/stops/:stopId", async (req, res) => {
+  app.put("/api/routes/:routeId/stops/:stopId", requireAuth, async (req, res) => {
     try {
       const stop = await storage.updateRouteStop(parseInt(req.params.stopId), req.body);
       if (!stop) {
@@ -1714,7 +1918,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/deliveries/:id/ocr-logs", async (req, res) => {
+  app.get("/api/deliveries/:id/ocr-logs", requireAuth, async (req, res) => {
     try {
       const logs = await storage.getOcrLogs(parseInt(req.params.id));
       res.json(logs);

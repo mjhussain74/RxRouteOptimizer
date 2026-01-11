@@ -1,12 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Upload, MapPin, Truck, Route, Users, Map, FileText, Building2, LogOut } from "lucide-react";
+import { Upload, MapPin, Route, FileText, Building2, LogOut } from "lucide-react";
 import { Button } from "./ui/button";
 import RouteOptimizer from "./RouteOptimizer";
 import RouteMap from "./RouteMap";
-import DriverManager from "./DriverManager";
 import OrderManagement from "./OrderManagement";
-import ZoneManager from "./ZoneManager";
 import ReportGenerator from "./ReportGenerator";
 
 interface PharmacyDashboardProps {
@@ -16,7 +14,7 @@ interface PharmacyDashboardProps {
   pharmacyName?: string;
 }
 
-type TabType = "orders" | "optimize" | "routes" | "drivers" | "zones" | "reports";
+type TabType = "orders" | "optimize" | "routes" | "reports";
 
 export default function PharmacyDashboard({ onOpenDriverView, onLogout, pharmacyId, pharmacyName }: PharmacyDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("orders");
@@ -31,16 +29,10 @@ export default function PharmacyDashboard({ onOpenDriverView, onLogout, pharmacy
     queryKey: ["/api/routes"],
   });
 
-  const { data: drivers = [] } = useQuery({
-    queryKey: ["/api/drivers"],
-  });
-
   const tabs = [
     { id: "orders" as TabType, label: "Orders", icon: Upload },
     { id: "optimize" as TabType, label: "Optimize Routes", icon: Route },
     { id: "routes" as TabType, label: "View Routes", icon: MapPin },
-    { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
-    { id: "drivers" as TabType, label: "Drivers", icon: Users },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
   ];
 
@@ -132,18 +124,7 @@ export default function PharmacyDashboard({ onOpenDriverView, onLogout, pharmacy
             routes={routes as any[]}
             selectedRouteId={selectedRouteId}
             onSelectRoute={setSelectedRouteId}
-            drivers={drivers as any[]}
-            onOpenDriverView={onOpenDriverView}
-          />
-        )}
-
-        {activeTab === "zones" && (
-          <ZoneManager drivers={drivers as any[]} />
-        )}
-
-        {activeTab === "drivers" && (
-          <DriverManager
-            drivers={drivers as any[]}
+            drivers={[]}
             onOpenDriverView={onOpenDriverView}
           />
         )}

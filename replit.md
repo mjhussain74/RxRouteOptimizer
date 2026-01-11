@@ -140,6 +140,17 @@ address,customer_name,customer_phone,rx_number,notes
   - Completed/cancelled deliveries are not reused for new prescriptions
   - New orders to an already-delivered address get new delivery IDs
   - Direct order selection in Route Optimizer (no barcode scanning required)
+- Role-based authentication and multi-tenant dashboards (2026-01-11):
+  - Session-based authentication using express-session with server-side sessions
+  - Role-based access control: admin (full access) and dispatcher (pharmacy-scoped)
+  - Separate AdminDashboard with pharmacy management and user provisioning
+  - PharmacyDashboard with pharmacy-scoped views for batches, routes, reports
+  - Initial admin setup flow on first launch
+  - Protected API endpoints with requireAuth and requireAdmin middleware
+  - Comprehensive ownership validation on all data endpoints (batches, deliveries, routes, prescriptions)
+  - Driver and zone management restricted to admin role only
+  - Ownership checks on route optimization with batch/delivery validation
+  - Prescription CRUD endpoints validate delivery ownership
 
 ## User Preferences
 - Dark theme UI preferred
