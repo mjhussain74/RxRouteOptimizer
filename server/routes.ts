@@ -398,10 +398,16 @@ export async function registerRoutes(
       
       for (const row of parsed.data as any[]) {
         // Support both old format (address column) and new format (separate address fields)
-        const streetAddress = row.patientaddress || row.street || row.Street || '';
-        const city = row.patcity || row.city || row.City || '';
-        const state = row.patstate || row.state || row.State || '';
-        const zipCode = row.patzip || row.zip || row.Zip || row.zipcode || '';
+        // Column names are case-insensitive - check multiple variations
+        const streetAddress = row.pataddress || row.PatAddress || row.PATADDRESS || 
+                              row.patientaddress || row.PatientAddress || 
+                              row.street || row.Street || row.STREET || '';
+        const city = row.patcity || row.PatCity || row.PATCITY || 
+                     row.city || row.City || row.CITY || '';
+        const state = row.patstate || row.PatState || row.PATSTATE || 
+                      row.state || row.State || row.STATE || '';
+        const zipCode = row.patzip || row.PatZip || row.PATZIP || 
+                        row.zip || row.Zip || row.ZIP || row.zipcode || row.ZipCode || '';
         
         // Check if we have component address fields or a full address
         let addressText: string;
@@ -422,18 +428,30 @@ export async function registerRoutes(
           continue;
         }
 
-        // Get RX number (required field)
-        const rxNumber = row.rxno || row.rx_number || row.rx_no || row.Rx_Number || row.RxNo || row.rxNumber || row.RX || row.rx || null;
+        // Get RX number (required field) - support multiple column name variations
+        const rxNumber = row.rxno || row.RxNo || row.RXNO || row.Rxno ||
+                         row.rx_number || row.Rx_Number || row.RX_NUMBER ||
+                         row.rx_no || row.Rx_No || row.RX_NO ||
+                         row.rxNumber || row.RxNumber || row.RXNUMBER ||
+                         row.RX || row.rx || row.Rx || null;
         if (!rxNumber) {
           skippedCount++;
           skippedReasons.push(`Missing RX number for address: ${addressText.substring(0, 30)}...`);
           continue;
         }
 
-        // Get customer info
-        const customerName = row.patientname || row.customer_name || row.customerName || row.name || null;
-        const customerPhone = row.patphone || row.customer_phone || row.customerPhone || row.phone || null;
-        const notes = row.delivery || row.notes || row.Notes || null;
+        // Get customer info - support multiple column name variations
+        const customerName = row.patientname || row.PatientName || row.PATIENTNAME ||
+                             row.patname || row.PatName || row.PATNAME ||
+                             row.customer_name || row.customerName || row.CustomerName ||
+                             row.name || row.Name || row.NAME || null;
+        const customerPhone = row.patphone || row.PatPhone || row.PATPHONE ||
+                              row.patientphone || row.PatientPhone ||
+                              row.customer_phone || row.customerPhone || row.CustomerPhone ||
+                              row.phone || row.Phone || row.PHONE || null;
+        const notes = row.delivery || row.Delivery || row.DELIVERY ||
+                      row.notes || row.Notes || row.NOTES ||
+                      row.comments || row.Comments || null;
         
         // Check if we already have a delivery for this address (address consolidation)
         let delivery: any;
