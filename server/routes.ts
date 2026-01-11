@@ -665,14 +665,14 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Route not found" });
       }
       const stops = await storage.getRouteStops(route.id);
-      const deliveryIds = stops.map(s => s.deliveryId);
-      const batch = route.batchId ? await storage.getBatch(route.batchId) : null;
-      const deliveries = batch ? await storage.getDeliveriesByBatch(batch.id) : [];
       
-      // Attach prescriptions to each delivery
+      // Attach prescriptions to each delivery - fetch delivery directly by ID
       const stopsWithDeliveries = await Promise.all(
         stops.map(async (stop) => {
-          const delivery = deliveries.find(d => d.id === stop.deliveryId);
+          if (!stop.deliveryId) {
+            return { ...stop, delivery: null };
+          }
+          const delivery = await storage.getDelivery(stop.deliveryId);
           if (delivery) {
             const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
             return {
