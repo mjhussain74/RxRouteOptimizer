@@ -403,18 +403,33 @@ export async function registerRoutes(
       // Map to track deliveries by normalized address hash
       const addressDeliveryMap = new Map<string, any>();
       
+      // Helper function to clean Excel formula format (="value" -> value)
+      const cleanExcelValue = (val: any): string => {
+        if (!val) return '';
+        let str = String(val).trim();
+        // Remove Excel formula wrapper ="..." 
+        if (str.startsWith('="') && str.endsWith('"')) {
+          str = str.slice(2, -1);
+        }
+        // Also handle just = prefix
+        if (str.startsWith('=')) {
+          str = str.slice(1);
+        }
+        return str.trim();
+      };
+      
       for (const row of parsed.data as any[]) {
         // Support both old format (address column) and new format (separate address fields)
         // Column names are case-insensitive - check multiple variations
-        const streetAddress = row.pataddress || row.PatAddress || row.PATADDRESS || 
+        const streetAddress = cleanExcelValue(row.PATADDRESS || row.pataddress || row.PatAddress || 
                               row.patientaddress || row.PatientAddress || 
-                              row.street || row.Street || row.STREET || '';
-        const city = row.patcity || row.PatCity || row.PATCITY || 
-                     row.city || row.City || row.CITY || '';
-        const state = row.patstate || row.PatState || row.PATSTATE || 
-                      row.state || row.State || row.STATE || '';
-        const zipCode = row.patzip || row.PatZip || row.PATZIP || 
-                        row.zip || row.Zip || row.ZIP || row.zipcode || row.ZipCode || '';
+                              row.street || row.Street || row.STREET || '');
+        const city = cleanExcelValue(row.PATCITY || row.patcity || row.PatCity || 
+                     row.city || row.City || row.CITY || '');
+        const state = cleanExcelValue(row.PATSTATE || row.patstate || row.PatState || 
+                      row.state || row.State || row.STATE || 'MI');
+        const zipCode = cleanExcelValue(row.PATZIP || row.patzip || row.PatZip || 
+                        row.zip || row.Zip || row.ZIP || row.zipcode || row.ZipCode || '');
         
         // Check if we have component address fields or a full address
         let addressText: string;
@@ -436,11 +451,11 @@ export async function registerRoutes(
         }
 
         // Get RX number (required field) - support multiple column name variations
-        const rxNumber = row.rxno || row.RxNo || row.RXNO || row.Rxno ||
+        const rxNumber = cleanExcelValue(row.RXNO || row.rxno || row.RxNo || row.Rxno ||
                          row.rx_number || row.Rx_Number || row.RX_NUMBER ||
                          row.rx_no || row.Rx_No || row.RX_NO ||
                          row.rxNumber || row.RxNumber || row.RXNUMBER ||
-                         row.RX || row.rx || row.Rx || null;
+                         row.RX || row.rx || row.Rx || '');
         if (!rxNumber) {
           skippedCount++;
           skippedReasons.push(`Missing RX number for address: ${addressText.substring(0, 30)}...`);
@@ -448,17 +463,17 @@ export async function registerRoutes(
         }
 
         // Get customer info - support multiple column name variations
-        const customerName = row.patientname || row.PatientName || row.PATIENTNAME ||
+        const customerName = cleanExcelValue(row.PATIENTNAME || row.patientname || row.PatientName ||
                              row.patname || row.PatName || row.PATNAME ||
                              row.customer_name || row.customerName || row.CustomerName ||
-                             row.name || row.Name || row.NAME || null;
-        const customerPhone = row.patphone || row.PatPhone || row.PATPHONE ||
+                             row.name || row.Name || row.NAME || '');
+        const customerPhone = cleanExcelValue(row.PATPHONE || row.patphone || row.PatPhone ||
                               row.patientphone || row.PatientPhone ||
                               row.customer_phone || row.customerPhone || row.CustomerPhone ||
-                              row.phone || row.Phone || row.PHONE || null;
-        const notes = row.delivery || row.Delivery || row.DELIVERY ||
+                              row.phone || row.Phone || row.PHONE || '');
+        const notes = cleanExcelValue(row.delivery || row.Delivery || row.DELIVERY ||
                       row.notes || row.Notes || row.NOTES ||
-                      row.comments || row.Comments || null;
+                      row.comments || row.Comments || row.DRUGNAME || row.drugname || '');
         
         // Check if we already have a delivery for this address (address consolidation)
         let delivery: any;
