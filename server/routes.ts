@@ -914,6 +914,7 @@ export async function registerRoutes(
 
   app.post("/api/routes/:routeId/stops/:stopId/complete", async (req, res) => {
     try {
+      const routeId = parseInt(req.params.routeId);
       const stopId = parseInt(req.params.stopId);
       const stop = await storage.completeRouteStop(stopId);
 
@@ -922,6 +923,15 @@ export async function registerRoutes(
       }
 
       io.emit("stop_status_update", { stopId, status: "completed" });
+
+      // Check if all stops are completed - if so, mark route as complete
+      const allStops = await storage.getRouteStops(routeId);
+      const allCompleted = allStops.every(s => s.status === "completed");
+      if (allCompleted) {
+        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
+        io.emit("route_completed", { routeId });
+        console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
+      }
 
       res.json(stop);
     } catch (error) {
@@ -945,6 +955,7 @@ export async function registerRoutes(
 
   app.post("/api/routes/:routeId/stops/:stopId/proof", async (req, res) => {
     try {
+      const routeId = parseInt(req.params.routeId);
       const stopId = parseInt(req.params.stopId);
       const { signature, picture, notes, barcode } = req.body;
 
@@ -969,6 +980,15 @@ export async function registerRoutes(
       
       io.emit("proof_submitted", { stopId, proof });
       io.emit("stop_status_update", { stopId, status: "completed" });
+      
+      // Check if all stops are completed - if so, mark route as complete
+      const allStops = await storage.getRouteStops(routeId);
+      const allCompleted = allStops.every(s => s.status === "completed");
+      if (allCompleted) {
+        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
+        io.emit("route_completed", { routeId });
+        console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
+      }
       
       res.json({ proof, stop: completedStop });
     } catch (error) {

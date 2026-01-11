@@ -74,7 +74,7 @@ export default function ReportGenerator({ pharmacyId }: ReportGeneratorProps) {
     enabled: !!selectedBatchId,
   });
 
-  const completedRoutes = routes.filter((r) => r.status === "completed" || r.completedAt);
+  const completedRoutes = routes.filter((r) => r.status === "complete" || r.status === "completed" || r.completedAt);
   const activeRoutes = routes.filter((r) => r.status === "dispatched" || r.status === "active");
   const totalDeliveries = batches.reduce((acc: number, b: any) => acc + (b.totalDeliveries || 0), 0);
   const totalPrescriptions = selectedBatchData?.prescriptions?.length || 0;
@@ -450,7 +450,7 @@ export default function ReportGenerator({ pharmacyId }: ReportGeneratorProps) {
                             </td>
                             <td className="px-4 py-3">
                               <span className={`text-xs px-2 py-1 rounded ${
-                                route.completedAt || route.status === "completed"
+                                route.completedAt || route.status === "complete" || route.status === "completed"
                                   ? "bg-green-500/20 text-green-400"
                                   : route.status === "dispatched"
                                   ? "bg-blue-500/20 text-blue-400"
@@ -458,7 +458,7 @@ export default function ReportGenerator({ pharmacyId }: ReportGeneratorProps) {
                                   ? "bg-yellow-500/20 text-yellow-400"
                                   : "bg-slate-500/20 text-slate-400"
                               }`}>
-                                {route.completedAt ? "Completed" : route.status}
+                                {route.completedAt || route.status === "complete" ? "Complete" : route.status}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-sm text-slate-300">
