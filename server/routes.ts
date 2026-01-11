@@ -999,9 +999,10 @@ export async function registerRoutes(
       }
       
       res.json({ proof, stop: completedStop });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Proof submission error:", error);
-      res.status(500).json({ error: "Failed to submit proof" });
+      const errorMessage = error?.message || "Failed to submit proof";
+      res.status(500).json({ error: errorMessage });
     }
   });
 

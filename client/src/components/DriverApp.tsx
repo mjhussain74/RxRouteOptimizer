@@ -192,7 +192,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
           }),
         },
       );
-      if (!response.ok) throw new Error("Failed to submit proof");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to submit proof");
+      }
       return response.json();
     },
     onSuccess: async () => {
@@ -1094,13 +1097,6 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                         </Button>
                       )}
 
-                      {submitProofMutation.isError && (
-                        <p className="text-red-400 text-xs mt-2">
-                          {submitProofMutation.error instanceof Error
-                            ? submitProofMutation.error.message
-                            : "Verification failed"}
-                        </p>
-                      )}
                     </div>
 
                     <div>
@@ -1187,6 +1183,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     </div>
 
                     <div className="flex flex-col gap-2">
+                      {submitProofMutation.isError && (
+                        <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-3 text-red-400 text-sm">
+                          {submitProofMutation.error instanceof Error
+                            ? submitProofMutation.error.message
+                            : "Failed to submit proof"}
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <Button
                           variant="outline"
