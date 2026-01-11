@@ -599,23 +599,20 @@ export default function RouteOptimizer({
             ) : (
               <div className="max-h-[500px] overflow-y-auto space-y-2">
                 {filteredDeliveries.map((delivery) => {
-                  const isScanned = isDeliveryScanned(delivery);
+                  const isSelected = selectedDeliveryIds.has(delivery.id);
                   return (
                     <div
                       key={delivery.id}
-                      onClick={() => isScanned && toggleDeliverySelection(delivery.id)}
-                      className={`flex items-start gap-3 rounded-lg p-3 transition-colors ${
-                        !isScanned 
-                          ? "bg-slate-900/20 opacity-50 cursor-not-allowed border border-slate-700/50"
-                          : selectedDeliveryIds.has(delivery.id)
-                          ? "bg-blue-500/20 border border-blue-500/50 cursor-pointer"
-                          : "bg-slate-900/30 hover:bg-slate-900/50 border border-transparent cursor-pointer"
+                      onClick={() => toggleDeliverySelection(delivery.id)}
+                      className={`flex items-start gap-3 rounded-lg p-3 transition-colors cursor-pointer ${
+                        isSelected
+                          ? "bg-blue-500/20 border border-blue-500/50"
+                          : "bg-slate-900/30 hover:bg-slate-900/50 border border-transparent"
                       } ${delivery.priority === "urgent" ? "border-l-4 border-l-red-500" : ""}`}
                     >
                       <Checkbox
-                        checked={selectedDeliveryIds.has(delivery.id)}
-                        onCheckedChange={() => isScanned && toggleDeliverySelection(delivery.id)}
-                        disabled={!isScanned}
+                        checked={isSelected}
+                        onCheckedChange={() => toggleDeliverySelection(delivery.id)}
                         className="mt-1"
                       />
                       <div className="flex-1 min-w-0">
@@ -640,36 +637,22 @@ export default function RouteOptimizer({
                           {/* Show prescriptions if available */}
                           {delivery.prescriptions && delivery.prescriptions.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
-                              {delivery.prescriptions.map((rx) => {
-                                const rxScanned = scannedRxNumbers.has(rx.rxNumber);
-                                return (
-                                  <span
-                                    key={rx.id}
-                                    className={`text-xs font-mono px-1.5 py-0.5 rounded ${
-                                      rxScanned 
-                                        ? 'bg-green-500/20 text-green-400' 
-                                        : 'bg-slate-700 text-slate-400'
-                                    }`}
-                                  >
-                                    {rx.rxNumber}
-                                    {rxScanned && <Check className="h-2.5 w-2.5 inline ml-0.5" />}
-                                  </span>
-                                );
-                              })}
+                              {delivery.prescriptions.map((rx) => (
+                                <span
+                                  key={rx.id}
+                                  className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400"
+                                >
+                                  {rx.rxNumber}
+                                </span>
+                              ))}
                             </div>
                           ) : delivery.rxNumber ? (
-                            <p className={`text-xs font-mono ${isScanned ? 'text-green-400' : 'text-slate-500'}`}>
+                            <p className="text-xs font-mono text-slate-500">
                               RX: {delivery.rxNumber}
-                              {isScanned && <Check className="h-3 w-3 inline ml-1" />}
                             </p>
                           ) : null}
                         </div>
                       </div>
-                      {isScanned ? (
-                        <CheckCircle className="h-4 w-4 text-green-400 flex-shrink-0" />
-                      ) : (
-                        <QrCode className="h-4 w-4 text-slate-500 flex-shrink-0" />
-                      )}
                     </div>
                   );
                 })}
