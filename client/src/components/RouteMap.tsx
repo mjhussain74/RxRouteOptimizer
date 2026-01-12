@@ -72,6 +72,7 @@ export default function RouteMap({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ driverId }),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to assign route");
       return response.json();
@@ -86,6 +87,7 @@ export default function RouteMap({
     mutationFn: async (routeId: number) => {
       const response = await fetch(`/api/routes/${routeId}/dispatch`, {
         method: "POST",
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to dispatch route");
       return response.json();

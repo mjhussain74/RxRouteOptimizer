@@ -24,6 +24,7 @@ export default function DriverManager({ drivers, onOpenDriverView }: DriverManag
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to add driver");
       return response.json();

@@ -87,7 +87,7 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
     setSearchError("");
     
     try {
-      const response = await fetch(`/api/geocode?address=${encodeURIComponent(zipCodeSearch.trim())}`);
+      const response = await fetch(`/api/geocode?address=${encodeURIComponent(zipCodeSearch.trim())}`, { credentials: "include" });
       if (!response.ok) {
         throw new Error("Geocoding failed");
       }
@@ -119,6 +119,7 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(zone),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to create zone");
       return response.json();
@@ -142,6 +143,7 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(zone),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to update zone");
       return response.json();
@@ -156,6 +158,7 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
     mutationFn: async (zoneId: number) => {
       const response = await fetch(`/api/zones/${zoneId}`, {
         method: "DELETE",
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to delete zone");
       return response.json();
@@ -171,6 +174,7 @@ export default function ZoneManager({ drivers }: ZoneManagerProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zoneId }),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to assign driver");
       return response.json();

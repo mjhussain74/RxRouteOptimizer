@@ -41,6 +41,7 @@ export default function PharmacyManager() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to create pharmacy");
       return response.json();
@@ -57,6 +58,7 @@ export default function PharmacyManager() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to update pharmacy");
       return response.json();

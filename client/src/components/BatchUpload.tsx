@@ -21,6 +21,7 @@ export default function BatchUpload({ onBatchCreated }: BatchUploadProps) {
       const response = await fetch("/api/batches/upload", {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
       if (!response.ok) {
         throw new Error("Failed to upload batch");

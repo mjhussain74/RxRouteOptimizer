@@ -154,6 +154,7 @@ export default function OrderManagement({
       const response = await fetch("/api/batches/upload", {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -183,6 +184,7 @@ export default function OrderManagement({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(delivery),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Update failed");
       return response.json();
@@ -199,6 +201,7 @@ export default function OrderManagement({
     mutationFn: async (deliveryId: number) => {
       const response = await fetch(`/api/deliveries/${deliveryId}`, {
         method: "DELETE",
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Delete failed");
       return response.json();
@@ -222,6 +225,7 @@ export default function OrderManagement({
           status: "pending",
           priority: "normal",
         }),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to add order");
       return response.json();
@@ -254,6 +258,7 @@ export default function OrderManagement({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ priority }),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to update priority");
       return response.json();
@@ -277,6 +282,7 @@ export default function OrderManagement({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to update status");
       return response.json();
@@ -301,6 +307,7 @@ export default function OrderManagement({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to update batch status");
       return response.json();
@@ -319,6 +326,7 @@ export default function OrderManagement({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prescriptionIds }),
+        credentials: "include",
       });
       if (!response.ok) {
         const error = await response.json();
@@ -341,6 +349,7 @@ export default function OrderManagement({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceDeliveryIds }),
+        credentials: "include",
       });
       if (!response.ok) {
         const error = await response.json();

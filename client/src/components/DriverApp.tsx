@@ -140,6 +140,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         `/api/routes/${routeId}/stops/${stopId}/complete`,
         {
           method: "POST",
+          credentials: "include",
         },
       );
       if (!response.ok) throw new Error("Failed to complete stop");
@@ -201,6 +202,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
             notes: proofNotes,
             barcode: scannedBarcode,
           }),
+          credentials: "include",
         },
       );
       
@@ -248,6 +250,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
             picture: null,
             notes: proofNotes || "Skipped - no signature/photo available",
           }),
+          credentials: "include",
         },
       );
       if (!response.ok) throw new Error("Failed to skip delivery");
@@ -272,6 +275,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
       const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/scan`, {
         method: "POST",
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to scan package");
       return response.json();
@@ -286,6 +290,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     mutationFn: async (routeId: number) => {
       const response = await fetch(`/api/routes/${routeId}/activate`, {
         method: "POST",
+        credentials: "include",
       });
       if (!response.ok) {
         const error = await response.json();
@@ -305,6 +310,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/urgent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
       });
       if (!response.ok) {
         const error = await response.json();
@@ -326,6 +332,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason }),
+        credentials: "include",
       });
       if (!response.ok) {
         const error = await response.json();

@@ -17,7 +17,7 @@ export default function Login() {
   useEffect(() => {
     const checkSetup = async () => {
       try {
-        const response = await fetch('/api/auth/needs-setup');
+        const response = await fetch('/api/auth/needs-setup', { credentials: "include" });
         const data = await response.json();
         setNeedsSetup(data.needsSetup);
       } catch (err) {
@@ -38,6 +38,7 @@ export default function Login() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),
+          credentials: "include",
         });
 
         const data = await response.json();
@@ -55,6 +56,7 @@ export default function Login() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),
+          credentials: "include",
         });
 
         const data = await response.json();

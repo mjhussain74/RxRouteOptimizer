@@ -53,6 +53,7 @@ export default function UserManager({ pharmacies }: UserManagerProps) {
           role: data.role,
           pharmacyId: data.pharmacyId ? parseInt(data.pharmacyId) : null,
         }),
+        credentials: "include",
       });
       if (!response.ok) {
         const error = await response.json();
@@ -72,6 +73,7 @@ export default function UserManager({ pharmacies }: UserManagerProps) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to update user");
       return response.json();
@@ -86,6 +88,7 @@ export default function UserManager({ pharmacies }: UserManagerProps) {
     mutationFn: async (id: number) => {
       const response = await fetch(`/api/users/${id}`, {
         method: "DELETE",
+        credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to delete user");
       return response.json();

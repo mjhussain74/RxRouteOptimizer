@@ -198,6 +198,7 @@ export default function RouteOptimizer({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        credentials: "include",
       });
       if (!response.ok) {
         throw new Error("Failed to optimize route");
@@ -219,7 +220,7 @@ export default function RouteOptimizer({
     try {
       const response = await fetch(
         `/api/geocode?address=${encodeURIComponent(startAddress)}`,
-        { method: "GET" }
+        { method: "GET", credentials: "include" }
       );
       const data = await response.json();
       if (data && data.lat !== undefined && data.lng !== undefined) {
