@@ -972,14 +972,21 @@ export async function registerRoutes(
       const session = req.session as any;
       let routes = await storage.getRoutes();
       // Non-admin users only see routes from their pharmacy's batches
-      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
-        const userPharmacyId = Number(session.user.pharmacyId);
-        const pharmacyBatches = await storage.getBatches();
-        const pharmacyBatchIds = pharmacyBatches
-          .filter(b => Number(b.pharmacyId) === userPharmacyId)
-          .map(b => b.id);
-        console.log(`[Routes Filter] User: ${session.user.username}, PharmacyId: ${userPharmacyId}, BatchIds: ${pharmacyBatchIds.join(',')}`);
-        routes = routes.filter(r => r.batchId && pharmacyBatchIds.includes(r.batchId));
+      // Routes without batchId are excluded for non-admin users (can't determine ownership)
+      if (session?.user?.role !== 'admin') {
+        if (session?.user?.pharmacyId) {
+          const userPharmacyId = Number(session.user.pharmacyId);
+          const pharmacyBatches = await storage.getBatches();
+          const pharmacyBatchIds = pharmacyBatches
+            .filter(b => Number(b.pharmacyId) === userPharmacyId)
+            .map(b => b.id);
+          console.log(`[Routes Filter] User: ${session.user.username}, PharmacyId: ${userPharmacyId}, BatchIds: ${pharmacyBatchIds.join(',')}`);
+          // Only include routes that have a batchId AND that batchId belongs to the user's pharmacy
+          routes = routes.filter(r => r.batchId && pharmacyBatchIds.includes(r.batchId));
+        } else {
+          // Dispatcher without pharmacy - show no routes
+          routes = [];
+        }
       }
       res.json(routes);
     } catch (error) {
