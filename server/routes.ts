@@ -575,17 +575,21 @@ export async function registerRoutes(
       const session = req.session as any;
       let batches: any[];
       
+      console.log(`[Batches API] Full session:`, JSON.stringify(session?.user || 'no user'));
+      
       // Non-admin users only see their pharmacy's batches (filtered at DB level)
       if (session?.user?.role !== 'admin') {
         const userPharmacyId = session?.user?.pharmacyId;
-        console.log(`[Batches API] User: ${session?.user?.username}, Role: ${session?.user?.role}, PharmacyId: ${userPharmacyId}`);
+        console.log(`[Batches API] User: ${session?.user?.username}, Role: ${session?.user?.role}, PharmacyId: ${userPharmacyId} (type: ${typeof userPharmacyId})`);
         
         if (userPharmacyId !== null && userPharmacyId !== undefined) {
-          batches = await storage.getBatchesByPharmacy(Number(userPharmacyId));
-          console.log(`[Batches API] Returning ${batches.length} batches for pharmacy ${userPharmacyId}`);
+          const pharmacyIdNum = Number(userPharmacyId);
+          console.log(`[Batches API] Calling getBatchesByPharmacy(${pharmacyIdNum})`);
+          batches = await storage.getBatchesByPharmacy(pharmacyIdNum);
+          console.log(`[Batches API] Got ${batches.length} batches:`, batches.map(b => ({ id: b.id, pharmacyId: b.pharmacyId })));
         } else {
-          console.log(`[Batches API] Non-admin without pharmacyId, returning empty`);
-          batches = [];
+          console.log(`[Batches API] ERROR: Non-admin dispatcher without pharmacyId!`);
+          return res.status(403).json({ error: "Your account is not associated with a pharmacy. Please contact admin." });
         }
       } else {
         batches = await storage.getBatches();
