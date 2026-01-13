@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { queryClient } from './queryClient';
 
 export interface AuthUser {
   id: number;
@@ -25,13 +26,17 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       isLoading: true,
-      login: (user: AuthUser) => set({ user, isAuthenticated: true, isLoading: false }),
+      login: (user: AuthUser) => {
+        queryClient.clear();
+        set({ user, isAuthenticated: true, isLoading: false });
+      },
       logout: async () => {
         try {
           await fetch('/api/auth/logout', { method: 'POST' });
         } catch (err) {
           console.error('Logout error:', err);
         }
+        queryClient.clear();
         set({ user: null, isAuthenticated: false, isLoading: false });
       },
       checkSession: async () => {

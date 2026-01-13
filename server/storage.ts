@@ -358,6 +358,20 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
+  async getRoutesByPharmacy(pharmacyId: number): Promise<Route[]> {
+    // Get batch IDs for this pharmacy
+    const pharmacyBatches = await this.getBatchesByPharmacy(pharmacyId);
+    const batchIds = pharmacyBatches.map(b => b.id);
+    
+    if (batchIds.length === 0) {
+      return [];
+    }
+    
+    return db.select().from(routes).where(
+      inArray(routes.batchId, batchIds)
+    ).orderBy(desc(routes.createdAt));
+  }
+
   async getActiveDeliveriesByZone(zoneId: number): Promise<Delivery[]> {
     // Get the zone to find its center and radius
     const zone = await this.getDeliveryZone(zoneId);
