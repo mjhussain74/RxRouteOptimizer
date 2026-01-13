@@ -574,14 +574,32 @@ export async function registerRoutes(
     try {
       const session = req.session as any;
       let batches = await storage.getBatches();
+      
+      console.log(`[Batches API] Session user:`, JSON.stringify(session?.user));
+      console.log(`[Batches API] All batches:`, batches.map(b => ({ id: b.id, pharmacyId: b.pharmacyId, name: b.name })));
+      
       // Non-admin users only see their pharmacy's batches
-      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
-        const userPharmacyId = Number(session.user.pharmacyId);
-        console.log(`[Batches Filter] User: ${session.user.username}, Role: ${session.user.role}, PharmacyId: ${userPharmacyId}`);
-        console.log(`[Batches Filter] Total batches before filter: ${batches.length}`);
-        batches = batches.filter(b => Number(b.pharmacyId) === userPharmacyId);
-        console.log(`[Batches Filter] Batches after filter: ${batches.length}`);
+      if (session?.user?.role !== 'admin') {
+        if (session?.user?.pharmacyId) {
+          const userPharmacyId = Number(session.user.pharmacyId);
+          console.log(`[Batches Filter] User: ${session.user.username}, Role: ${session.user.role}, PharmacyId: ${userPharmacyId}`);
+          console.log(`[Batches Filter] Total batches before filter: ${batches.length}`);
+          batches = batches.filter(b => {
+            const batchPharmacyId = Number(b.pharmacyId);
+            const match = batchPharmacyId === userPharmacyId;
+            console.log(`[Batches Filter] Batch ${b.id}: pharmacyId=${b.pharmacyId} (${typeof b.pharmacyId}), converted=${batchPharmacyId}, match=${match}`);
+            return match;
+          });
+          console.log(`[Batches Filter] Batches after filter: ${batches.length}`);
+        } else {
+          // Non-admin without pharmacy - return empty
+          console.log(`[Batches Filter] Non-admin user without pharmacyId, returning empty`);
+          batches = [];
+        }
+      } else {
+        console.log(`[Batches Filter] Admin user, returning all batches`);
       }
+      
       res.json(batches);
     } catch (error) {
       console.error("Error fetching batches:", error);
@@ -1650,21 +1668,25 @@ export async function registerRoutes(
     try {
       const session = req.session as any;
       const zoneId = req.query.zoneId ? parseInt(req.query.zoneId as string) : null;
-      let activeDeliveries;
-      
-      if (zoneId) {
-        activeDeliveries = await storage.getActiveDeliveriesByZone(zoneId);
-      } else {
-        activeDeliveries = await storage.getActiveDeliveries();
-      }
+      let activeDeliveries: any[] = zoneId 
+        ? await storage.getActiveDeliveriesByZone(zoneId)
+        : await storage.getActiveDeliveries();
       
       // Filter by pharmacy for non-admin users
-      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
-        const pharmacyBatches = await storage.getBatches();
-        const pharmacyBatchIds = pharmacyBatches
-          .filter(b => b.pharmacyId === session.user.pharmacyId)
-          .map(b => b.id);
-        activeDeliveries = activeDeliveries.filter(d => d.batchId && pharmacyBatchIds.includes(d.batchId));
+      if (session?.user?.role !== 'admin') {
+        if (session?.user?.pharmacyId) {
+          const userPharmacyId = Number(session.user.pharmacyId);
+          const pharmacyBatches = await storage.getBatches();
+          const pharmacyBatchIds = pharmacyBatches
+            .filter(b => Number(b.pharmacyId) === userPharmacyId)
+            .map(b => b.id);
+          console.log(`[Active Deliveries Filter] User: ${session.user.username}, PharmacyId: ${userPharmacyId}, BatchIds: ${pharmacyBatchIds.join(',')}`);
+          activeDeliveries = activeDeliveries.filter(d => d.batchId && pharmacyBatchIds.includes(d.batchId));
+          console.log(`[Active Deliveries Filter] Filtered to ${activeDeliveries.length} deliveries`);
+        } else {
+          // Non-admin without pharmacy - return empty
+          activeDeliveries = [];
+        }
       }
       
       // Attach prescriptions to each delivery
