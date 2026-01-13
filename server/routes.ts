@@ -573,38 +573,23 @@ export async function registerRoutes(
   app.get("/api/batches", requireAuth, async (req, res) => {
     try {
       const session = req.session as any;
-      let batches = await storage.getBatches();
+      let batches: any[];
       
-      console.log(`[Batches API] Session user:`, JSON.stringify(session?.user));
-      console.log(`[Batches API] All batches:`, batches.map(b => ({ id: b.id, pharmacyId: b.pharmacyId, name: b.name })));
-      
-      // Non-admin users only see their pharmacy's batches
+      // Non-admin users only see their pharmacy's batches (filtered at DB level)
       if (session?.user?.role !== 'admin') {
         const userPharmacyId = session?.user?.pharmacyId;
-        console.log(`[Batches Filter] User: ${session?.user?.username}, Role: ${session?.user?.role}, PharmacyId: ${userPharmacyId} (type: ${typeof userPharmacyId})`);
+        console.log(`[Batches API] User: ${session?.user?.username}, Role: ${session?.user?.role}, PharmacyId: ${userPharmacyId}`);
         
         if (userPharmacyId !== null && userPharmacyId !== undefined) {
-          const userPharmacyIdNum = Number(userPharmacyId);
-          console.log(`[Batches Filter] Total batches before filter: ${batches.length}`);
-          batches = batches.filter(b => {
-            // Skip batches without pharmacyId
-            if (b.pharmacyId === null || b.pharmacyId === undefined) {
-              console.log(`[Batches Filter] Batch ${b.id}: no pharmacyId, excluding`);
-              return false;
-            }
-            const batchPharmacyId = Number(b.pharmacyId);
-            const match = batchPharmacyId === userPharmacyIdNum;
-            console.log(`[Batches Filter] Batch ${b.id}: pharmacyId=${b.pharmacyId}, userPharmacyId=${userPharmacyIdNum}, match=${match}`);
-            return match;
-          });
-          console.log(`[Batches Filter] Batches after filter: ${batches.length}`);
+          batches = await storage.getBatchesByPharmacy(Number(userPharmacyId));
+          console.log(`[Batches API] Returning ${batches.length} batches for pharmacy ${userPharmacyId}`);
         } else {
-          // Non-admin without pharmacy - return empty
-          console.log(`[Batches Filter] Non-admin user without pharmacyId, returning empty`);
+          console.log(`[Batches API] Non-admin without pharmacyId, returning empty`);
           batches = [];
         }
       } else {
-        console.log(`[Batches Filter] Admin user, returning all batches`);
+        batches = await storage.getBatches();
+        console.log(`[Batches API] Admin user, returning all ${batches.length} batches`);
       }
       
       res.json(batches);
@@ -1675,25 +1660,42 @@ export async function registerRoutes(
     try {
       const session = req.session as any;
       const zoneId = req.query.zoneId ? parseInt(req.query.zoneId as string) : null;
-      let activeDeliveries: any[] = zoneId 
-        ? await storage.getActiveDeliveriesByZone(zoneId)
-        : await storage.getActiveDeliveries();
+      let activeDeliveries: any[];
       
-      // Filter by pharmacy for non-admin users
+      // Non-admin users only see their pharmacy's deliveries (filtered at DB level)
       if (session?.user?.role !== 'admin') {
-        if (session?.user?.pharmacyId) {
-          const userPharmacyId = Number(session.user.pharmacyId);
-          const pharmacyBatches = await storage.getBatches();
-          const pharmacyBatchIds = pharmacyBatches
-            .filter(b => Number(b.pharmacyId) === userPharmacyId)
-            .map(b => b.id);
-          console.log(`[Active Deliveries Filter] User: ${session.user.username}, PharmacyId: ${userPharmacyId}, BatchIds: ${pharmacyBatchIds.join(',')}`);
-          activeDeliveries = activeDeliveries.filter(d => d.batchId && pharmacyBatchIds.includes(d.batchId));
-          console.log(`[Active Deliveries Filter] Filtered to ${activeDeliveries.length} deliveries`);
+        const userPharmacyId = session?.user?.pharmacyId;
+        console.log(`[Active Deliveries API] User: ${session?.user?.username}, PharmacyId: ${userPharmacyId}`);
+        
+        if (userPharmacyId !== null && userPharmacyId !== undefined) {
+          // Get deliveries filtered by pharmacy at DB level
+          activeDeliveries = await storage.getActiveDeliveriesByPharmacy(Number(userPharmacyId));
+          console.log(`[Active Deliveries API] Returning ${activeDeliveries.length} deliveries for pharmacy ${userPharmacyId}`);
+          
+          // If zone filtering is also requested, apply it
+          if (zoneId) {
+            const zone = await storage.getDeliveryZone(zoneId);
+            if (zone) {
+              activeDeliveries = activeDeliveries.filter(d => {
+                if (!d.lat || !d.lng) return false;
+                const distance = Math.sqrt(
+                  Math.pow(Number(d.lat) - Number(zone.centerLat), 2) +
+                  Math.pow(Number(d.lng) - Number(zone.centerLng), 2)
+                ) * 111000; // Rough meters conversion
+                return distance <= zone.radiusMeters;
+              });
+            }
+          }
         } else {
-          // Non-admin without pharmacy - return empty
+          console.log(`[Active Deliveries API] Non-admin without pharmacyId, returning empty`);
           activeDeliveries = [];
         }
+      } else {
+        // Admin sees all
+        activeDeliveries = zoneId 
+          ? await storage.getActiveDeliveriesByZone(zoneId)
+          : await storage.getActiveDeliveries();
+        console.log(`[Active Deliveries API] Admin user, returning all ${activeDeliveries.length} deliveries`);
       }
       
       // Attach prescriptions to each delivery

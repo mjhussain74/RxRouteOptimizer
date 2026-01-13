@@ -301,6 +301,12 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(deliveryBatches).orderBy(desc(deliveryBatches.createdAt));
   }
 
+  async getBatchesByPharmacy(pharmacyId: number): Promise<DeliveryBatch[]> {
+    return db.select().from(deliveryBatches)
+      .where(eq(deliveryBatches.pharmacyId, pharmacyId))
+      .orderBy(desc(deliveryBatches.createdAt));
+  }
+
   async getBatch(id: number): Promise<DeliveryBatch | undefined> {
     const result = await db.select().from(deliveryBatches).where(eq(deliveryBatches.id, id));
     return result[0];
@@ -326,6 +332,25 @@ export class DatabaseStorage implements IStorage {
   async getActiveDeliveries(): Promise<Delivery[]> {
     return db.select().from(deliveries).where(
       and(
+        notInArray(deliveries.status, ['complete', 'cancelled']),
+        isNotNull(deliveries.lat),
+        isNotNull(deliveries.lng)
+      )
+    );
+  }
+
+  async getActiveDeliveriesByPharmacy(pharmacyId: number): Promise<Delivery[]> {
+    // Get batch IDs for this pharmacy
+    const pharmacyBatches = await this.getBatchesByPharmacy(pharmacyId);
+    const batchIds = pharmacyBatches.map(b => b.id);
+    
+    if (batchIds.length === 0) {
+      return [];
+    }
+    
+    return db.select().from(deliveries).where(
+      and(
+        inArray(deliveries.batchId, batchIds),
         notInArray(deliveries.status, ['complete', 'cancelled']),
         isNotNull(deliveries.lat),
         isNotNull(deliveries.lng)
