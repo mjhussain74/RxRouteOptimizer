@@ -159,24 +159,38 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       routeId: number;
       stopId: number;
     }) => {
-      // Barcode verification - check against prescriptions array or legacy rxNumber
+      // Barcode verification - check against delivery ID, prescriptions array, or legacy rxNumber
       if (scannedBarcode) {
         const trimmedBarcode = scannedBarcode.trim().toLowerCase();
         const delivery = currentStop?.delivery;
         
-        // Check if barcode matches any prescription or legacy rxNumber
+        // Check if barcode matches delivery ID, any prescription, or legacy rxNumber
         let barcodeValid = false;
         
-        if (delivery?.prescriptions && delivery.prescriptions.length > 0) {
+        // Check against delivery identifier (actual or fallback DEL-{id})
+        if (delivery?.deliveryIdentifier) {
+          barcodeValid = delivery.deliveryIdentifier.toLowerCase() === trimmedBarcode;
+        }
+        // Also check fallback format DEL-{id} for deliveries without identifiers
+        if (!barcodeValid && delivery?.id) {
+          const fallbackId = `del-${delivery.id}`;
+          barcodeValid = fallbackId === trimmedBarcode;
+        }
+        
+        // If not matched, check prescriptions
+        if (!barcodeValid && delivery?.prescriptions && delivery.prescriptions.length > 0) {
           barcodeValid = delivery.prescriptions.some(
             (rx: any) => rx.rxNumber?.toLowerCase() === trimmedBarcode
           );
-        } else if (delivery?.rxNumber) {
+        }
+        
+        // If still not matched, check legacy rxNumber
+        if (!barcodeValid && delivery?.rxNumber) {
           barcodeValid = delivery.rxNumber.trim().toLowerCase() === trimmedBarcode;
         }
         
-        if (!barcodeValid && (delivery?.prescriptions?.length > 0 || delivery?.rxNumber)) {
-          throw new Error("Scanned barcode does not match any prescription number for this delivery");
+        if (!barcodeValid && delivery) {
+          throw new Error("Scanned barcode does not match delivery ID or any prescription number");
         }
       }
 
@@ -1062,15 +1076,25 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 <CardContent className="space-y-6">
                   <div className="space-y-4">
                     <div className="bg-slate-900/50 rounded-lg p-4 border border-blue-500/20">
-                      <div className="flex items-center justify-between mb-2">
-                        <Label className="text-slate-300">
-                          Scan Barcode (Rx Number)
-                        </Label>
-                        <span className="text-xs font-mono text-blue-400">
-                          {currentStop?.delivery?.prescriptions && currentStop.delivery.prescriptions.length > 0 
-                            ? currentStop.delivery.prescriptions.map((rx: any) => rx.rxNumber).join(", ")
-                            : currentStop?.delivery?.rxNumber || "N/A"}
-                        </span>
+                      <div className="flex flex-col gap-1 mb-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">
+                            Scan Delivery Label
+                          </Label>
+                          <span className="text-xs font-mono text-green-400">
+                            {currentStop?.delivery?.deliveryIdentifier || `DEL-${currentStop?.delivery?.id || 'N/A'}`}
+                          </span>
+                        </div>
+                        {(currentStop?.delivery?.prescriptions?.length > 0 || currentStop?.delivery?.rxNumber) && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">or Rx Number</span>
+                            <span className="text-xs font-mono text-blue-400">
+                              {currentStop?.delivery?.prescriptions && currentStop.delivery.prescriptions.length > 0 
+                                ? currentStop.delivery.prescriptions.map((rx: any) => rx.rxNumber).join(", ")
+                                : currentStop?.delivery?.rxNumber || "N/A"}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {isScanning ? (

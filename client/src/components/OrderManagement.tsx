@@ -37,6 +37,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import * as XLSX from "xlsx";
+import JsBarcode from "jsbarcode";
 
 interface Prescription {
   id: number;
@@ -415,12 +416,27 @@ export default function OrderManagement({
     const pharmacyName = "RX Delivery Pharmacy";
     const today = new Date().toLocaleDateString();
     const rxNumbers = delivery.prescriptions?.map(p => p.rxNumber).join(", ") || delivery.rxNumber || "N/A";
+    const deliveryId = delivery.deliveryIdentifier || `DEL-${delivery.id}`;
+    
+    const canvas = document.createElement('canvas');
+    try {
+      JsBarcode(canvas, deliveryId, {
+        format: "CODE128",
+        width: 2,
+        height: 60,
+        displayValue: false,
+        margin: 5
+      });
+    } catch (err) {
+      console.error("Barcode generation error:", err);
+    }
+    const barcodeDataUrl = canvas.toDataURL("image/png");
     
     const labelHtml = `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Delivery Label - ${delivery.deliveryIdentifier || 'DEL-' + delivery.id}</title>
+        <title>Delivery Label - ${deliveryId}</title>
         <style>
           @page { size: 4in 6in; margin: 0.25in; }
           body {
@@ -462,7 +478,15 @@ export default function OrderManagement({
             background: #f0f0f0;
             padding: 8px;
             border-radius: 4px;
+            margin-bottom: 8px;
+          }
+          .barcode-container {
+            text-align: center;
             margin-bottom: 15px;
+          }
+          .barcode-container img {
+            max-width: 100%;
+            height: auto;
           }
           .rx-numbers {
             font-size: 16px;
@@ -490,7 +514,10 @@ export default function OrderManagement({
         <div class="label-container">
           <div class="pharmacy-name">${pharmacyName}</div>
           <div class="date">Date: ${today}</div>
-          <div class="delivery-id">${delivery.deliveryIdentifier || 'DEL-' + delivery.id}</div>
+          <div class="delivery-id">${deliveryId}</div>
+          <div class="barcode-container">
+            <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
+          </div>
           <div class="field">
             <div class="field-label">Deliver To</div>
             <div class="field-value address">${delivery.addressText}</div>
