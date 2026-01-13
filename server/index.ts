@@ -1,37 +1,21 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import MemoryStore from "memorystore";
-import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { Pool } from "@neondatabase/serverless";
 
 const app = express();
 const httpServer = createServer(app);
 
-// Use PostgreSQL for session storage in production (persists across restarts)
-// Use MemoryStore in development for simplicity
 const isProduction = process.env.NODE_ENV === 'production';
 
-let sessionStore: session.Store;
-
-if (isProduction && process.env.DATABASE_URL) {
-  const PgSession = connectPgSimple(session);
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  sessionStore = new PgSession({
-    pool: pool as any,
-    tableName: 'session',
-    createTableIfMissing: true
-  });
-  console.log('Using PostgreSQL session store for production');
-} else {
-  const MemoryStoreSession = MemoryStore(session);
-  sessionStore = new MemoryStoreSession({
-    checkPeriod: 86400000
-  });
-  console.log('Using MemoryStore session store for development');
-}
+// Use MemoryStore for sessions (simpler and works with Neon serverless)
+// Sessions will be lost on restart, but users can log in again
+const MemoryStoreSession = MemoryStore(session);
+const sessionStore = new MemoryStoreSession({
+  checkPeriod: 86400000
+});
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
