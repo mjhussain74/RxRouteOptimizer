@@ -1,37 +1,58 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import MemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { Pool } from "@neondatabase/serverless";
 
 const app = express();
 const httpServer = createServer(app);
 
-const MemoryStoreSession = MemoryStore(session);
+// Use PostgreSQL for session storage in production (persists across restarts)
+// Use MemoryStore in development for simplicity
+const isProduction = process.env.NODE_ENV === 'production';
+
+let sessionStore: session.Store;
+
+if (isProduction && process.env.DATABASE_URL) {
+  const PgSession = connectPgSimple(session);
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  sessionStore = new PgSession({
+    pool: pool as any,
+    tableName: 'session',
+    createTableIfMissing: true
+  });
+  console.log('Using PostgreSQL session store for production');
+} else {
+  const MemoryStoreSession = MemoryStore(session);
+  sessionStore = new MemoryStoreSession({
+    checkPeriod: 86400000
+  });
+  console.log('Using MemoryStore session store for development');
+}
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'route-optimizer-secret-key',
   resave: false,
   saveUninitialized: false,
-  store: new MemoryStoreSession({
-    checkPeriod: 86400000
-  }),
+  store: sessionStore,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    sameSite: isProduction ? 'none' : 'lax'
   },
-  proxy: process.env.NODE_ENV === 'production'
+  proxy: isProduction
 }));
-
-if (process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1);
-}
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

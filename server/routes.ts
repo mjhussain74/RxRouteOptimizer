@@ -580,14 +580,21 @@ export async function registerRoutes(
       
       // Non-admin users only see their pharmacy's batches
       if (session?.user?.role !== 'admin') {
-        if (session?.user?.pharmacyId) {
-          const userPharmacyId = Number(session.user.pharmacyId);
-          console.log(`[Batches Filter] User: ${session.user.username}, Role: ${session.user.role}, PharmacyId: ${userPharmacyId}`);
+        const userPharmacyId = session?.user?.pharmacyId;
+        console.log(`[Batches Filter] User: ${session?.user?.username}, Role: ${session?.user?.role}, PharmacyId: ${userPharmacyId} (type: ${typeof userPharmacyId})`);
+        
+        if (userPharmacyId !== null && userPharmacyId !== undefined) {
+          const userPharmacyIdNum = Number(userPharmacyId);
           console.log(`[Batches Filter] Total batches before filter: ${batches.length}`);
           batches = batches.filter(b => {
+            // Skip batches without pharmacyId
+            if (b.pharmacyId === null || b.pharmacyId === undefined) {
+              console.log(`[Batches Filter] Batch ${b.id}: no pharmacyId, excluding`);
+              return false;
+            }
             const batchPharmacyId = Number(b.pharmacyId);
-            const match = batchPharmacyId === userPharmacyId;
-            console.log(`[Batches Filter] Batch ${b.id}: pharmacyId=${b.pharmacyId} (${typeof b.pharmacyId}), converted=${batchPharmacyId}, match=${match}`);
+            const match = batchPharmacyId === userPharmacyIdNum;
+            console.log(`[Batches Filter] Batch ${b.id}: pharmacyId=${b.pharmacyId}, userPharmacyId=${userPharmacyIdNum}, match=${match}`);
             return match;
           });
           console.log(`[Batches Filter] Batches after filter: ${batches.length}`);
