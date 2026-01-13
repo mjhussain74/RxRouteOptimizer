@@ -40,7 +40,8 @@ async function checkBatchOwnership(batchId: number, session: any): Promise<boole
   if (session?.user?.role === 'admin') return true;
   if (!session?.user?.pharmacyId) return false;
   const batch = await storage.getBatch(batchId);
-  return batch?.pharmacyId === session.user.pharmacyId;
+  if (!batch?.pharmacyId) return false;
+  return Number(batch.pharmacyId) === Number(session.user.pharmacyId);
 }
 
 async function checkDeliveryOwnership(deliveryId: number, session: any): Promise<boolean> {
@@ -575,7 +576,11 @@ export async function registerRoutes(
       let batches = await storage.getBatches();
       // Non-admin users only see their pharmacy's batches
       if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
-        batches = batches.filter(b => b.pharmacyId === session.user.pharmacyId);
+        const userPharmacyId = Number(session.user.pharmacyId);
+        console.log(`[Batches Filter] User: ${session.user.username}, Role: ${session.user.role}, PharmacyId: ${userPharmacyId}`);
+        console.log(`[Batches Filter] Total batches before filter: ${batches.length}`);
+        batches = batches.filter(b => Number(b.pharmacyId) === userPharmacyId);
+        console.log(`[Batches Filter] Batches after filter: ${batches.length}`);
       }
       res.json(batches);
     } catch (error) {
@@ -968,10 +973,12 @@ export async function registerRoutes(
       let routes = await storage.getRoutes();
       // Non-admin users only see routes from their pharmacy's batches
       if (session?.user?.role !== 'admin' && session?.user?.pharmacyId) {
+        const userPharmacyId = Number(session.user.pharmacyId);
         const pharmacyBatches = await storage.getBatches();
         const pharmacyBatchIds = pharmacyBatches
-          .filter(b => b.pharmacyId === session.user.pharmacyId)
+          .filter(b => Number(b.pharmacyId) === userPharmacyId)
           .map(b => b.id);
+        console.log(`[Routes Filter] User: ${session.user.username}, PharmacyId: ${userPharmacyId}, BatchIds: ${pharmacyBatchIds.join(',')}`);
         routes = routes.filter(r => r.batchId && pharmacyBatchIds.includes(r.batchId));
       }
       res.json(routes);
