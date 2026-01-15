@@ -498,72 +498,100 @@ export default function OrderManagement({
       <head>
         <title>Delivery Label - ${deliveryId}</title>
         <style>
-          @page { size: 4in 6in; margin: 0.25in; }
+          @page { size: 3in 2in; margin: 0.1in; }
           body {
             font-family: Arial, sans-serif;
-            padding: 20px;
-            max-width: 4in;
-            margin: 0 auto;
+            padding: 4px;
+            width: 3in;
+            height: 2in;
+            margin: 0;
+            box-sizing: border-box;
           }
           .label-container {
-            border: 2px solid #000;
-            padding: 15px;
-            border-radius: 8px;
+            border: 1px solid #000;
+            padding: 6px;
+            border-radius: 4px;
+            height: calc(2in - 8px - 0.2in);
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+          }
+          .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #000;
+            padding-bottom: 3px;
+            margin-bottom: 4px;
           }
           .pharmacy-name {
-            font-size: 18px;
+            font-size: 10px;
             font-weight: bold;
-            text-align: center;
-            border-bottom: 2px solid #000;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
           }
-          .field {
-            margin-bottom: 12px;
-          }
-          .field-label {
-            font-size: 11px;
+          .date {
+            font-size: 8px;
             color: #666;
-            text-transform: uppercase;
-            margin-bottom: 2px;
-          }
-          .field-value {
-            font-size: 14px;
-            font-weight: 500;
           }
           .delivery-id {
-            font-size: 20px;
+            font-size: 11px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 8px;
-            border-radius: 4px;
-            margin-bottom: 8px;
+            padding: 2px 4px;
+            border-radius: 2px;
+            margin-bottom: 3px;
           }
           .barcode-container {
             text-align: center;
-            margin-bottom: 15px;
+            margin-bottom: 3px;
           }
           .barcode-container img {
             max-width: 100%;
-            height: auto;
+            height: 30px;
           }
-          .rx-numbers {
-            font-size: 16px;
-            font-weight: bold;
-            background: #e8f4e8;
-            padding: 10px;
-            border-radius: 4px;
-            text-align: center;
+          .content-row {
+            display: flex;
+            gap: 6px;
+            flex: 1;
+            min-height: 0;
+          }
+          .left-col {
+            flex: 1;
+            overflow: hidden;
+          }
+          .right-col {
+            width: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .field {
+            margin-bottom: 2px;
+          }
+          .field-label {
+            font-size: 7px;
+            color: #666;
+            text-transform: uppercase;
+          }
+          .field-value {
+            font-size: 9px;
+            font-weight: 500;
+            line-height: 1.2;
           }
           .address {
-            font-size: 16px;
-            line-height: 1.4;
+            font-size: 8px;
+            line-height: 1.1;
           }
-          .date {
-            text-align: right;
-            font-size: 12px;
-            color: #666;
+          .rx-numbers {
+            font-size: 9px;
+            font-weight: bold;
+            background: #e8f4e8;
+            padding: 3px;
+            border-radius: 2px;
+            text-align: center;
+          }
+          .rx-numbers .field-label {
+            font-size: 6px;
           }
           @media print {
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -572,29 +600,33 @@ export default function OrderManagement({
       </head>
       <body>
         <div class="label-container">
-          <div class="pharmacy-name">${pharmacyName}</div>
-          <div class="date">Date: ${today}</div>
+          <div class="header-row">
+            <div class="pharmacy-name">${pharmacyName}</div>
+            <div class="date">${today}</div>
+          </div>
           <div class="delivery-id">${deliveryId}</div>
           <div class="barcode-container">
             <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
           </div>
-          <div class="field">
-            <div class="field-label">Deliver To</div>
-            <div class="field-value address">${delivery.addressText}</div>
+          <div class="content-row">
+            <div class="left-col">
+              <div class="field">
+                <div class="field-label">Deliver To</div>
+                <div class="field-value address">${delivery.addressText}</div>
+              </div>
+              <div class="field">
+                <div class="field-label">Customer</div>
+                <div class="field-value">${delivery.customerName || "N/A"} ${delivery.customerPhone ? `| ${delivery.customerPhone}` : ""}</div>
+              </div>
+              ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
+            </div>
+            <div class="right-col">
+              <div class="rx-numbers">
+                <div class="field-label">RX#</div>
+                ${rxNumbers}
+              </div>
+            </div>
           </div>
-          <div class="field">
-            <div class="field-label">Customer</div>
-            <div class="field-value">${delivery.customerName || "N/A"}</div>
-          </div>
-          <div class="field">
-            <div class="field-label">Phone</div>
-            <div class="field-value">${delivery.customerPhone || "N/A"}</div>
-          </div>
-          <div class="rx-numbers">
-            <div class="field-label">RX Number(s)</div>
-            ${rxNumbers}
-          </div>
-          ${delivery.notes ? `<div class="field" style="margin-top: 12px;"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
         </div>
       </body>
       </html>
