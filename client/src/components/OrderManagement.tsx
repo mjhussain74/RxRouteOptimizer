@@ -117,14 +117,18 @@ export default function OrderManagement({
     batchId?: number;
     deliveryId?: number;
   } | null>(null);
-  
+
   const [showSplitDialog, setShowSplitDialog] = useState(false);
   const [splitDelivery, setSplitDelivery] = useState<Delivery | null>(null);
-  const [selectedPrescriptionsForSplit, setSelectedPrescriptionsForSplit] = useState<number[]>([]);
-  
+  const [selectedPrescriptionsForSplit, setSelectedPrescriptionsForSplit] =
+    useState<number[]>([]);
+
   const [showMergeDialog, setShowMergeDialog] = useState(false);
-  const [mergeTargetDelivery, setMergeTargetDelivery] = useState<Delivery | null>(null);
-  const [selectedDeliveriesForMerge, setSelectedDeliveriesForMerge] = useState<number[]>([]);
+  const [mergeTargetDelivery, setMergeTargetDelivery] =
+    useState<Delivery | null>(null);
+  const [selectedDeliveriesForMerge, setSelectedDeliveriesForMerge] = useState<
+    number[]
+  >([]);
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -322,7 +326,13 @@ export default function OrderManagement({
   });
 
   const splitDeliveryMutation = useMutation({
-    mutationFn: async ({ deliveryId, prescriptionIds }: { deliveryId: number; prescriptionIds: number[] }) => {
+    mutationFn: async ({
+      deliveryId,
+      prescriptionIds,
+    }: {
+      deliveryId: number;
+      prescriptionIds: number[];
+    }) => {
       const response = await fetch(`/api/deliveries/${deliveryId}/split`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -336,7 +346,9 @@ export default function OrderManagement({
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
+      queryClient.invalidateQueries({
+        queryKey: [`/api/batches/${activeBatchId}`],
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
       setShowSplitDialog(false);
       setSplitDelivery(null);
@@ -345,13 +357,22 @@ export default function OrderManagement({
   });
 
   const mergeDeliveriesMutation = useMutation({
-    mutationFn: async ({ targetDeliveryId, sourceDeliveryIds }: { targetDeliveryId: number; sourceDeliveryIds: number[] }) => {
-      const response = await fetch(`/api/deliveries/${targetDeliveryId}/merge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceDeliveryIds }),
-        credentials: "include",
-      });
+    mutationFn: async ({
+      targetDeliveryId,
+      sourceDeliveryIds,
+    }: {
+      targetDeliveryId: number;
+      sourceDeliveryIds: number[];
+    }) => {
+      const response = await fetch(
+        `/api/deliveries/${targetDeliveryId}/merge`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourceDeliveryIds }),
+          credentials: "include",
+        },
+      );
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Failed to merge deliveries");
@@ -359,7 +380,9 @@ export default function OrderManagement({
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/batches/${activeBatchId}`] });
+      queryClient.invalidateQueries({
+        queryKey: [`/api/batches/${activeBatchId}`],
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
       setShowMergeDialog(false);
       setMergeTargetDelivery(null);
@@ -415,11 +438,14 @@ export default function OrderManagement({
   const printDeliveryLabel = (delivery: Delivery) => {
     const pharmacyName = "RX Delivery Pharmacy";
     const today = new Date().toLocaleDateString();
-    const rxNumbers = delivery.prescriptions?.map(p => p.rxNumber).join(", ") || delivery.rxNumber || "N/A";
+    const rxNumbers =
+      delivery.prescriptions?.map((p) => p.rxNumber).join(", ") ||
+      delivery.rxNumber ||
+      "N/A";
     const deliveryId = delivery.deliveryIdentifier || `DEL-${delivery.id}`;
-    
-    const canvas = document.createElement('canvas');
-    try {
+
+    const canvas = document.createElement("canvas");
+    /*    try {
       JsBarcode(canvas, deliveryId, {
         format: "CODE128",
         width: 2,
@@ -431,7 +457,41 @@ export default function OrderManagement({
       console.error("Barcode generation error:", err);
     }
     const barcodeDataUrl = canvas.toDataURL("image/png");
-    
+  */
+
+    try {
+      const dpr = window.devicePixelRatio || 1;
+      const ctx = canvas.getContext("2d");
+
+      // High DPI canvas
+      const logicalWidth = 400;
+      const logicalHeight = 120;
+
+      canvas.width = logicalWidth * dpr;
+      canvas.height = logicalHeight * dpr;
+      canvas.style.width = `${logicalWidth}px`;
+      canvas.style.height = `${logicalHeight}px`;
+
+      if (ctx) {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      JsBarcode(canvas, deliveryId, {
+        format: "CODE128",
+        width: 3, // 🔑 wider bars
+        height: 80, // 🔑 taller bars
+        displayValue: false,
+        margin: 20, // 🔑 proper quiet zone
+        background: "#ffffff",
+        lineColor: "#000000",
+        flat: true, // prevents anti-alias blur
+      });
+    } catch (err) {
+      console.error("Barcode generation error:", err);
+    }
+
+    const barcodeDataUrl = canvas.toDataURL("image/png");
+
     const labelHtml = `
       <!DOCTYPE html>
       <html>
@@ -524,23 +584,23 @@ export default function OrderManagement({
           </div>
           <div class="field">
             <div class="field-label">Customer</div>
-            <div class="field-value">${delivery.customerName || 'N/A'}</div>
+            <div class="field-value">${delivery.customerName || "N/A"}</div>
           </div>
           <div class="field">
             <div class="field-label">Phone</div>
-            <div class="field-value">${delivery.customerPhone || 'N/A'}</div>
+            <div class="field-value">${delivery.customerPhone || "N/A"}</div>
           </div>
           <div class="rx-numbers">
             <div class="field-label">RX Number(s)</div>
             ${rxNumbers}
           </div>
-          ${delivery.notes ? `<div class="field" style="margin-top: 12px;"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ''}
+          ${delivery.notes ? `<div class="field" style="margin-top: 12px;"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
         </div>
       </body>
       </html>
     `;
-    
-    const printWindow = window.open('', '_blank', 'width=500,height=600');
+
+    const printWindow = window.open("", "_blank", "width=500,height=600");
     if (printWindow) {
       printWindow.document.write(labelHtml);
       printWindow.document.close();
@@ -573,13 +633,14 @@ export default function OrderManagement({
   const filteredDeliveries = deliveries.filter((d) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
-    
+
     // Search in prescription Rx numbers
     const prescriptionMatch = d.prescriptions?.some(
-      (rx) => rx.rxNumber?.toLowerCase().includes(query) ||
-              rx.patientName?.toLowerCase().includes(query)
+      (rx) =>
+        rx.rxNumber?.toLowerCase().includes(query) ||
+        rx.patientName?.toLowerCase().includes(query),
     );
-    
+
     return (
       d.addressText?.toLowerCase().includes(query) ||
       d.customerName?.toLowerCase().includes(query) ||
@@ -777,7 +838,7 @@ export default function OrderManagement({
               )}
             </div>
           </div>
-          
+
           <div className="mt-4 flex justify-center">
             <Button
               variant="outline"
@@ -793,11 +854,11 @@ export default function OrderManagement({
 "789 Pine Road, Queens, NY 11375",Bob Johnson,555-0303,RX-006,Call on arrival
 "321 Elm Street, Bronx, NY 10451",Alice Williams,555-0404,RX-007,Signature required
 "321 Elm Street, Bronx, NY 10451",Alice Williams,555-0404,RX-008,Signature required`;
-                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const blob = new Blob([csvContent], { type: "text/csv" });
                 const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
+                const a = document.createElement("a");
                 a.href = url;
-                a.download = 'sample-orders.csv';
+                a.download = "sample-orders.csv";
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -939,7 +1000,8 @@ export default function OrderManagement({
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-white">
-                        {delivery.prescriptions && delivery.prescriptions.length > 0 ? (
+                        {delivery.prescriptions &&
+                        delivery.prescriptions.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {delivery.prescriptions.map((rx) => (
                               <span
@@ -1330,13 +1392,16 @@ export default function OrderManagement({
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={showSplitDialog} onOpenChange={(open) => {
-        if (!open) {
-          setShowSplitDialog(false);
-          setSplitDelivery(null);
-          setSelectedPrescriptionsForSplit([]);
-        }
-      }}>
+      <Dialog
+        open={showSplitDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowSplitDialog(false);
+            setSplitDelivery(null);
+            setSelectedPrescriptionsForSplit([]);
+          }
+        }}
+      >
         <DialogContent className="bg-slate-800 border-slate-700 max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
@@ -1346,20 +1411,26 @@ export default function OrderManagement({
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-slate-400 text-sm">
-              Select prescriptions to move to a new delivery. At least one prescription must remain in the original delivery.
+              Select prescriptions to move to a new delivery. At least one
+              prescription must remain in the original delivery.
             </p>
-            
+
             {splitDelivery && (
               <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
                 <p className="text-white font-medium text-sm mb-1">
-                  {splitDelivery.deliveryIdentifier || `DEL-${splitDelivery.id}`}
+                  {splitDelivery.deliveryIdentifier ||
+                    `DEL-${splitDelivery.id}`}
                 </p>
-                <p className="text-slate-400 text-xs">{splitDelivery.addressText}</p>
+                <p className="text-slate-400 text-xs">
+                  {splitDelivery.addressText}
+                </p>
               </div>
             )}
 
             <div className="space-y-2">
-              <Label className="text-slate-300">Select prescriptions to split:</Label>
+              <Label className="text-slate-300">
+                Select prescriptions to split:
+              </Label>
               {splitDelivery?.prescriptions?.map((rx) => (
                 <label
                   key={rx.id}
@@ -1370,16 +1441,27 @@ export default function OrderManagement({
                     checked={selectedPrescriptionsForSplit.includes(rx.id)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedPrescriptionsForSplit([...selectedPrescriptionsForSplit, rx.id]);
+                        setSelectedPrescriptionsForSplit([
+                          ...selectedPrescriptionsForSplit,
+                          rx.id,
+                        ]);
                       } else {
-                        setSelectedPrescriptionsForSplit(selectedPrescriptionsForSplit.filter(id => id !== rx.id));
+                        setSelectedPrescriptionsForSplit(
+                          selectedPrescriptionsForSplit.filter(
+                            (id) => id !== rx.id,
+                          ),
+                        );
                       }
                     }}
                     className="w-4 h-4 rounded border-slate-500"
                   />
                   <div className="flex-1">
-                    <p className="text-white font-mono text-sm">{rx.rxNumber}</p>
-                    <p className="text-slate-400 text-xs">{rx.patientName || "No patient name"}</p>
+                    <p className="text-white font-mono text-sm">
+                      {rx.rxNumber}
+                    </p>
+                    <p className="text-slate-400 text-xs">
+                      {rx.patientName || "No patient name"}
+                    </p>
                   </div>
                 </label>
               ))}
@@ -1399,7 +1481,10 @@ export default function OrderManagement({
               </Button>
               <Button
                 onClick={() => {
-                  if (splitDelivery && selectedPrescriptionsForSplit.length > 0) {
+                  if (
+                    splitDelivery &&
+                    selectedPrescriptionsForSplit.length > 0
+                  ) {
                     splitDeliveryMutation.mutate({
                       deliveryId: splitDelivery.id,
                       prescriptionIds: selectedPrescriptionsForSplit,
@@ -1408,25 +1493,31 @@ export default function OrderManagement({
                 }}
                 disabled={
                   selectedPrescriptionsForSplit.length === 0 ||
-                  (splitDelivery?.prescriptions?.length || 0) <= selectedPrescriptionsForSplit.length ||
+                  (splitDelivery?.prescriptions?.length || 0) <=
+                    selectedPrescriptionsForSplit.length ||
                   splitDeliveryMutation.isPending
                 }
                 className="bg-blue-600 hover:bg-blue-700"
               >
-                {splitDeliveryMutation.isPending ? "Splitting..." : "Split Delivery"}
+                {splitDeliveryMutation.isPending
+                  ? "Splitting..."
+                  : "Split Delivery"}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showMergeDialog} onOpenChange={(open) => {
-        if (!open) {
-          setShowMergeDialog(false);
-          setMergeTargetDelivery(null);
-          setSelectedDeliveriesForMerge([]);
-        }
-      }}>
+      <Dialog
+        open={showMergeDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowMergeDialog(false);
+            setMergeTargetDelivery(null);
+            setSelectedDeliveriesForMerge([]);
+          }
+        }}
+      >
         <DialogContent className="bg-slate-800 border-slate-700 max-w-lg max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
@@ -1436,54 +1527,78 @@ export default function OrderManagement({
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-slate-400 text-sm">
-              Select deliveries to merge into the target delivery. Prescriptions from selected deliveries will be combined.
+              Select deliveries to merge into the target delivery. Prescriptions
+              from selected deliveries will be combined.
             </p>
-            
+
             {mergeTargetDelivery && (
               <div className="bg-green-900/30 rounded-lg p-3 border border-green-500/30">
                 <p className="text-green-400 text-xs mb-1">Target Delivery</p>
                 <p className="text-white font-medium text-sm">
-                  {mergeTargetDelivery.deliveryIdentifier || `DEL-${mergeTargetDelivery.id}`}
+                  {mergeTargetDelivery.deliveryIdentifier ||
+                    `DEL-${mergeTargetDelivery.id}`}
                 </p>
-                <p className="text-slate-400 text-xs">{mergeTargetDelivery.addressText}</p>
+                <p className="text-slate-400 text-xs">
+                  {mergeTargetDelivery.addressText}
+                </p>
                 <p className="text-slate-500 text-xs mt-1">
-                  {mergeTargetDelivery.prescriptions?.length || 0} prescription(s)
+                  {mergeTargetDelivery.prescriptions?.length || 0}{" "}
+                  prescription(s)
                 </p>
               </div>
             )}
 
             <div className="space-y-2">
-              <Label className="text-slate-300">Select deliveries to merge:</Label>
+              <Label className="text-slate-300">
+                Select deliveries to merge:
+              </Label>
               {deliveries
-                .filter(d => d.id !== mergeTargetDelivery?.id && d.status !== 'complete' && d.status !== 'cancelled')
+                .filter(
+                  (d) =>
+                    d.id !== mergeTargetDelivery?.id &&
+                    d.status !== "complete" &&
+                    d.status !== "cancelled",
+                )
                 .map((delivery) => (
-                <label
-                  key={delivery.id}
-                  className="flex items-center gap-3 p-3 bg-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedDeliveriesForMerge.includes(delivery.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedDeliveriesForMerge([...selectedDeliveriesForMerge, delivery.id]);
-                      } else {
-                        setSelectedDeliveriesForMerge(selectedDeliveriesForMerge.filter(id => id !== delivery.id));
-                      }
-                    }}
-                    className="w-4 h-4 rounded border-slate-500"
-                  />
-                  <div className="flex-1">
-                    <p className="text-white font-mono text-sm">
-                      {delivery.deliveryIdentifier || `DEL-${delivery.id}`}
-                    </p>
-                    <p className="text-slate-400 text-xs truncate">{delivery.addressText}</p>
-                    <p className="text-slate-500 text-xs">
-                      {delivery.prescriptions?.length || 0} prescription(s): {delivery.prescriptions?.map(p => p.rxNumber).join(", ") || "N/A"}
-                    </p>
-                  </div>
-                </label>
-              ))}
+                  <label
+                    key={delivery.id}
+                    className="flex items-center gap-3 p-3 bg-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-700"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedDeliveriesForMerge.includes(delivery.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedDeliveriesForMerge([
+                            ...selectedDeliveriesForMerge,
+                            delivery.id,
+                          ]);
+                        } else {
+                          setSelectedDeliveriesForMerge(
+                            selectedDeliveriesForMerge.filter(
+                              (id) => id !== delivery.id,
+                            ),
+                          );
+                        }
+                      }}
+                      className="w-4 h-4 rounded border-slate-500"
+                    />
+                    <div className="flex-1">
+                      <p className="text-white font-mono text-sm">
+                        {delivery.deliveryIdentifier || `DEL-${delivery.id}`}
+                      </p>
+                      <p className="text-slate-400 text-xs truncate">
+                        {delivery.addressText}
+                      </p>
+                      <p className="text-slate-500 text-xs">
+                        {delivery.prescriptions?.length || 0} prescription(s):{" "}
+                        {delivery.prescriptions
+                          ?.map((p) => p.rxNumber)
+                          .join(", ") || "N/A"}
+                      </p>
+                    </div>
+                  </label>
+                ))}
             </div>
 
             <div className="flex justify-end gap-2">
@@ -1500,17 +1615,25 @@ export default function OrderManagement({
               </Button>
               <Button
                 onClick={() => {
-                  if (mergeTargetDelivery && selectedDeliveriesForMerge.length > 0) {
+                  if (
+                    mergeTargetDelivery &&
+                    selectedDeliveriesForMerge.length > 0
+                  ) {
                     mergeDeliveriesMutation.mutate({
                       targetDeliveryId: mergeTargetDelivery.id,
                       sourceDeliveryIds: selectedDeliveriesForMerge,
                     });
                   }
                 }}
-                disabled={selectedDeliveriesForMerge.length === 0 || mergeDeliveriesMutation.isPending}
+                disabled={
+                  selectedDeliveriesForMerge.length === 0 ||
+                  mergeDeliveriesMutation.isPending
+                }
                 className="bg-green-600 hover:bg-green-700"
               >
-                {mergeDeliveriesMutation.isPending ? "Merging..." : "Merge Deliveries"}
+                {mergeDeliveriesMutation.isPending
+                  ? "Merging..."
+                  : "Merge Deliveries"}
               </Button>
             </div>
           </div>
@@ -1568,7 +1691,10 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
       const gray = d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
       // Apply contrast enhancement instead of harsh binarization
       const contrast = 1.5;
-      const enhanced = Math.min(255, Math.max(0, (gray - 128) * contrast + 128));
+      const enhanced = Math.min(
+        255,
+        Math.max(0, (gray - 128) * contrast + 128),
+      );
       d[i] = d[i + 1] = d[i + 2] = enhanced;
     }
     ctx.putImageData(img, 0, 0);
@@ -1594,10 +1720,10 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
 
     try {
       const Tesseract = await import("tesseract.js");
-      
+
       // Create worker with explicit logger for debugging
       const worker = await Tesseract.createWorker("eng", 1, {
-        logger: (m: any) => console.log('[Tesseract]', m),
+        logger: (m: any) => console.log("[Tesseract]", m),
       });
 
       // Use less restrictive parameters for better recognition
@@ -1605,27 +1731,27 @@ function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
         preserve_interword_spaces: "1",
       });
 
-      console.log('[OCR] Starting recognition...');
+      console.log("[OCR] Starting recognition...");
       const result = await worker.recognize(canvas);
       await worker.terminate();
 
       const ocrData = result.data as any;
       const text = ocrData.text || "";
-      console.log('[OCR] Raw text:', text);
+      console.log("[OCR] Raw text:", text);
       setDebugText(text || "No text detected");
 
       // Use all text if no high-confidence words found
       const words = ocrData.words?.filter((w: any) => w.confidence > 60) || [];
-      const cleanText = words.length > 0 
-        ? words.map((w: any) => w.text).join(" ")
-        : text;
+      const cleanText =
+        words.length > 0 ? words.map((w: any) => w.text).join(" ") : text;
 
       const rxMatch =
         cleanText.match(/RX\s*#?\s*(\d{6,})/i) ||
         cleanText.match(/\b(\d{7,})\b/);
 
       let patientName = "";
-      const lines = ocrData.lines || text.split('\n').map((t: string) => ({ text: t }));
+      const lines =
+        ocrData.lines || text.split("\n").map((t: string) => ({ text: t }));
       for (const line of lines.map((l: any) => l.text.trim())) {
         if (/^(Patient|Name|PT)/i.test(line)) {
           patientName = line.replace(/^(Patient|Name|PT)[:\s]*/i, "").trim();
