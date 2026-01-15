@@ -372,6 +372,25 @@ export class DatabaseStorage implements IStorage {
     ).orderBy(desc(routes.createdAt));
   }
 
+  async getDeliveriesByPharmacy(pharmacyId: number): Promise<Delivery[]> {
+    // Get batch IDs for this pharmacy
+    const pharmacyBatches = await this.getBatchesByPharmacy(pharmacyId);
+    const batchIds = pharmacyBatches.map(b => b.id);
+    
+    if (batchIds.length === 0) {
+      return [];
+    }
+    
+    return db.select().from(deliveries).where(
+      inArray(deliveries.batchId, batchIds)
+    ).orderBy(desc(deliveries.createdAt));
+  }
+
+  async getRouteStopByDeliveryId(deliveryId: number): Promise<RouteStop | undefined> {
+    const result = await db.select().from(routeStops).where(eq(routeStops.deliveryId, deliveryId)).limit(1);
+    return result[0];
+  }
+
   async getActiveDeliveriesByZone(zoneId: number): Promise<Delivery[]> {
     // Get the zone to find its center and radius
     const zone = await this.getDeliveryZone(zoneId);
@@ -417,6 +436,10 @@ export class DatabaseStorage implements IStorage {
   async getDelivery(id: number): Promise<Delivery | undefined> {
     const result = await db.select().from(deliveries).where(eq(deliveries.id, id));
     return result[0];
+  }
+
+  async getDeliveries(): Promise<Delivery[]> {
+    return db.select().from(deliveries).orderBy(desc(deliveries.createdAt));
   }
 
   async createDelivery(delivery: InsertDelivery): Promise<Delivery> {
@@ -542,6 +565,14 @@ export class DatabaseStorage implements IStorage {
       .set({ status: "completed", actualArrival: new Date() })
       .where(eq(routeStops.id, id))
       .returning();
+    
+    // Also mark the delivery as complete so it's removed from open orders
+    if (result[0]?.deliveryId) {
+      await db.update(deliveries)
+        .set({ status: "complete" })
+        .where(eq(deliveries.id, result[0].deliveryId));
+    }
+    
     return result[0];
   }
 

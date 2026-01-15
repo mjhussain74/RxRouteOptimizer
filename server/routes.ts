@@ -2088,5 +2088,82 @@ export async function registerRoutes(
     }
   });
 
+  // Order-level reporting endpoint - returns deliveries with proof data for pharmacy-scoped reporting
+  app.get("/api/reports/orders", requirePharmacyScope, async (req, res) => {
+    try {
+      const ctx = getPharmacyContext(req.session);
+      if (!ctx) return res.status(401).json({ error: "Not authenticated" });
+      
+      const batchId = req.query.batchId ? parseInt(req.query.batchId as string) : null;
+      const status = req.query.status as string | undefined;
+      
+      // Get deliveries with pharmacy filtering
+      let allDeliveries: any[];
+      if (ctx.isAdmin) {
+        allDeliveries = await storage.getDeliveries();
+      } else {
+        allDeliveries = await storage.getDeliveriesByPharmacy(ctx.pharmacyId!);
+      }
+      
+      // Filter by batch if specified
+      if (batchId) {
+        allDeliveries = allDeliveries.filter(d => d.batchId === batchId);
+      }
+      
+      // Filter by status if specified
+      if (status) {
+        allDeliveries = allDeliveries.filter(d => d.status === status);
+      }
+      
+      // Enrich each delivery with prescriptions and proof data
+      const ordersWithDetails = await Promise.all(
+        allDeliveries.map(async (delivery) => {
+          const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
+          
+          // Find route stop for this delivery to get proof
+          const routeStop = await storage.getRouteStopByDeliveryId(delivery.id);
+          let proof = null;
+          let routeInfo = null;
+          
+          if (routeStop) {
+            proof = await storage.getDeliveryProof(routeStop.id);
+            const route = await storage.getRoute(routeStop.routeId!);
+            if (route) {
+              const driver = route.driverId ? await storage.getDriver(route.driverId) : null;
+              routeInfo = {
+                routeId: route.id,
+                routeName: route.name,
+                routeStatus: route.status,
+                driverName: driver?.name || null,
+                completedAt: routeStop.actualArrival
+              };
+            }
+          }
+          
+          return {
+            ...delivery,
+            prescriptions,
+            proof: proof ? {
+              hasSignature: !!proof.signature,
+              hasPhoto: !!proof.picture,
+              signatureData: proof.signature,
+              photoData: proof.picture,
+              notes: proof.notes,
+              barcode: proof.barcode,
+              timestamp: proof.createdAt
+            } : null,
+            route: routeInfo
+          };
+        })
+      );
+      
+      console.log(`[Orders Report API] User ${ctx.username}, returning ${ordersWithDetails.length} orders`);
+      res.json(ordersWithDetails);
+    } catch (error) {
+      console.error("Orders report error:", error);
+      res.status(500).json({ error: "Failed to fetch orders report" });
+    }
+  });
+
   return httpServer;
 }

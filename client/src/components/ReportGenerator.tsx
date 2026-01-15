@@ -106,6 +106,34 @@ interface RouteReportData {
   }>;
 }
 
+interface OrderWithProof {
+  id: number;
+  deliveryIdentifier: string | null;
+  addressText: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  status: string;
+  batchId: number | null;
+  createdAt: string;
+  prescriptions: Prescription[];
+  proof: {
+    hasSignature: boolean;
+    hasPhoto: boolean;
+    signatureData: string | null;
+    photoData: string | null;
+    notes: string | null;
+    barcode: string | null;
+    timestamp: string;
+  } | null;
+  route: {
+    routeId: number;
+    routeName: string;
+    routeStatus: string;
+    driverName: string | null;
+    completedAt: string | null;
+  } | null;
+}
+
 interface ReportGeneratorProps {
   pharmacyId?: number;
   isAdmin?: boolean;
@@ -117,7 +145,8 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [selectedPharmacyId, setSelectedPharmacyId] = useState<number | null>(null);
-  const [reportType, setReportType] = useState<"routes" | "route-details" | "deliveries" | "prescriptions">("routes");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
+  const [reportType, setReportType] = useState<"orders" | "routes" | "route-details" | "deliveries" | "prescriptions">("orders");
   const [proofDialog, setProofDialog] = useState<{ open: boolean; type: 'signature' | 'photo'; data: string | null }>({ open: false, type: 'signature', data: null });
 
   const { data: batches = [] } = useQuery<any[]>({
@@ -136,6 +165,18 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const { data: pharmacies = [] } = useQuery<any[]>({
     queryKey: ["/api/pharmacies"],
     enabled: isAdmin === true,
+  });
+
+  const { data: ordersData = [] } = useQuery<OrderWithProof[]>({
+    queryKey: ["/api/reports/orders", selectedBatchId, orderStatusFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (selectedBatchId) params.append("batchId", selectedBatchId.toString());
+      if (orderStatusFilter !== "all") params.append("status", orderStatusFilter);
+      const res = await fetch(`/api/reports/orders?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch orders");
+      return res.json();
+    },
   });
 
   const { data: selectedBatchData } = useQuery<BatchWithDeliveries>({
@@ -616,23 +657,160 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
         <CardContent className="p-0">
           <Tabs value={reportType} onValueChange={(v) => setReportType(v as any)} className="w-full">
             <TabsList className="w-full bg-slate-700/50 rounded-none border-b border-slate-700">
+              <TabsTrigger value="orders" className="flex-1 data-[state=active]:bg-slate-600">
+                <Package className="h-4 w-4 mr-2" />
+                Orders
+              </TabsTrigger>
               <TabsTrigger value="routes" className="flex-1 data-[state=active]:bg-slate-600">
                 <Truck className="h-4 w-4 mr-2" />
-                Routes Summary
+                Routes
               </TabsTrigger>
               <TabsTrigger value="route-details" className="flex-1 data-[state=active]:bg-slate-600">
                 <Eye className="h-4 w-4 mr-2" />
                 Route Details
               </TabsTrigger>
               <TabsTrigger value="deliveries" className="flex-1 data-[state=active]:bg-slate-600">
-                <Package className="h-4 w-4 mr-2" />
-                Deliveries
+                <FileText className="h-4 w-4 mr-2" />
+                Batch Deliveries
               </TabsTrigger>
               <TabsTrigger value="prescriptions" className="flex-1 data-[state=active]:bg-slate-600">
                 <Pill className="h-4 w-4 mr-2" />
                 Prescriptions
               </TabsTrigger>
             </TabsList>
+
+            <TabsContent value="orders" className="mt-0">
+              <div className="p-4 border-b border-slate-700 flex gap-4 items-center">
+                <div>
+                  <Label className="text-slate-400 text-xs">Filter by Batch</Label>
+                  <select
+                    value={selectedBatchId || ""}
+                    onChange={(e) => setSelectedBatchId(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-48 h-9 px-3 bg-slate-700 border border-slate-600 text-white rounded-md text-sm"
+                  >
+                    <option value="">All Batches</option>
+                    {filteredBatches.map((batch: any) => (
+                      <option key={batch.id} value={batch.id}>
+                        {batch.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-slate-400 text-xs">Status</Label>
+                  <select
+                    value={orderStatusFilter}
+                    onChange={(e) => setOrderStatusFilter(e.target.value)}
+                    className="w-36 h-9 px-3 bg-slate-700 border border-slate-600 text-white rounded-md text-sm"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="geocoded">Geocoded</option>
+                    <option value="active">Active</option>
+                    <option value="complete">Complete</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+                <div className="ml-auto text-sm text-slate-400">
+                  Showing {ordersData.length} orders
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-700/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Order ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Address</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Customer</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Rx Count</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Route</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Proof</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Completed</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700">
+                    {ordersData.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                          No orders found
+                        </td>
+                      </tr>
+                    ) : (
+                      ordersData.slice(0, 50).map((order) => (
+                        <tr key={order.id} className="hover:bg-slate-700/30">
+                          <td className="px-4 py-3 text-sm text-white font-mono">
+                            {order.deliveryIdentifier || `DEL${order.id}`}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-300 max-w-xs truncate">
+                            {order.addressText}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-300">
+                            {order.customerName || "N/A"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-xs px-2 py-1 rounded ${
+                              order.status === "complete"
+                                ? "bg-green-500/20 text-green-400"
+                                : order.status === "active"
+                                ? "bg-blue-500/20 text-blue-400"
+                                : order.status === "cancelled"
+                                ? "bg-red-500/20 text-red-400"
+                                : "bg-slate-500/20 text-slate-400"
+                            }`}>
+                              {order.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-300">
+                            {order.prescriptions?.length || 0}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-400">
+                            {order.route ? (
+                              <span className="text-blue-400">{order.route.routeName}</span>
+                            ) : (
+                              <span className="text-slate-500">Not routed</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {order.proof ? (
+                              <div className="flex gap-1">
+                                {order.proof.hasSignature && (
+                                  <button
+                                    onClick={() => openProofDialog('signature', order.proof?.signatureData || null)}
+                                    className="p-1 bg-green-500/20 rounded hover:bg-green-500/30"
+                                    title="View Signature"
+                                  >
+                                    <PenTool className="h-3 w-3 text-green-400" />
+                                  </button>
+                                )}
+                                {order.proof.hasPhoto && (
+                                  <button
+                                    onClick={() => openProofDialog('photo', order.proof?.photoData || null)}
+                                    className="p-1 bg-blue-500/20 rounded hover:bg-blue-500/30"
+                                    title="View Photo"
+                                  >
+                                    <Image className="h-3 w-3 text-blue-400" />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-500">No proof</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-400">
+                            {order.route?.completedAt 
+                              ? new Date(order.route.completedAt).toLocaleString()
+                              : order.proof?.timestamp
+                              ? new Date(order.proof.timestamp).toLocaleString()
+                              : "-"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>
             
             <TabsContent value="routes" className="mt-0">
               <div className="overflow-x-auto">
