@@ -442,7 +442,7 @@ export default function OrderManagement({
       delivery.prescriptions?.map((p) => p.rxNumber).join(", ") ||
       delivery.rxNumber ||
       "N/A";
-    const deliveryId = delivery.deliveryIdentifier || `DEL-${delivery.id}`;
+    const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
 
     const canvas = document.createElement("canvas");
     /*    try {
@@ -1419,7 +1419,7 @@ export default function OrderManagement({
               <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
                 <p className="text-white font-medium text-sm mb-1">
                   {splitDelivery.deliveryIdentifier ||
-                    `DEL-${splitDelivery.id}`}
+                    `DEL${splitDelivery.id}`}
                 </p>
                 <p className="text-slate-400 text-xs">
                   {splitDelivery.addressText}
@@ -1536,7 +1536,7 @@ export default function OrderManagement({
                 <p className="text-green-400 text-xs mb-1">Target Delivery</p>
                 <p className="text-white font-medium text-sm">
                   {mergeTargetDelivery.deliveryIdentifier ||
-                    `DEL-${mergeTargetDelivery.id}`}
+                    `DEL${mergeTargetDelivery.id}`}
                 </p>
                 <p className="text-slate-400 text-xs">
                   {mergeTargetDelivery.addressText}
@@ -1585,7 +1585,7 @@ export default function OrderManagement({
                     />
                     <div className="flex-1">
                       <p className="text-white font-mono text-sm">
-                        {delivery.deliveryIdentifier || `DEL-${delivery.id}`}
+                        {delivery.deliveryIdentifier || `DEL${delivery.id}`}
                       </p>
                       <p className="text-slate-400 text-xs truncate">
                         {delivery.addressText}

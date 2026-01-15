@@ -68,7 +68,7 @@ export const deliveryBatches = pgTable("delivery_batches", {
 
 export const deliveries = pgTable("deliveries", {
   id: serial("id").primaryKey(),
-  deliveryIdentifier: text("delivery_identifier"), // DEL-YYYY-NNNNNN format
+  deliveryIdentifier: text("delivery_identifier"), // DELYYYYNNNNNN format
   batchId: integer("batch_id").references(() => deliveryBatches.id),
   pharmacyId: integer("pharmacy_id").references(() => pharmacies.id),
   zoneId: integer("zone_id").references(() => deliveryZones.id),

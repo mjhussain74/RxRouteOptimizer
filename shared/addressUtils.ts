@@ -140,5 +140,5 @@ export function parseAddressComponents(fullAddress: string): {
 export function generateDeliveryIdentifier(batchId: number, sequence: number): string {
   const year = new Date().getFullYear();
   const paddedSequence = sequence.toString().padStart(6, '0');
-  return `DEL-${year}-${paddedSequence}`;
+  return `DEL${year}${paddedSequence}`;
 }

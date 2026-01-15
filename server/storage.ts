@@ -675,7 +675,7 @@ export class DatabaseStorage implements IStorage {
     // Get the next sequence number for the new delivery
     const sequence = await this.getNextDeliverySequence(sourceDelivery.batchId);
     const year = new Date().getFullYear();
-    const deliveryIdentifier = `DEL-${year}-${sequence.toString().padStart(6, '0')}`;
+    const deliveryIdentifier = `DEL${year}${sequence.toString().padStart(6, '0')}`;
 
     // Create a new delivery with the same address info
     const newDelivery = await db.insert(deliveries).values({

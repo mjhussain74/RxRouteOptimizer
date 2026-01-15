@@ -283,7 +283,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
           y = 20;
         }
         const rxCount = delivery.prescriptions?.length || 0;
-        doc.text(`${index + 1}. ${delivery.deliveryIdentifier || `DEL-${delivery.id}`}`, 20, y);
+        doc.text(`${index + 1}. ${delivery.deliveryIdentifier || `DEL${delivery.id}`}`, 20, y);
         y += 5;
         doc.text(`   Address: ${delivery.addressText}`, 20, y);
         y += 5;
@@ -310,7 +310,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
         }
         const delivery = selectedBatchData.deliveries.find(d => d.id === prescription.deliveryId);
         doc.text(
-          `${index + 1}. Rx: ${prescription.rxNumber} | Patient: ${prescription.patientName || "N/A"} | Delivery: ${delivery?.deliveryIdentifier || `DEL-${prescription.deliveryId}`}`,
+          `${index + 1}. Rx: ${prescription.rxNumber} | Patient: ${prescription.patientName || "N/A"} | Delivery: ${delivery?.deliveryIdentifier || `DEL${prescription.deliveryId}`}`,
           20,
           y
         );
@@ -381,7 +381,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
       const rows = selectedBatchData.deliveries.map((delivery) => {
         const rxNumbers = delivery.prescriptions?.map(p => p.rxNumber).join("; ") || "";
         return [
-          delivery.deliveryIdentifier || `DEL-${delivery.id}`,
+          delivery.deliveryIdentifier || `DEL${delivery.id}`,
           delivery.streetAddress || delivery.addressText,
           delivery.city || "",
           delivery.state || "",
@@ -408,7 +408,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
           prescription.rxNumber,
           prescription.patientName || "",
           prescription.patientPhone || "",
-          delivery?.deliveryIdentifier || `DEL-${prescription.deliveryId}`,
+          delivery?.deliveryIdentifier || `DEL${prescription.deliveryId}`,
           delivery?.addressText || "",
           prescription.entryMethod,
           prescription.notes || "",
@@ -859,7 +859,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                       selectedBatchData.deliveries.slice(0, 20).map((delivery) => (
                         <tr key={delivery.id} className="hover:bg-slate-700/30">
                           <td className="px-4 py-3 text-sm text-white font-mono">
-                            {delivery.deliveryIdentifier || `DEL-${delivery.id}`}
+                            {delivery.deliveryIdentifier || `DEL${delivery.id}`}
                           </td>
                           <td className="px-4 py-3 text-sm text-slate-300 max-w-xs truncate">
                             {delivery.streetAddress || delivery.addressText}
@@ -935,7 +935,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                               {prescription.patientPhone || "N/A"}
                             </td>
                             <td className="px-4 py-3 text-sm text-slate-400 font-mono">
-                              {delivery?.deliveryIdentifier || `DEL-${prescription.deliveryId}`}
+                              {delivery?.deliveryIdentifier || `DEL${prescription.deliveryId}`}
                             </td>
                             <td className="px-4 py-3">
                               <span className={`text-xs px-2 py-1 rounded ${

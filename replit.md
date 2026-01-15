@@ -131,7 +131,7 @@ address,customer_name,customer_phone,rx_number,notes
   - New prescriptions table with one-to-many relationship to deliveries
   - Address normalization with SHA256 hashing for consistent address matching
   - Deliveries now consolidate multiple prescriptions by normalized address
-  - Delivery ID generation (DEL-YYYY-NNNNNN format)
+  - Delivery ID generation (DELYYYYNNNNNN format, no hyphens)
   - DriverApp barcode verification supports multiple prescriptions per delivery
   - Enhanced ReportGenerator with delivery-level and prescription-level views
   - Added split/merge delivery functionality for manual override capabilities

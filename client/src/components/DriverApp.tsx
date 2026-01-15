@@ -167,13 +167,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         // Check if barcode matches delivery ID, any prescription, or legacy rxNumber
         let barcodeValid = false;
         
-        // Check against delivery identifier (actual or fallback DEL-{id})
+        // Check against delivery identifier (actual or fallback DEL{id})
         if (delivery?.deliveryIdentifier) {
           barcodeValid = delivery.deliveryIdentifier.toLowerCase() === trimmedBarcode;
         }
-        // Also check fallback format DEL-{id} for deliveries without identifiers
+        // Also check fallback format DEL{id} for deliveries without identifiers
         if (!barcodeValid && delivery?.id) {
-          const fallbackId = `del-${delivery.id}`;
+          const fallbackId = `del${delivery.id}`;
           barcodeValid = fallbackId === trimmedBarcode;
         }
         
@@ -1082,7 +1082,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                             Scan Delivery Label
                           </Label>
                           <span className="text-xs font-mono text-green-400">
-                            {currentStop?.delivery?.deliveryIdentifier || `DEL-${currentStop?.delivery?.id || 'N/A'}`}
+                            {currentStop?.delivery?.deliveryIdentifier || `DEL${currentStop?.delivery?.id || 'N/A'}`}
                           </span>
                         </div>
                         {(currentStop?.delivery?.prescriptions?.length > 0 || currentStop?.delivery?.rxNumber) && (
