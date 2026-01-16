@@ -2094,13 +2094,19 @@ export async function registerRoutes(
       const ctx = getPharmacyContext(req.session);
       if (!ctx) return res.status(401).json({ error: "Not authenticated" });
       
+      const pharmacyId = req.query.pharmacyId ? parseInt(req.query.pharmacyId as string) : null;
       const batchId = req.query.batchId ? parseInt(req.query.batchId as string) : null;
       const status = req.query.status as string | undefined;
       
       // Get deliveries with pharmacy filtering
       let allDeliveries: any[];
       if (ctx.isAdmin) {
-        allDeliveries = await storage.getDeliveries();
+        // Admin can filter by pharmacy or see all
+        if (pharmacyId) {
+          allDeliveries = await storage.getDeliveriesByPharmacy(pharmacyId);
+        } else {
+          allDeliveries = await storage.getDeliveries();
+        }
       } else {
         allDeliveries = await storage.getDeliveriesByPharmacy(ctx.pharmacyId!);
       }
@@ -2112,7 +2118,12 @@ export async function registerRoutes(
       
       // Filter by status if specified
       if (status) {
-        allDeliveries = allDeliveries.filter(d => d.status === status);
+        if (status === "open") {
+          // Open orders = not complete and not cancelled
+          allDeliveries = allDeliveries.filter(d => d.status !== "complete" && d.status !== "cancelled");
+        } else {
+          allDeliveries = allDeliveries.filter(d => d.status === status);
+        }
       }
       
       // Enrich each delivery with prescriptions and proof data

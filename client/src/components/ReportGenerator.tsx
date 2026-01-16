@@ -145,7 +145,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [selectedPharmacyId, setSelectedPharmacyId] = useState<number | null>(null);
-  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("open");
   const [reportType, setReportType] = useState<"orders" | "routes" | "route-details" | "deliveries" | "prescriptions">("orders");
   const [proofDialog, setProofDialog] = useState<{ open: boolean; type: 'signature' | 'photo'; data: string | null }>({ open: false, type: 'signature', data: null });
 
@@ -168,9 +168,10 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   });
 
   const { data: ordersData = [] } = useQuery<OrderWithProof[]>({
-    queryKey: ["/api/reports/orders", selectedBatchId, orderStatusFilter],
+    queryKey: ["/api/reports/orders", selectedPharmacyId, selectedBatchId, orderStatusFilter],
     queryFn: async () => {
       const params = new URLSearchParams();
+      if (selectedPharmacyId) params.append("pharmacyId", selectedPharmacyId.toString());
       if (selectedBatchId) params.append("batchId", selectedBatchId.toString());
       if (orderStatusFilter !== "all") params.append("status", orderStatusFilter);
       const res = await fetch(`/api/reports/orders?${params.toString()}`, { credentials: "include" });
@@ -701,13 +702,14 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                   <select
                     value={orderStatusFilter}
                     onChange={(e) => setOrderStatusFilter(e.target.value)}
-                    className="w-36 h-9 px-3 bg-slate-700 border border-slate-600 text-white rounded-md text-sm"
+                    className="w-40 h-9 px-3 bg-slate-700 border border-slate-600 text-white rounded-md text-sm"
                   >
-                    <option value="all">All Status</option>
+                    <option value="open">Open Orders</option>
+                    <option value="all">All Orders</option>
                     <option value="pending">Pending</option>
                     <option value="geocoded">Geocoded</option>
                     <option value="active">Active</option>
-                    <option value="complete">Complete</option>
+                    <option value="complete">Completed</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
                 </div>
