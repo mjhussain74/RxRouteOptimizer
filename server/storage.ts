@@ -1,10 +1,10 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
-import { eq, and, desc, inArray, notInArray, isNotNull } from "drizzle-orm";
+import { eq, and, desc, inArray, notInArray, isNotNull, sql as drizzleSql, like } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import {
   users, drivers, deliveryBatches, deliveries, routes, routeStops, driverLocations, deliveryProofs,
-  pharmacies, deliveryZones, driverZones, ocrLogs, prescriptions,
+  pharmacies, deliveryZones, driverZones, ocrLogs, prescriptions, deliveryIdCounters,
   type User, type InsertUser,
   type Driver, type InsertDriver,
   type DeliveryBatch, type InsertDeliveryBatch,
@@ -111,7 +111,8 @@ export interface IStorage {
   // Delivery matching methods
   findDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined>;
   findActiveDeliveryByNormalizedAddress(batchId: number, normalizedHash: string): Promise<Delivery | undefined>;
-  getNextDeliverySequence(batchId: number): Promise<number>;
+  getNextDeliverySequence(): Promise<number>;
+  generateUniqueDeliveryIdentifier(): Promise<string>;
   
   // Split/merge delivery methods
   movePrescriptionToDelivery(prescriptionId: number, targetDeliveryId: number): Promise<Prescription | undefined>;
@@ -683,10 +684,48 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getNextDeliverySequence(batchId: number): Promise<number> {
-    const result = await db.select().from(deliveries)
-      .where(eq(deliveries.batchId, batchId));
-    return result.length + 1;
+  async getNextDeliverySequence(): Promise<number> {
+    // Use atomic INSERT ... ON CONFLICT ... RETURNING pattern to get the next sequence number.
+    // This prevents race conditions when multiple concurrent requests try to get the next ID.
+    const year = new Date().getFullYear();
+    
+    // Atomically increment and return the counter for this year using raw SQL
+    // INSERT a row with last_value=1 if year doesn't exist, otherwise increment last_value
+    const result = await db.execute(
+      drizzleSql`INSERT INTO delivery_id_counters (year, last_value) 
+                 VALUES (${year}, 1) 
+                 ON CONFLICT (year) 
+                 DO UPDATE SET last_value = delivery_id_counters.last_value + 1 
+                 RETURNING last_value`
+    );
+    
+    // Extract the returned value from the result
+    const rows = result.rows as Array<{ last_value: number }>;
+    if (rows && rows.length > 0) {
+      return rows[0].last_value;
+    }
+    
+    // Fallback: should never reach here, but query existing max as backup
+    const fallback = await db.select({ deliveryIdentifier: deliveries.deliveryIdentifier })
+      .from(deliveries)
+      .where(like(deliveries.deliveryIdentifier, `DEL${year}%`))
+      .orderBy(desc(deliveries.deliveryIdentifier))
+      .limit(1);
+    
+    if (fallback.length === 0 || !fallback[0].deliveryIdentifier) {
+      return 1;
+    }
+    
+    const currentId = fallback[0].deliveryIdentifier;
+    const sequenceStr = currentId.substring(7);
+    return (parseInt(sequenceStr, 10) || 0) + 1;
+  }
+
+  async generateUniqueDeliveryIdentifier(): Promise<string> {
+    // Generate a unique delivery identifier using atomic counter.
+    const year = new Date().getFullYear();
+    const sequence = await this.getNextDeliverySequence();
+    return `DEL${year}${sequence.toString().padStart(6, '0')}`;
   }
 
   // Split/merge delivery methods
@@ -703,10 +742,8 @@ export class DatabaseStorage implements IStorage {
     const sourceDelivery = await this.getDelivery(sourceDeliveryId);
     if (!sourceDelivery || !sourceDelivery.batchId) return undefined;
 
-    // Get the next sequence number for the new delivery
-    const sequence = await this.getNextDeliverySequence(sourceDelivery.batchId);
-    const year = new Date().getFullYear();
-    const deliveryIdentifier = `DEL${year}${sequence.toString().padStart(6, '0')}`;
+    // Generate globally unique delivery identifier
+    const deliveryIdentifier = await this.generateUniqueDeliveryIdentifier();
 
     // Create a new delivery with the same address info
     const newDelivery = await db.insert(deliveries).values({

@@ -794,8 +794,7 @@ export async function registerRoutes(
         } else {
           // Create new delivery (either no cached delivery, or cached one is completed/cancelled)
           const geocoded = await geocodeAddress(addressText);
-          const sequence = await storage.getNextDeliverySequence(batch.id);
-          const deliveryIdentifier = generateDeliveryIdentifier(batch.id, sequence);
+          const deliveryIdentifier = await storage.generateUniqueDeliveryIdentifier();
           
           delivery = await storage.createDelivery({
             batchId: batch.id,
@@ -1762,8 +1761,7 @@ export async function registerRoutes(
       
       let deliveryIdentifier = null;
       if (batchId) {
-        const sequence = await storage.getNextDeliverySequence(batchId);
-        deliveryIdentifier = generateDeliveryIdentifier(batchId, sequence);
+        deliveryIdentifier = await storage.generateUniqueDeliveryIdentifier();
       }
       
       // Create the delivery (rxNumber is stored on prescription, not delivery)

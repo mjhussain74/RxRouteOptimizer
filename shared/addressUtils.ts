@@ -137,7 +137,7 @@ export function parseAddressComponents(fullAddress: string): {
   return null;
 }
 
-export function generateDeliveryIdentifier(batchId: number, sequence: number): string {
+export function generateDeliveryIdentifier(sequence: number): string {
   const year = new Date().getFullYear();
   const paddedSequence = sequence.toString().padStart(6, '0');
   return `DEL${year}${paddedSequence}`;

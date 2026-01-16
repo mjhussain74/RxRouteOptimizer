@@ -342,3 +342,11 @@ export type InsertOcrLog = z.infer<typeof insertOcrLogSchema>;
 export type OcrLog = typeof ocrLogs.$inferSelect;
 export type InsertPrescription = z.infer<typeof insertPrescriptionSchema>;
 export type Prescription = typeof prescriptions.$inferSelect;
+
+// Delivery ID counter table for atomic sequence generation
+export const deliveryIdCounters = pgTable("delivery_id_counters", {
+  year: integer("year").primaryKey(),
+  lastValue: integer("last_value").notNull().default(0),
+});
+
+export type DeliveryIdCounter = typeof deliveryIdCounters.$inferSelect;
