@@ -4,7 +4,7 @@ import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
 import Papa from "papaparse";
 import { storage } from "./storage";
-import { normalizeAddress, generateDeliveryIdentifier } from "../shared/addressUtils";
+import { normalizeAddress } from "../shared/addressUtils";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
