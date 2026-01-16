@@ -4,7 +4,7 @@ import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
 import Papa from "papaparse";
 import { storage } from "./storage";
-import { normalizeAddress } from "../shared/addressUtils";
+import { normalizeAddress, parseAddressComponents } from "../shared/addressUtils";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -736,13 +736,22 @@ export async function registerRoutes(
         let addressText: string;
         let normalizedData: { streetAddress: string; city: string; state: string; zipCode: string; normalizedHash: string; fullAddress: string } | null = null;
         
-        if (streetAddress && city && state) {
-          // New format with separate fields
-          normalizedData = normalizeAddress(streetAddress, city, state, zipCode);
+        if (streetAddress && city) {
+          // New format with separate fields - use state from CSV or default to MI
+          normalizedData = normalizeAddress(streetAddress, city, state || 'MI', zipCode);
           addressText = normalizedData.fullAddress;
         } else {
           // Old format with single address column
           addressText = row.address || row.Address || row.ADDRESS || '';
+          
+          // Try to parse and normalize the full address
+          if (addressText) {
+            const parsed = parseAddressComponents(addressText, 'MI');
+            if (parsed) {
+              normalizedData = normalizeAddress(parsed.street, parsed.city, parsed.state, parsed.zip);
+              addressText = normalizedData.fullAddress;
+            }
+          }
         }
         
         if (!addressText || addressText.trim() === '') {

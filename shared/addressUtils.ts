@@ -108,13 +108,13 @@ export function normalizeAddress(
   };
 }
 
-export function parseAddressComponents(fullAddress: string): {
+export function parseAddressComponents(fullAddress: string, defaultState: string = 'MI'): {
   street: string;
   city: string;
   state: string;
   zip: string;
 } | null {
-  // Try to parse "123 Main St, Detroit, MI 48212" format
+  // Try to parse various address formats
   const patterns = [
     // Standard: Street, City, ST ZIP
     /^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)$/i,
@@ -130,6 +130,26 @@ export function parseAddressComponents(fullAddress: string): {
         city: match[2].trim(),
         state: match[3].toUpperCase(),
         zip: match[4],
+      };
+    }
+  }
+  
+  // Try patterns WITHOUT state code (use default state)
+  const noStatePatterns = [
+    // Street, City, ZIP (no state)
+    /^(.+?),\s*([^,]+),\s*(\d{5}(?:-\d{4})?)$/i,
+    // Street, City ZIP (no comma before zip, no state)
+    /^(.+?),\s*([^,\d]+)\s+(\d{5}(?:-\d{4})?)$/i,
+  ];
+  
+  for (const pattern of noStatePatterns) {
+    const match = fullAddress.match(pattern);
+    if (match) {
+      return {
+        street: match[1].trim(),
+        city: match[2].trim(),
+        state: defaultState,
+        zip: match[3],
       };
     }
   }
