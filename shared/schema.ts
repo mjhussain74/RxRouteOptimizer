@@ -47,6 +47,8 @@ export const drivers = pgTable("drivers", {
   userId: integer("user_id").references(() => users.id),
   name: text("name").notNull(),
   phone: text("phone"),
+  username: text("username").unique(), // For driver login
+  password: text("password"), // Hashed password for driver login
   status: text("status").notNull().default("available"),
   currentLat: real("current_lat"),
   currentLng: real("current_lng"),

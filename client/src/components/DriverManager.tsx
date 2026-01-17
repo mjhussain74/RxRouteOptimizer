@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { User, Plus, Phone, MapPin, ExternalLink, Loader2 } from "lucide-react";
+import { User, Plus, Phone, MapPin, ExternalLink, Loader2, Key, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -14,8 +14,13 @@ interface DriverManagerProps {
 
 export default function DriverManager({ drivers, onOpenDriverView }: DriverManagerProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [credentialsDialogOpen, setCredentialsDialogOpen] = useState<number | null>(null);
   const [newDriverName, setNewDriverName] = useState("");
   const [newDriverPhone, setNewDriverPhone] = useState("");
+  const [driverUsername, setDriverUsername] = useState("");
+  const [driverPassword, setDriverPassword] = useState("");
+  const [credentialsError, setCredentialsError] = useState("");
+  const [credentialsSuccess, setCredentialsSuccess] = useState(false);
   const queryClient = useQueryClient();
 
   const addDriverMutation = useMutation({
@@ -36,6 +41,54 @@ export default function DriverManager({ drivers, onOpenDriverView }: DriverManag
       setNewDriverPhone("");
     },
   });
+
+  const setCredentialsMutation = useMutation({
+    mutationFn: async (data: { driverId: number; username: string; password: string }) => {
+      const response = await fetch(`/api/drivers/${data.driverId}/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: data.username, password: data.password }),
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to set credentials");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+      setCredentialsSuccess(true);
+      setTimeout(() => {
+        setCredentialsDialogOpen(null);
+        setDriverUsername("");
+        setDriverPassword("");
+        setCredentialsSuccess(false);
+        setCredentialsError("");
+      }, 1500);
+    },
+    onError: (error: Error) => {
+      setCredentialsError(error.message);
+    },
+  });
+
+  const handleSetCredentials = (driverId: number) => {
+    if (!driverUsername.trim() || !driverPassword.trim()) return;
+    setCredentialsError("");
+    setCredentialsMutation.mutate({
+      driverId,
+      username: driverUsername.trim(),
+      password: driverPassword.trim(),
+    });
+  };
+
+  const openCredentialsDialog = (driver: any) => {
+    setCredentialsDialogOpen(driver.id);
+    setDriverUsername(driver.username || "");
+    setDriverPassword("");
+    setCredentialsError("");
+    setCredentialsSuccess(false);
+  };
 
   const handleAddDriver = () => {
     if (!newDriverName.trim()) return;
@@ -186,6 +239,75 @@ export default function DriverManager({ drivers, onOpenDriverView }: DriverManag
                     <ExternalLink className="mr-2 h-4 w-4" />
                     Open Driver App
                   </Button>
+                  <Dialog open={credentialsDialogOpen === driver.id} onOpenChange={(open) => !open && setCredentialsDialogOpen(null)}>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        onClick={() => openCredentialsDialog(driver)}
+                        className={`w-full ${driver.username ? 'border-green-600 text-green-400' : 'border-slate-600 text-slate-300'} hover:bg-slate-700`}
+                      >
+                        <Key className="mr-2 h-4 w-4" />
+                        {driver.username ? 'Update Login' : 'Set Login'}
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="bg-slate-800 border-slate-700">
+                      <DialogHeader>
+                        <DialogTitle className="text-white">Set Driver Login for {driver.name}</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 pt-4">
+                        {credentialsSuccess ? (
+                          <div className="flex flex-col items-center py-8">
+                            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-4">
+                              <Check className="h-8 w-8 text-green-400" />
+                            </div>
+                            <p className="text-green-400 font-medium">Credentials saved!</p>
+                          </div>
+                        ) : (
+                          <>
+                            <div>
+                              <Label className="text-slate-300">Username</Label>
+                              <Input
+                                placeholder="e.g., driver1"
+                                value={driverUsername}
+                                onChange={(e) => setDriverUsername(e.target.value)}
+                                className="bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-slate-300">Password</Label>
+                              <Input
+                                type="password"
+                                placeholder="Enter password"
+                                value={driverPassword}
+                                onChange={(e) => setDriverPassword(e.target.value)}
+                                className="bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
+                              />
+                            </div>
+                            {credentialsError && (
+                              <div className="text-red-400 text-sm bg-red-900/20 p-2 rounded">
+                                {credentialsError}
+                              </div>
+                            )}
+                            <Button
+                              onClick={() => handleSetCredentials(driver.id)}
+                              disabled={!driverUsername.trim() || !driverPassword.trim() || setCredentialsMutation.isPending}
+                              className="w-full bg-green-600 hover:bg-green-700"
+                            >
+                              {setCredentialsMutation.isPending ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Key className="mr-2 h-4 w-4" />
+                              )}
+                              Save Credentials
+                            </Button>
+                            <p className="text-slate-400 text-xs text-center">
+                              Driver can use these credentials to log in to the Driver app
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   <Button
                     variant="outline"
                     onClick={() => copyDriverLink(driver.id)}

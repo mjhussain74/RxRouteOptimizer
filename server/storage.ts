@@ -173,6 +173,26 @@ export class DatabaseStorage implements IStorage {
     return safeUser;
   }
 
+  async validateDriverPassword(username: string, password: string): Promise<Driver | null> {
+    const result = await db.select().from(drivers).where(eq(drivers.username, username));
+    if (!result[0] || !result[0].password) return null;
+    
+    const isValid = await verifyPassword(password, result[0].password);
+    if (!isValid) return null;
+    
+    const { password: _, ...safeDriver } = result[0];
+    return safeDriver as Driver;
+  }
+
+  async setDriverCredentials(driverId: number, username: string, password: string): Promise<Driver | undefined> {
+    const hashedPassword = await hashPassword(password);
+    const result = await db.update(drivers)
+      .set({ username, password: hashedPassword })
+      .where(eq(drivers.id, driverId))
+      .returning();
+    return result[0];
+  }
+
   async getUsers(): Promise<SafeUser[]> {
     const result = await db.select({
       id: users.id,

@@ -65,15 +65,20 @@ function App() {
       );
     }
 
+    if (user?.role === 'driver' && user?.driverId) {
+      return (
+        <DriverApp 
+          driverId={user.driverId} 
+          onBack={handleLogout}
+        />
+      );
+    }
+
     return (
       <PharmacyDashboard 
         onLogout={handleLogout}
         pharmacyId={user?.pharmacyId || null}
         pharmacyName={user?.pharmacyName}
-        onOpenDriverView={(id: number) => {
-          setDriverId(id);
-          setView("driver");
-        }} 
       />
     );
   };

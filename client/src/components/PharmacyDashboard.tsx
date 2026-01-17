@@ -1,38 +1,28 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Upload, MapPin, Route, FileText, Building2, LogOut } from "lucide-react";
+import { Upload, FileText, Building2, LogOut } from "lucide-react";
 import { Button } from "./ui/button";
-import RouteOptimizer from "./RouteOptimizer";
-import RouteMap from "./RouteMap";
 import OrderManagement from "./OrderManagement";
 import ReportGenerator from "./ReportGenerator";
 
 interface PharmacyDashboardProps {
-  onOpenDriverView: (driverId: number) => void;
   onLogout: () => void;
   pharmacyId: number | null;
   pharmacyName?: string;
 }
 
-type TabType = "orders" | "optimize" | "routes" | "reports";
+type TabType = "orders" | "reports";
 
-export default function PharmacyDashboard({ onOpenDriverView, onLogout, pharmacyId, pharmacyName }: PharmacyDashboardProps) {
+export default function PharmacyDashboard({ onLogout, pharmacyId, pharmacyName }: PharmacyDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("orders");
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
-  const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
 
   const { data: batches = [] } = useQuery({
     queryKey: ["/api/batches", pharmacyId ? `pharmacy=${pharmacyId}` : ""],
   });
 
-  const { data: routes = [] } = useQuery({
-    queryKey: ["/api/routes"],
-  });
-
   const tabs = [
     { id: "orders" as TabType, label: "Orders", icon: Upload },
-    { id: "optimize" as TabType, label: "Optimize Routes", icon: Route },
-    { id: "routes" as TabType, label: "View Routes", icon: MapPin },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
   ];
 
@@ -55,9 +45,6 @@ export default function PharmacyDashboard({ onOpenDriverView, onLogout, pharmacy
               <div className="text-right">
                 <div className="text-sm font-medium text-white">
                   {(batches as any[]).length} Batches
-                </div>
-                <div className="text-xs text-slate-400">
-                  {(routes as any[]).length} Routes Active
                 </div>
               </div>
               <Button
@@ -102,30 +89,7 @@ export default function PharmacyDashboard({ onOpenDriverView, onLogout, pharmacy
             pharmacyId={pharmacyId}
             onBatchCreated={(batchId) => {
               setSelectedBatchId(batchId);
-              setActiveTab("optimize");
             }}
-          />
-        )}
-
-        {activeTab === "optimize" && (
-          <RouteOptimizer
-            selectedBatchId={selectedBatchId}
-            batches={batches as any[]}
-            onSelectBatch={setSelectedBatchId}
-            onRouteCreated={(routeId) => {
-              setSelectedRouteId(routeId);
-              setActiveTab("routes");
-            }}
-          />
-        )}
-
-        {activeTab === "routes" && (
-          <RouteMap
-            routes={routes as any[]}
-            selectedRouteId={selectedRouteId}
-            onSelectRoute={setSelectedRouteId}
-            drivers={[]}
-            onOpenDriverView={onOpenDriverView}
           />
         )}
 

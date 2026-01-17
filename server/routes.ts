@@ -14,7 +14,8 @@ declare module 'express-session' {
       id: number;
       username: string;
       role: string;
-      pharmacyId: number | null;
+      pharmacyId?: number | null;
+      driverId?: number | null;
     } | null;
   }
 }
@@ -26,12 +27,34 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// Require staff (admin or dispatcher) - blocks drivers
+function requireStaff(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  if (req.session.user.role === 'driver') {
+    return res.status(403).json({ message: "Staff access required" });
+  }
+  next();
+}
+
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.user) {
     return res.status(401).json({ message: "Authentication required" });
   }
   if (req.session.user.role !== 'admin') {
     return res.status(403).json({ message: "Admin access required" });
+  }
+  next();
+}
+
+// Require driver role
+function requireDriver(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  if (req.session.user.role !== 'driver') {
+    return res.status(403).json({ message: "Driver access required" });
   }
   next();
 }
@@ -54,16 +77,20 @@ function getPharmacyContext(session: any): PharmacyContext | null {
   };
 }
 
-// Middleware that requires pharmacy context for non-admin users
+// Middleware that requires pharmacy context for non-admin users (blocks drivers)
 function requirePharmacyScope(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.user) {
     return res.status(401).json({ message: "Authentication required" });
+  }
+  // Drivers cannot access pharmacy-scoped endpoints
+  if (req.session.user.role === 'driver') {
+    return res.status(403).json({ message: "Staff access required" });
   }
   // Admins can access everything
   if (req.session.user.role === 'admin') {
     return next();
   }
-  // Non-admins must have a pharmacy association
+  // Dispatchers must have a pharmacy association
   if (!req.session.user.pharmacyId) {
     return res.status(403).json({ message: "Your account is not associated with a pharmacy. Please contact admin." });
   }
@@ -96,9 +123,18 @@ async function checkDeliveryOwnership(deliveryId: number, session: any): Promise
 
 async function checkRouteOwnership(routeId: number, session: any): Promise<boolean> {
   if (session?.user?.role === 'admin') return true;
-  if (!session?.user?.pharmacyId) return false;
+  
   const route = await storage.getRoute(routeId);
-  if (!route?.batchId) return false;
+  if (!route) return false;
+  
+  // Drivers can access routes assigned to them
+  if (session?.user?.role === 'driver') {
+    return route.driverId === session.user.driverId;
+  }
+  
+  // Dispatchers need pharmacy ownership via batch
+  if (!session?.user?.pharmacyId) return false;
+  if (!route.batchId) return false;
   return checkBatchOwnership(route.batchId, session);
 }
 
@@ -424,6 +460,44 @@ export async function registerRoutes(
     }
   });
 
+  // Driver login endpoint
+  app.post("/api/auth/driver-login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+
+      const driver = await storage.validateDriverPassword(username, password);
+      
+      if (!driver) {
+        return res.status(401).json({ message: "Invalid username or password" });
+      }
+
+      // Store driver info in session
+      req.session.user = {
+        id: driver.id,
+        username: driver.username!,
+        role: 'driver',
+        driverId: driver.id
+      };
+
+      res.json({
+        user: {
+          id: driver.id,
+          username: driver.username,
+          role: 'driver',
+          driverId: driver.id,
+          name: driver.name
+        }
+      });
+    } catch (error) {
+      console.error("Driver login error:", error);
+      res.status(500).json({ message: "Login failed" });
+    }
+  });
+
   // Logout endpoint
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy((err) => {
@@ -583,9 +657,19 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers/:id", requireAdmin, async (req, res) => {
+  app.get("/api/drivers/:id", requireAuth, async (req, res) => {
     try {
-      const driver = await storage.getDriver(parseInt(req.params.id));
+      const driverId = parseInt(req.params.id);
+      
+      // Drivers can only access their own info, admins can access all
+      if (req.session.user?.role === 'driver' && req.session.user.driverId !== driverId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (req.session.user?.role === 'dispatcher') {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const driver = await storage.getDriver(driverId);
       if (!driver) {
         return res.status(404).json({ error: "Driver not found" });
       }
@@ -595,12 +679,50 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers/:id/routes", requireAdmin, async (req, res) => {
+  app.get("/api/drivers/:id/routes", requireAuth, async (req, res) => {
     try {
-      const routes = await storage.getRoutesByDriver(parseInt(req.params.id));
+      const driverId = parseInt(req.params.id);
+      
+      // Drivers can only access their own routes, admins can access all
+      if (req.session.user?.role === 'driver' && req.session.user.driverId !== driverId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (req.session.user?.role === 'dispatcher') {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const routes = await storage.getRoutesByDriver(driverId);
       res.json(routes);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch driver routes" });
+    }
+  });
+
+  app.post("/api/drivers/:id/credentials", requireAdmin, async (req, res) => {
+    try {
+      const driverId = parseInt(req.params.id);
+      const { username, password } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+
+      if (password.length < 4) {
+        return res.status(400).json({ error: "Password must be at least 4 characters" });
+      }
+
+      const driver = await storage.setDriverCredentials(driverId, username, password);
+      if (!driver) {
+        return res.status(404).json({ error: "Driver not found" });
+      }
+
+      res.json({ message: "Driver credentials updated", driver: { id: driver.id, name: driver.name, username: driver.username } });
+    } catch (error: any) {
+      if (error.code === '23505') {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+      console.error("Error setting driver credentials:", error);
+      res.status(500).json({ error: "Failed to set driver credentials" });
     }
   });
 
@@ -625,7 +747,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/batches/:id/status", requireAuth, async (req, res) => {
+  app.patch("/api/batches/:id/status", requireStaff, async (req, res) => {
     try {
       const batchId = parseInt(req.params.id);
       
@@ -662,7 +784,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/batches/upload", requireAuth, upload.single("file"), async (req, res) => {
+  app.post("/api/batches/upload", requireStaff, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -863,7 +985,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/batches/:id", requireAuth, async (req, res) => {
+  app.get("/api/batches/:id", requireStaff, async (req, res) => {
     try {
       const batchId = parseInt(req.params.id);
       
@@ -892,7 +1014,7 @@ export async function registerRoutes(
   });
   
   // Prescription endpoints
-  app.get("/api/prescriptions/batch/:batchId", requireAuth, async (req, res) => {
+  app.get("/api/prescriptions/batch/:batchId", requireStaff, async (req, res) => {
     try {
       const batchId = parseInt(req.params.batchId);
       
@@ -908,7 +1030,7 @@ export async function registerRoutes(
     }
   });
   
-  app.get("/api/prescriptions/delivery/:deliveryId", requireAuth, async (req, res) => {
+  app.get("/api/prescriptions/delivery/:deliveryId", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.deliveryId);
       
@@ -924,7 +1046,7 @@ export async function registerRoutes(
     }
   });
   
-  app.post("/api/prescriptions", requireAuth, async (req, res) => {
+  app.post("/api/prescriptions", requireStaff, async (req, res) => {
     try {
       if (!req.body.rxNumber) {
         return res.status(400).json({ error: "RX number is required" });
@@ -947,7 +1069,7 @@ export async function registerRoutes(
     }
   });
   
-  app.put("/api/prescriptions/:id", requireAuth, async (req, res) => {
+  app.put("/api/prescriptions/:id", requireStaff, async (req, res) => {
     try {
       const prescriptionId = parseInt(req.params.id);
       const prescription = await storage.getPrescription(prescriptionId);
@@ -968,7 +1090,7 @@ export async function registerRoutes(
     }
   });
   
-  app.delete("/api/prescriptions/:id", requireAuth, async (req, res) => {
+  app.delete("/api/prescriptions/:id", requireStaff, async (req, res) => {
     try {
       const prescriptionId = parseInt(req.params.id);
       const prescription = await storage.getPrescription(prescriptionId);
@@ -1072,7 +1194,7 @@ export async function registerRoutes(
   });
 
   // Detailed route report with delivery proofs
-  app.get("/api/routes/:id/report", requireAuth, async (req, res) => {
+  app.get("/api/routes/:id/report", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
       
@@ -1177,7 +1299,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/optimize", requireAuth, async (req, res) => {
+  app.post("/api/routes/optimize", requireStaff, async (req, res) => {
     try {
       const { batchId, deliveryIds, zoneId, startLat, startLng, startAddress, routeName } = req.body;
 
@@ -1343,7 +1465,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:id/assign", requireAuth, async (req, res) => {
+  app.post("/api/routes/:id/assign", requireStaff, async (req, res) => {
     try {
       const { driverId } = req.body;
       const routeId = parseInt(req.params.id);
@@ -1364,7 +1486,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:id/dispatch", requireAuth, async (req, res) => {
+  app.post("/api/routes/:id/dispatch", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
       
@@ -1422,10 +1544,16 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:routeId/stops/:stopId/complete", async (req, res) => {
+  app.post("/api/routes/:routeId/stops/:stopId/complete", requireAuth, async (req, res) => {
     try {
       const routeId = parseInt(req.params.routeId);
       const stopId = parseInt(req.params.stopId);
+      
+      // Check route ownership (allows drivers to complete stops on their routes)
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
       const stop = await storage.completeRouteStop(stopId);
 
       if (!stop) {
@@ -1449,10 +1577,15 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/drivers/:id/location", async (req, res) => {
+  app.post("/api/drivers/:id/location", requireDriver, async (req, res) => {
     try {
       const driverId = parseInt(req.params.id);
       const { lat, lng } = req.body;
+
+      // Drivers can only update their own location
+      if (req.session.user?.driverId !== driverId) {
+        return res.status(403).json({ error: "Access denied - can only update your own location" });
+      }
 
       const location = await storage.recordDriverLocation(driverId, lat, lng);
       io.emit("location_update", { driverId, lat, lng });
@@ -1463,11 +1596,16 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:routeId/stops/:stopId/proof", async (req, res) => {
+  app.post("/api/routes/:routeId/stops/:stopId/proof", requireAuth, async (req, res) => {
     try {
       const routeId = parseInt(req.params.routeId);
       const stopId = parseInt(req.params.stopId);
       const { signature, picture, notes, barcode } = req.body;
+
+      // Check route ownership (allows drivers to submit proof on their routes)
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
 
       // Allow submission if: signature OR picture provided, OR notes provided (skip with note), OR barcode provided
       if (!signature && !picture && !notes && !barcode) {
@@ -1509,11 +1647,16 @@ export async function registerRoutes(
   });
 
   // Cancel a delivery stop (can't deliver)
-  app.post("/api/routes/:routeId/stops/:stopId/cancel", async (req, res) => {
+  app.post("/api/routes/:routeId/stops/:stopId/cancel", requireAuth, async (req, res) => {
     try {
       const routeId = parseInt(req.params.routeId);
       const stopId = parseInt(req.params.stopId);
       const { reason } = req.body;
+
+      // Check route ownership (allows drivers to cancel stops on their routes)
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
 
       if (!reason) {
         return res.status(400).json({ error: "Cancellation reason is required" });
@@ -1572,7 +1715,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/pharmacies/:id", requireAuth, async (req, res) => {
+  app.get("/api/pharmacies/:id", requireStaff, async (req, res) => {
     try {
       const pharmacyId = parseInt(req.params.id);
       const session = req.session as any;
@@ -1732,7 +1875,7 @@ export async function registerRoutes(
   });
 
   // Enhanced delivery endpoints
-  app.get("/api/deliveries/:id", requireAuth, async (req, res) => {
+  app.get("/api/deliveries/:id", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
       
@@ -1751,7 +1894,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/deliveries", requireAuth, async (req, res) => {
+  app.post("/api/deliveries", requireStaff, async (req, res) => {
     try {
       if (!req.body.rxNumber) {
         return res.status(400).json({ error: "RX number is required" });
@@ -1805,7 +1948,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/deliveries/:id", requireAuth, async (req, res) => {
+  app.put("/api/deliveries/:id", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
       
@@ -1824,7 +1967,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/deliveries/:id", requireAuth, async (req, res) => {
+  app.delete("/api/deliveries/:id", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
       
@@ -1844,7 +1987,7 @@ export async function registerRoutes(
   });
 
   // Split delivery - move prescriptions to a new delivery
-  app.post("/api/deliveries/:id/split", requireAuth, async (req, res) => {
+  app.post("/api/deliveries/:id/split", requireStaff, async (req, res) => {
     try {
       const sourceDeliveryId = parseInt(req.params.id);
       
@@ -1882,7 +2025,7 @@ export async function registerRoutes(
   });
 
   // Merge deliveries - combine multiple deliveries into one
-  app.post("/api/deliveries/:id/merge", requireAuth, async (req, res) => {
+  app.post("/api/deliveries/:id/merge", requireStaff, async (req, res) => {
     try {
       const targetDeliveryId = parseInt(req.params.id);
       
@@ -1919,7 +2062,7 @@ export async function registerRoutes(
   });
 
   // Move a single prescription to another delivery
-  app.post("/api/prescriptions/:id/move", requireAuth, async (req, res) => {
+  app.post("/api/prescriptions/:id/move", requireStaff, async (req, res) => {
     try {
       const prescriptionId = parseInt(req.params.id);
       const { targetDeliveryId } = req.body;
@@ -1961,7 +2104,7 @@ export async function registerRoutes(
   });
 
   // Update delivery status (complete/cancelled)
-  app.patch("/api/deliveries/:id/status", requireAuth, async (req, res) => {
+  app.patch("/api/deliveries/:id/status", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
       
@@ -1989,9 +2132,16 @@ export async function registerRoutes(
     }
   });
 
-  // Route stop priority update
-  app.put("/api/routes/:routeId/stops/:stopId", requireAuth, async (req, res) => {
+  // Route stop priority update (staff only - dispatchers need pharmacy ownership)
+  app.put("/api/routes/:routeId/stops/:stopId", requireStaff, async (req, res) => {
     try {
+      const routeId = parseInt(req.params.routeId);
+      
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
       const stop = await storage.updateRouteStop(parseInt(req.params.stopId), req.body);
       if (!stop) {
         return res.status(404).json({ error: "Stop not found" });
@@ -2003,24 +2153,37 @@ export async function registerRoutes(
     }
   });
 
-  // Package scanning for route activation
-  app.post("/api/routes/:routeId/stops/:stopId/scan", async (req, res) => {
+  // Package scanning for route activation (staff only)
+  app.post("/api/routes/:routeId/stops/:stopId/scan", requireStaff, async (req, res) => {
     try {
+      const routeId = parseInt(req.params.routeId);
+      
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
       const stop = await storage.markPackageScanned(parseInt(req.params.stopId));
       if (!stop) {
         return res.status(404).json({ error: "Stop not found" });
       }
-      io.emit("package_scanned", { stopId: stop.id, routeId: parseInt(req.params.routeId) });
+      io.emit("package_scanned", { stopId: stop.id, routeId });
       res.json(stop);
     } catch (error) {
       res.status(500).json({ error: "Failed to mark package as scanned" });
     }
   });
 
-  // Route activation
-  app.post("/api/routes/:id/activate", async (req, res) => {
+  // Route activation (staff only - dispatch function)
+  app.post("/api/routes/:id/activate", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
+      
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
       const stops = await storage.getRouteStops(routeId);
       
       // Check if all packages are scanned
@@ -2045,11 +2208,16 @@ export async function registerRoutes(
     }
   });
 
-  // Set stop as urgent priority
-  app.post("/api/routes/:routeId/stops/:stopId/urgent", async (req, res) => {
+  // Set stop as urgent priority (staff only)
+  app.post("/api/routes/:routeId/stops/:stopId/urgent", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.routeId);
       const stopId = parseInt(req.params.stopId);
+      
+      // Check pharmacy ownership
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
       
       // Mark this stop as urgent
       const stop = await storage.updateRouteStop(stopId, { priority: "urgent" });
@@ -2076,8 +2244,8 @@ export async function registerRoutes(
     }
   });
 
-  // OCR logging
-  app.post("/api/ocr/log", async (req, res) => {
+  // OCR logging (staff only)
+  app.post("/api/ocr/log", requireStaff, async (req, res) => {
     try {
       const log = await storage.createOcrLog(req.body);
       res.json(log);
@@ -2086,7 +2254,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/deliveries/:id/ocr-logs", requireAuth, async (req, res) => {
+  app.get("/api/deliveries/:id/ocr-logs", requireStaff, async (req, res) => {
     try {
       const logs = await storage.getOcrLogs(parseInt(req.params.id));
       res.json(logs);
