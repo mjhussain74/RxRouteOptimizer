@@ -804,8 +804,21 @@ export async function registerRoutes(
       const session = req.session as any;
       const pharmacyId = session?.user?.pharmacyId || null;
       
+      // Get pharmacy name for batch naming
+      let pharmacyPrefix = "";
+      if (pharmacyId) {
+        const pharmacy = await storage.getPharmacy(pharmacyId);
+        if (pharmacy) {
+          pharmacyPrefix = `${pharmacy.name} - `;
+        }
+      }
+      
+      const batchName = req.body.name 
+        ? `${pharmacyPrefix}${req.body.name}`
+        : `${pharmacyPrefix}Batch ${new Date().toLocaleDateString()}`;
+      
       const batch = await storage.createBatch({
-        name: req.body.name || `Batch ${new Date().toLocaleDateString()}`,
+        name: batchName,
         status: "processing",
         totalDeliveries: parsed.data.length,
         pharmacyId
