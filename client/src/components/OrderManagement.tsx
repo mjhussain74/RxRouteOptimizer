@@ -776,13 +776,15 @@ export default function OrderManagement({
             border: 1px solid #000;
             border-radius: 4px;
             box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
+            display: block;
+            page-break-inside: avoid;
             page-break-after: always;
+            break-inside: avoid;
+            break-after: page;
             margin-bottom: 4px;
           }
           .page-break {
-            page-break-after: always;
+            display: none;
           }
           .header-row {
             display: flex;
@@ -805,9 +807,9 @@ export default function OrderManagement({
           }
           .barcode-container { text-align: center; margin-bottom: 3px; }
           .barcode-container img { max-width: 100%; height: 30px; }
-          .content-row { display: flex; gap: 6px; flex: 1; min-height: 0; }
-          .left-col { flex: 1; overflow: hidden; }
-          .right-col { width: 80px; display: flex; align-items: center; justify-content: center; }
+          .content-row { display: table; width: 100%; }
+          .left-col { display: table-cell; vertical-align: top; }
+          .right-col { display: table-cell; width: 80px; vertical-align: middle; text-align: center; }
           .field { margin-bottom: 2px; }
           .field-label { font-size: 7px; color: #666; text-transform: uppercase; }
           .field-value { font-size: 9px; font-weight: 500; line-height: 1.2; }
@@ -823,7 +825,12 @@ export default function OrderManagement({
           .phone-box .field-label { font-size: 7px; }
           @media print {
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .label-container { break-after: page; }
+            .label-container { 
+              break-inside: avoid !important;
+              page-break-inside: avoid !important;
+              break-after: page;
+              page-break-after: always;
+            }
           }
         </style>
       </head>
