@@ -159,6 +159,7 @@ export const driverLocations = pgTable("driver_locations", {
 export const deliveryProofs = pgTable("delivery_proofs", {
   id: serial("id").primaryKey(),
   stopId: integer("stop_id").references(() => routeStops.id),
+  deliveryId: integer("delivery_id").references(() => deliveries.id),
   signature: text("signature"), // Base64 (deprecated, kept for migration)
   signatureUrl: text("signature_url"), // Object storage URL
   picture: text("picture"), // Base64 (deprecated, kept for migration)
@@ -166,7 +167,8 @@ export const deliveryProofs = pgTable("delivery_proofs", {
   notes: text("notes"),
   barcode: text("barcode"),
   driverId: integer("driver_id").references(() => drivers.id),
-  uploadStatus: text("upload_status").default("pending"), // pending, uploading, completed, failed
+  localProofId: text("local_proof_id"), // Client-side IndexedDB proof ID for syncing
+  uploadStatus: text("upload_status").default("pending"), // pending, uploading, completed, failed, partial
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -1640,6 +1640,57 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/routes/:routeId/stops/:stopId/complete-local", requireAuth, async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.routeId);
+      const stopId = parseInt(req.params.stopId);
+      const { localProofId, notes, barcode } = req.body;
+
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+
+      console.log(`📦 Local-first completion for stop ${stopId}, localProofId: ${localProofId}`);
+
+      const stop = await storage.getRouteStop(stopId);
+      if (!stop) {
+        return res.status(404).json({ error: "Stop not found" });
+      }
+
+      const proof = await storage.createDeliveryProof({
+        stopId,
+        deliveryId: stop.deliveryId,
+        signature: null,
+        picture: null,
+        notes: notes || null,
+        barcode: barcode || null,
+        localProofId: localProofId || null,
+        uploadStatus: 'pending',
+      });
+
+      const completedStop = await storage.completeRouteStop(stopId);
+
+      io.emit("stop_status_update", { stopId, status: "completed" });
+
+      const allStops = await storage.getRouteStops(routeId);
+      const allCompleted = allStops.every(s => s.status === "completed");
+      if (allCompleted) {
+        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
+        io.emit("route_completed", { routeId });
+        console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
+      }
+
+      res.json({ 
+        stop: completedStop, 
+        proof,
+        message: "Delivery marked complete. Proof will upload in background." 
+      });
+    } catch (error: any) {
+      console.error("Complete-local error:", error);
+      res.status(500).json({ error: error?.message || "Failed to complete stop" });
+    }
+  });
+
   app.post("/api/drivers/:id/location", requireDriver, async (req, res) => {
     try {
       const driverId = parseInt(req.params.id);
