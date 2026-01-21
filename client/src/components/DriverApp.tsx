@@ -229,15 +229,20 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       }
       return response.json();
     },
-    onSuccess: async () => {
-      console.log("✅ Proof submitted successfully");
+    onSuccess: async (data: { message?: string; proof?: { uploadsPending?: boolean } }) => {
+      console.log("✅ Proof submitted successfully", data);
+      
+      // Show success message (images uploading in background if applicable)
+      if (data?.proof?.uploadsPending) {
+        console.log("📤 Images uploading in background...");
+      }
+      
       setSignature(null);
       setPicture(null);
       setProofNotes("");
       setScannedBarcode(null);
       setShowProofModal(false);
-      // Wait a moment for the backend to process, then refetch route
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Refetch route data immediately - uploads happen in background
       await refetchRoute();
     },
     onError: (error) => {
