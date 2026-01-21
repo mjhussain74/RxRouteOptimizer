@@ -95,6 +95,17 @@ export interface IStorage {
   
   createDeliveryProof(data: InsertDeliveryProof): Promise<DeliveryProof>;
   getDeliveryProof(stopId: number): Promise<DeliveryProof | undefined>;
+  getProofByLocalId(localProofId: string): Promise<DeliveryProof | undefined>;
+  updateDeliveryProof(id: number, data: {
+    signature?: string | null;
+    picture?: string | null;
+    signatureUrl?: string | null;
+    pictureUrl?: string | null;
+    notes?: string | null;
+    barcode?: string | null;
+    uploadStatus?: string | null;
+  }): Promise<DeliveryProof | undefined>;
+  getDeliveryProofById(id: number): Promise<DeliveryProof | undefined>;
   
   createOcrLog(log: InsertOcrLog): Promise<OcrLog>;
   getOcrLogs(deliveryId: number): Promise<OcrLog[]>;
@@ -624,6 +635,42 @@ export class DatabaseStorage implements IStorage {
 
   async getDeliveryProof(stopId: number): Promise<DeliveryProof | undefined> {
     const result = await db.select().from(deliveryProofs).where(eq(deliveryProofs.stopId, stopId));
+    return result[0];
+  }
+
+  async getProofByLocalId(localProofId: string): Promise<DeliveryProof | undefined> {
+    const result = await db.select().from(deliveryProofs).where(eq(deliveryProofs.localProofId, localProofId));
+    return result[0];
+  }
+
+  async updateDeliveryProof(id: number, data: {
+    signature?: string | null;
+    picture?: string | null;
+    signatureUrl?: string | null;
+    pictureUrl?: string | null;
+    notes?: string | null;
+    barcode?: string | null;
+    uploadStatus?: string | null;
+  }): Promise<DeliveryProof | undefined> {
+    const updateData: Record<string, any> = {};
+    if (data.signature !== undefined) updateData.signature = data.signature;
+    if (data.picture !== undefined) updateData.picture = data.picture;
+    if (data.signatureUrl !== undefined) updateData.signatureUrl = data.signatureUrl;
+    if (data.pictureUrl !== undefined) updateData.pictureUrl = data.pictureUrl;
+    if (data.notes !== undefined) updateData.notes = data.notes;
+    if (data.barcode !== undefined) updateData.barcode = data.barcode;
+    if (data.uploadStatus !== undefined) updateData.uploadStatus = data.uploadStatus;
+    
+    if (Object.keys(updateData).length === 0) {
+      return this.getDeliveryProofById(id);
+    }
+    
+    const result = await db.update(deliveryProofs).set(updateData).where(eq(deliveryProofs.id, id)).returning();
+    return result[0];
+  }
+
+  async getDeliveryProofById(id: number): Promise<DeliveryProof | undefined> {
+    const result = await db.select().from(deliveryProofs).where(eq(deliveryProofs.id, id));
     return result[0];
   }
 

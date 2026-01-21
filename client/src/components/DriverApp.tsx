@@ -663,7 +663,29 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               {activeRoute ? `Route: ${route?.name}` : "No active route"}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {(syncStatus.pendingCount > 0 || syncStatus.failedCount > 0) && (
+              <button
+                onClick={() => forceSyncNow()}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${
+                  syncStatus.failedCount > 0 
+                    ? 'bg-red-500/20 text-red-400' 
+                    : syncStatus.isSyncing 
+                      ? 'bg-blue-500/20 text-blue-400' 
+                      : 'bg-yellow-500/20 text-yellow-400'
+                }`}
+                title={`${syncStatus.pendingCount} pending, ${syncStatus.failedCount} failed`}
+              >
+                {syncStatus.isSyncing ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : syncStatus.isOnline ? (
+                  <Upload className="h-3 w-3" />
+                ) : (
+                  <CloudOff className="h-3 w-3" />
+                )}
+                <span>{syncStatus.pendingCount + syncStatus.failedCount}</span>
+              </button>
+            )}
             <button
               onClick={() => setShowDeliveryReport(true)}
               className="text-slate-400 hover:text-white transition-colors"

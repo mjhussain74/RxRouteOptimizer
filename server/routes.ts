@@ -1714,35 +1714,51 @@ export async function registerRoutes(
     try {
       const routeId = parseInt(req.params.routeId);
       const stopId = parseInt(req.params.stopId);
-      const { signature, picture, notes, barcode } = req.body;
+      const { signature, picture, notes, barcode, localProofId } = req.body;
 
-      // Check route ownership (allows drivers to submit proof on their routes)
       if (!await checkRouteOwnership(routeId, req.session)) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
 
-      // Allow submission if: signature OR picture provided, OR notes provided (skip with note), OR barcode provided
       if (!signature && !picture && !notes && !barcode) {
         return res.status(400).json({ error: "Signature, picture, notes, or barcode required" });
       }
 
-      // Create the delivery proof with uploadStatus tracking
       const hasUploads = !!(signature || picture);
       const useObjectStorage = isObjectStorageAvailable();
       
-      console.log(`📝 Creating delivery proof for stop ${stopId} with barcode: ${barcode || 'none'}, hasUploads: ${hasUploads}, useObjectStorage: ${useObjectStorage}`);
+      console.log(`📝 Processing proof for stop ${stopId}, localProofId: ${localProofId || 'none'}, hasUploads: ${hasUploads}`);
       
-      // If object storage is available, queue uploads. Otherwise, store base64 directly in DB (fallback)
-      const proof = await storage.createDeliveryProof({
-        stopId,
-        signature: useObjectStorage ? null : (signature || null), // Store in DB if no object storage
-        picture: useObjectStorage ? null : (picture || null),     // Store in DB if no object storage
-        notes: notes || null,
-        barcode: barcode || null,
-        uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed"
-      });
+      let proof;
+      const existingProof = localProofId ? await storage.getProofByLocalId(localProofId) : null;
+      
+      if (existingProof) {
+        console.log(`📝 Updating existing proof ${existingProof.id} with uploaded images`);
+        proof = await storage.updateDeliveryProof(existingProof.id, {
+          signature: useObjectStorage ? null : (signature || existingProof.signature),
+          picture: useObjectStorage ? null : (picture || existingProof.picture),
+          notes: notes || existingProof.notes,
+          barcode: barcode || existingProof.barcode,
+          uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed"
+        });
+      } else {
+        const stop = await storage.getRouteStop(stopId);
+        proof = await storage.createDeliveryProof({
+          stopId,
+          deliveryId: stop?.deliveryId || null,
+          signature: useObjectStorage ? null : (signature || null),
+          picture: useObjectStorage ? null : (picture || null),
+          notes: notes || null,
+          barcode: barcode || null,
+          localProofId: localProofId || null,
+          uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed"
+        });
+      }
 
-      // Queue uploads for background processing only if object storage is available
+      if (!proof) {
+        return res.status(500).json({ error: "Failed to create or update proof" });
+      }
+
       if (useObjectStorage) {
         if (signature) {
           addToUploadQueue(proof.id, "signature", signature).catch(err => {
@@ -1756,15 +1772,18 @@ export async function registerRoutes(
         }
       }
 
-      // Automatically mark the stop as completed when proof is submitted
-      console.log(`✅ Proof submitted for stop ${stopId}, marking as completed`);
-      const completedStop = await storage.completeRouteStop(stopId);
+      const stop = await storage.getRouteStop(stopId);
+      let completedStop = stop;
+      
+      if (stop?.status !== "completed") {
+        console.log(`✅ Proof submitted for stop ${stopId}, marking as completed`);
+        completedStop = await storage.completeRouteStop(stopId);
+        io.emit("stop_status_update", { stopId, status: "completed" });
+      }
       
       const uploadsPendingForEmit = useObjectStorage && hasUploads;
       io.emit("proof_submitted", { stopId, proof: { ...proof, uploadsPending: uploadsPendingForEmit } });
-      io.emit("stop_status_update", { stopId, status: "completed" });
       
-      // Check if all stops are completed - if so, mark route as complete
       const allStops = await storage.getRouteStops(routeId);
       const allCompleted = allStops.every(s => s.status === "completed");
       if (allCompleted) {
@@ -1773,7 +1792,6 @@ export async function registerRoutes(
         console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
       }
       
-      // Return immediately - uploads happen in background if object storage is available
       const uploadsPending = useObjectStorage && hasUploads;
       res.json({ 
         proof: { ...proof, uploadsPending }, 
