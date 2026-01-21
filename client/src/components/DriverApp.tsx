@@ -21,7 +21,18 @@ import {
   Package,
   Scan,
   Play,
+  Cloud,
+  CloudOff,
+  Upload,
 } from "lucide-react";
+import { saveProofLocally, getProofByStopId } from "../lib/localProofStorage";
+import { 
+  startAutoSync, 
+  stopAutoSync, 
+  subscribeSyncStatus, 
+  forceSyncNow,
+  SyncStatus 
+} from "../lib/proofSyncService";
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -101,6 +112,14 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [activationScanningStopId, setActivationScanningStopId] = useState<number | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    isOnline: navigator.onLine,
+    isSyncing: false,
+    pendingCount: 0,
+    failedCount: 0,
+    lastSyncTime: null,
+    lastError: null,
+  });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -127,6 +146,16 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     queryKey: [`/api/routes/${activeRoute?.id}`],
     enabled: !!activeRoute?.id,
   });
+
+  useEffect(() => {
+    startAutoSync(30000);
+    const unsubscribe = subscribeSyncStatus(setSyncStatus);
+    
+    return () => {
+      stopAutoSync();
+      unsubscribe();
+    };
+  }, []);
 
   const completeStopMutation = useMutation({
     mutationFn: async ({
@@ -194,7 +223,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         }
       }
 
-      console.log("📤 Submitting proof:", { 
+      console.log("📦 Saving proof locally first:", { 
         routeId, 
         stopId, 
         hasSignature: !!signature, 
@@ -205,14 +234,26 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         barcode: scannedBarcode
       });
 
+      // Save proof locally first (local-first approach)
+      const localProof = await saveProofLocally({
+        routeId,
+        stopId,
+        signature,
+        picture,
+        notes: proofNotes,
+        barcode: scannedBarcode,
+      });
+      
+      console.log("📦 Proof saved locally:", localProof.id);
+
+      // Mark stop as complete on the server immediately (without proof images)
       const response = await fetch(
-        `/api/routes/${routeId}/stops/${stopId}/proof`,
+        `/api/routes/${routeId}/stops/${stopId}/complete-local`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            signature,
-            picture,
+            localProofId: localProof.id,
             notes: proofNotes,
             barcode: scannedBarcode,
           }),
@@ -220,30 +261,31 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         },
       );
       
-      console.log("📥 Proof response status:", response.status);
+      console.log("📥 Complete-local response status:", response.status);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error("❌ Proof submission failed:", errorData);
-        throw new Error(errorData.error || "Failed to submit proof");
+        console.error("❌ Complete-local failed:", errorData);
+        throw new Error(errorData.error || "Failed to mark delivery complete");
       }
-      return response.json();
-    },
-    onSuccess: async (data: { message?: string; proof?: { uploadsPending?: boolean } }) => {
-      console.log("✅ Proof submitted successfully", data);
       
-      // Show success message (images uploading in background if applicable)
-      if (data?.proof?.uploadsPending) {
-        console.log("📤 Images uploading in background...");
-      }
+      return { ...await response.json(), localProofId: localProof.id };
+    },
+    onSuccess: async (data) => {
+      console.log("✅ Delivery marked complete, proof saved locally", data);
+      console.log("📤 Proof will upload in background...");
       
       setSignature(null);
       setPicture(null);
       setProofNotes("");
       setScannedBarcode(null);
       setShowProofModal(false);
-      // Refetch route data immediately - uploads happen in background
+      
+      // Refetch route data immediately
       await refetchRoute();
+      
+      // Trigger sync to upload proofs in background
+      forceSyncNow();
     },
     onError: (error) => {
       console.error("❌ Proof submission error:", error);
