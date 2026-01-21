@@ -437,55 +437,56 @@ export default function OrderManagement({
 
   const printDeliveryLabel = (delivery: Delivery, pharmacyName: string = "RX Delivery Pharmacy") => {
     const today = new Date().toLocaleDateString();
-    const customerPhone = delivery.customerPhone || delivery.prescriptions?.[0]?.patientPhone || "N/A";
     const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
+    
+    // Collect all patient names and phones from prescriptions
+    const patientNames: string[] = [];
+    const patientPhones: string[] = [];
+    
+    if (delivery.prescriptions && delivery.prescriptions.length > 0) {
+      delivery.prescriptions.forEach(rx => {
+        if (rx.patientName && !patientNames.includes(rx.patientName)) {
+          patientNames.push(rx.patientName);
+        }
+        if (rx.patientPhone && !patientPhones.includes(rx.patientPhone)) {
+          patientPhones.push(rx.patientPhone);
+        }
+      });
+    }
+    
+    // Fallback to delivery-level customer info if no prescription data
+    if (patientNames.length === 0 && delivery.customerName) {
+      patientNames.push(delivery.customerName);
+    }
+    if (patientPhones.length === 0 && delivery.customerPhone) {
+      patientPhones.push(delivery.customerPhone);
+    }
+    
+    const allPatientNames = patientNames.length > 0 ? patientNames.join(", ") : "N/A";
+    const allPatientPhones = patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
 
     const canvas = document.createElement("canvas");
-    /*    try {
-      JsBarcode(canvas, deliveryId, {
-        format: "CODE128",
-        width: 2,
-        height: 60,
-        displayValue: false,
-        margin: 5
-      });
-    } catch (err) {
-      console.error("Barcode generation error:", err);
-    }
-    const barcodeDataUrl = canvas.toDataURL("image/png");
-  */
-
     try {
       const dpr = window.devicePixelRatio || 1;
       const ctx = canvas.getContext("2d");
-
-      // High DPI canvas
       const logicalWidth = 400;
       const logicalHeight = 120;
-
       canvas.width = logicalWidth * dpr;
       canvas.height = logicalHeight * dpr;
-      canvas.style.width = `${logicalWidth}px`;
-      canvas.style.height = `${logicalHeight}px`;
-
-      if (ctx) {
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
-
+      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       JsBarcode(canvas, deliveryId, {
         format: "CODE128",
-        width: 3, // 🔑 wider bars
-        height: 80, // 🔑 taller bars
+        width: 3,
+        height: 80,
         displayValue: false,
-        margin: 20, // 🔑 proper quiet zone
+        margin: 20,
         background: "#ffffff",
         lineColor: "#000000",
-        flat: true, // prevents anti-alias blur
+        flat: true,
       });
     } catch (err) {
       console.error("Barcode generation error:", err);
     }
-
     const barcodeDataUrl = canvas.toDataURL("image/png");
 
     const labelHtml = `
@@ -494,103 +495,59 @@ export default function OrderManagement({
       <head>
         <title>Delivery Label - ${deliveryId}</title>
         <style>
-          @page { size: 3in 2in; margin: 0.1in; }
-          body {
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          @page { size: 4in 3in; margin: 0.15in; }
+          html, body {
             font-family: Arial, sans-serif;
-            padding: 4px;
-            width: 3in;
-            height: 2in;
             margin: 0;
-            box-sizing: border-box;
+            padding: 0;
           }
           .label-container {
-            border: 1px solid #000;
-            padding: 6px;
+            width: 3.7in;
+            min-height: 2.5in;
+            padding: 8px;
+            border: 2px solid #000;
             border-radius: 4px;
-            height: calc(2in - 8px - 0.2in);
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
           }
           .header-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
             border-bottom: 1px solid #000;
-            padding-bottom: 3px;
-            margin-bottom: 4px;
+            padding-bottom: 4px;
+            margin-bottom: 6px;
+            overflow: hidden;
           }
-          .pharmacy-name {
-            font-size: 10px;
-            font-weight: bold;
-          }
-          .date {
-            font-size: 8px;
-            color: #666;
-          }
+          .pharmacy-name { font-size: 12px; font-weight: bold; float: left; }
+          .date { font-size: 10px; color: #666; float: right; }
           .delivery-id {
-            font-size: 11px;
+            font-size: 14px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 2px 4px;
-            border-radius: 2px;
-            margin-bottom: 3px;
+            padding: 4px 6px;
+            border-radius: 3px;
+            margin-bottom: 6px;
+            clear: both;
           }
-          .barcode-container {
-            text-align: center;
-            margin-bottom: 3px;
-          }
-          .barcode-container img {
-            max-width: 100%;
-            height: 30px;
-          }
-          .content-row {
-            display: flex;
-            gap: 6px;
-            flex: 1;
-            min-height: 0;
-          }
-          .left-col {
-            flex: 1;
-            overflow: hidden;
-          }
-          .right-col {
-            width: 80px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .field {
-            margin-bottom: 2px;
-          }
-          .field-label {
-            font-size: 7px;
-            color: #666;
-            text-transform: uppercase;
-          }
-          .field-value {
-            font-size: 9px;
-            font-weight: 500;
-            line-height: 1.2;
-          }
-          .address {
-            font-size: 8px;
-            line-height: 1.1;
-          }
+          .barcode-container { text-align: center; margin-bottom: 8px; }
+          .barcode-container img { max-width: 100%; height: 40px; }
+          .content-row { overflow: hidden; }
+          .left-col { float: left; width: calc(100% - 100px); }
+          .right-col { float: right; width: 90px; }
+          .field { margin-bottom: 4px; }
+          .field-label { font-size: 8px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 11px; font-weight: 500; line-height: 1.3; }
+          .address { font-size: 10px; line-height: 1.2; }
           .phone-box {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: bold;
             background: #e8f0f8;
-            padding: 4px;
-            border-radius: 2px;
+            padding: 6px;
+            border-radius: 3px;
             text-align: center;
+            border: 1px solid #ccc;
           }
-          .phone-box .field-label {
-            font-size: 7px;
-          }
+          .phone-box .field-label { font-size: 8px; margin-bottom: 2px; display: block; }
           @media print {
-            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         </style>
       </head>
@@ -611,15 +568,15 @@ export default function OrderManagement({
                 <div class="field-value address">${delivery.addressText}</div>
               </div>
               <div class="field">
-                <div class="field-label">Customer</div>
-                <div class="field-value">${delivery.customerName || "N/A"} ${delivery.customerPhone ? `| ${delivery.customerPhone}` : ""}</div>
+                <div class="field-label">Patient(s)</div>
+                <div class="field-value">${allPatientNames}</div>
               </div>
               ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
             </div>
             <div class="right-col">
               <div class="phone-box">
                 <div class="field-label">PHONE</div>
-                ${customerPhone}
+                ${allPatientPhones}
               </div>
             </div>
           </div>
@@ -696,8 +653,33 @@ export default function OrderManagement({
     
     // Generate label HTML for each delivery (all deliveries in batch, ignoring search filter)
     const labelsHtml = deliveries.map((delivery) => {
-      const customerPhone = delivery.customerPhone || delivery.prescriptions?.[0]?.patientPhone || "N/A";
       const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
+      
+      // Collect all patient names and phones from prescriptions
+      const patientNames: string[] = [];
+      const patientPhones: string[] = [];
+      
+      if (delivery.prescriptions && delivery.prescriptions.length > 0) {
+        delivery.prescriptions.forEach(rx => {
+          if (rx.patientName && !patientNames.includes(rx.patientName)) {
+            patientNames.push(rx.patientName);
+          }
+          if (rx.patientPhone && !patientPhones.includes(rx.patientPhone)) {
+            patientPhones.push(rx.patientPhone);
+          }
+        });
+      }
+      
+      // Fallback to delivery-level customer info if no prescription data
+      if (patientNames.length === 0 && delivery.customerName) {
+        patientNames.push(delivery.customerName);
+      }
+      if (patientPhones.length === 0 && delivery.customerPhone) {
+        patientPhones.push(delivery.customerPhone);
+      }
+      
+      const allPatientNames = patientNames.length > 0 ? patientNames.join(", ") : "N/A";
+      const allPatientPhones = patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
       
       // Generate barcode for this delivery
       const canvas = document.createElement("canvas");
@@ -741,21 +723,21 @@ export default function OrderManagement({
                 <div class="field-value address">${delivery.addressText}</div>
               </div>
               <div class="field">
-                <div class="field-label">Customer</div>
-                <div class="field-value">${delivery.customerName || "N/A"} ${delivery.customerPhone ? `| ${delivery.customerPhone}` : ""}</div>
+                <div class="field-label">Patient(s)</div>
+                <div class="field-value">${allPatientNames}</div>
               </div>
               ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
             </div>
             <div class="right-col">
               <div class="phone-box">
                 <div class="field-label">PHONE</div>
-                ${customerPhone}
+                ${allPatientPhones}
               </div>
             </div>
           </div>
         </div>
       `;
-    }).join('<div class="page-break"></div>');
+    }).join('');
     
     const printHtml = `
       <!DOCTYPE html>
@@ -763,73 +745,83 @@ export default function OrderManagement({
       <head>
         <title>Delivery Labels - ${selectedBatch?.name || 'Batch'}</title>
         <style>
-          @page { size: 3in 2in; margin: 0.1in; }
-          body {
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          @page { 
+            size: 4in 3in; 
+            margin: 0.15in; 
+          }
+          html, body {
             font-family: Arial, sans-serif;
-            padding: 0;
             margin: 0;
+            padding: 0;
           }
           .label-container {
-            width: 3in;
-            height: 2in;
-            padding: 6px;
-            border: 1px solid #000;
+            width: 3.7in;
+            min-height: 2.5in;
+            padding: 8px;
+            border: 2px solid #000;
             border-radius: 4px;
-            box-sizing: border-box;
-            display: block;
-            page-break-inside: avoid;
             page-break-after: always;
-            break-inside: avoid;
-            break-after: page;
-            margin-bottom: 4px;
+            page-break-inside: avoid;
           }
-          .page-break {
-            display: none;
+          .label-container:last-child {
+            page-break-after: auto;
           }
           .header-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
             border-bottom: 1px solid #000;
-            padding-bottom: 3px;
-            margin-bottom: 4px;
+            padding-bottom: 4px;
+            margin-bottom: 6px;
+            overflow: hidden;
           }
-          .pharmacy-name { font-size: 10px; font-weight: bold; }
-          .date { font-size: 8px; color: #666; }
+          .pharmacy-name { font-size: 12px; font-weight: bold; float: left; }
+          .date { font-size: 10px; color: #666; float: right; }
           .delivery-id {
-            font-size: 11px;
+            font-size: 14px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 2px 4px;
-            border-radius: 2px;
-            margin-bottom: 3px;
+            padding: 4px 6px;
+            border-radius: 3px;
+            margin-bottom: 6px;
+            clear: both;
           }
-          .barcode-container { text-align: center; margin-bottom: 3px; }
-          .barcode-container img { max-width: 100%; height: 30px; }
-          .content-row { display: table; width: 100%; }
-          .left-col { display: table-cell; vertical-align: top; }
-          .right-col { display: table-cell; width: 80px; vertical-align: middle; text-align: center; }
-          .field { margin-bottom: 2px; }
-          .field-label { font-size: 7px; color: #666; text-transform: uppercase; }
-          .field-value { font-size: 9px; font-weight: 500; line-height: 1.2; }
-          .address { font-size: 8px; line-height: 1.1; }
+          .barcode-container { 
+            text-align: center; 
+            margin-bottom: 8px; 
+          }
+          .barcode-container img { 
+            max-width: 100%; 
+            height: 40px; 
+          }
+          .content-row {
+            overflow: hidden;
+          }
+          .left-col { 
+            float: left;
+            width: calc(100% - 100px);
+          }
+          .right-col { 
+            float: right;
+            width: 90px;
+          }
+          .field { margin-bottom: 4px; }
+          .field-label { font-size: 8px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 11px; font-weight: 500; line-height: 1.3; }
+          .address { font-size: 10px; line-height: 1.2; }
           .phone-box {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: bold;
             background: #e8f0f8;
-            padding: 4px;
-            border-radius: 2px;
+            padding: 6px;
+            border-radius: 3px;
             text-align: center;
+            border: 1px solid #ccc;
           }
-          .phone-box .field-label { font-size: 7px; }
+          .phone-box .field-label { font-size: 8px; margin-bottom: 2px; display: block; }
           @media print {
-            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .label-container { 
-              break-inside: avoid !important;
-              page-break-inside: avoid !important;
-              break-after: page;
-              page-break-after: always;
+            html, body { 
+              -webkit-print-color-adjust: exact; 
+              print-color-adjust: exact; 
             }
           }
         </style>
