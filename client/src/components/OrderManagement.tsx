@@ -435,13 +435,9 @@ export default function OrderManagement({
     [uploadMutation],
   );
 
-  const printDeliveryLabel = (delivery: Delivery) => {
-    const pharmacyName = "RX Delivery Pharmacy";
+  const printDeliveryLabel = (delivery: Delivery, pharmacyName: string = "RX Delivery Pharmacy") => {
     const today = new Date().toLocaleDateString();
-    const rxNumbers =
-      delivery.prescriptions?.map((p) => p.rxNumber).join(", ") ||
-      delivery.rxNumber ||
-      "N/A";
+    const customerPhone = delivery.customerPhone || delivery.prescriptions?.[0]?.patientPhone || "N/A";
     const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
 
     const canvas = document.createElement("canvas");
@@ -582,16 +578,16 @@ export default function OrderManagement({
             font-size: 8px;
             line-height: 1.1;
           }
-          .rx-numbers {
-            font-size: 9px;
+          .phone-box {
+            font-size: 10px;
             font-weight: bold;
-            background: #e8f4e8;
-            padding: 3px;
+            background: #e8f0f8;
+            padding: 4px;
             border-radius: 2px;
             text-align: center;
           }
-          .rx-numbers .field-label {
-            font-size: 6px;
+          .phone-box .field-label {
+            font-size: 7px;
           }
           @media print {
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -621,9 +617,9 @@ export default function OrderManagement({
               ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
             </div>
             <div class="right-col">
-              <div class="rx-numbers">
-                <div class="field-label">RX#</div>
-                ${rxNumbers}
+              <div class="phone-box">
+                <div class="field-label">PHONE</div>
+                ${customerPhone}
               </div>
             </div>
           </div>
@@ -686,6 +682,165 @@ export default function OrderManagement({
   const handleSaveEdit = () => {
     if (editingDelivery) {
       updateDeliveryMutation.mutate(editingDelivery);
+    }
+  };
+
+  // Print all labels for the selected batch (uses all deliveries, not filtered)
+  const printAllLabels = () => {
+    if (!activeBatchId || deliveries.length === 0) return;
+    
+    // Get pharmacy name from batch
+    const selectedBatch = (batches as any[]).find((b: any) => b.id === activeBatchId);
+    const pharmacyName = selectedBatch?.name?.split(' - ')[0] || "RX Delivery Pharmacy";
+    const today = new Date().toLocaleDateString();
+    
+    // Generate label HTML for each delivery (all deliveries in batch, ignoring search filter)
+    const labelsHtml = deliveries.map((delivery) => {
+      const customerPhone = delivery.customerPhone || delivery.prescriptions?.[0]?.patientPhone || "N/A";
+      const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
+      
+      // Generate barcode for this delivery
+      const canvas = document.createElement("canvas");
+      try {
+        const dpr = window.devicePixelRatio || 1;
+        const ctx = canvas.getContext("2d");
+        const logicalWidth = 400;
+        const logicalHeight = 120;
+        canvas.width = logicalWidth * dpr;
+        canvas.height = logicalHeight * dpr;
+        if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        JsBarcode(canvas, deliveryId, {
+          format: "CODE128",
+          width: 3,
+          height: 80,
+          displayValue: false,
+          margin: 20,
+          background: "#ffffff",
+          lineColor: "#000000",
+          flat: true,
+        });
+      } catch (err) {
+        console.error("Barcode generation error:", err);
+      }
+      const barcodeDataUrl = canvas.toDataURL("image/png");
+      
+      return `
+        <div class="label-container">
+          <div class="header-row">
+            <div class="pharmacy-name">${pharmacyName}</div>
+            <div class="date">${today}</div>
+          </div>
+          <div class="delivery-id">${deliveryId}</div>
+          <div class="barcode-container">
+            <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
+          </div>
+          <div class="content-row">
+            <div class="left-col">
+              <div class="field">
+                <div class="field-label">Deliver To</div>
+                <div class="field-value address">${delivery.addressText}</div>
+              </div>
+              <div class="field">
+                <div class="field-label">Customer</div>
+                <div class="field-value">${delivery.customerName || "N/A"} ${delivery.customerPhone ? `| ${delivery.customerPhone}` : ""}</div>
+              </div>
+              ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
+            </div>
+            <div class="right-col">
+              <div class="phone-box">
+                <div class="field-label">PHONE</div>
+                ${customerPhone}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('<div class="page-break"></div>');
+    
+    const printHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Delivery Labels - ${selectedBatch?.name || 'Batch'}</title>
+        <style>
+          @page { size: 3in 2in; margin: 0.1in; }
+          body {
+            font-family: Arial, sans-serif;
+            padding: 0;
+            margin: 0;
+          }
+          .label-container {
+            width: 3in;
+            height: 2in;
+            padding: 6px;
+            border: 1px solid #000;
+            border-radius: 4px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            page-break-after: always;
+            margin-bottom: 4px;
+          }
+          .page-break {
+            page-break-after: always;
+          }
+          .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #000;
+            padding-bottom: 3px;
+            margin-bottom: 4px;
+          }
+          .pharmacy-name { font-size: 10px; font-weight: bold; }
+          .date { font-size: 8px; color: #666; }
+          .delivery-id {
+            font-size: 11px;
+            font-weight: bold;
+            text-align: center;
+            background: #f0f0f0;
+            padding: 2px 4px;
+            border-radius: 2px;
+            margin-bottom: 3px;
+          }
+          .barcode-container { text-align: center; margin-bottom: 3px; }
+          .barcode-container img { max-width: 100%; height: 30px; }
+          .content-row { display: flex; gap: 6px; flex: 1; min-height: 0; }
+          .left-col { flex: 1; overflow: hidden; }
+          .right-col { width: 80px; display: flex; align-items: center; justify-content: center; }
+          .field { margin-bottom: 2px; }
+          .field-label { font-size: 7px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 9px; font-weight: 500; line-height: 1.2; }
+          .address { font-size: 8px; line-height: 1.1; }
+          .phone-box {
+            font-size: 10px;
+            font-weight: bold;
+            background: #e8f0f8;
+            padding: 4px;
+            border-radius: 2px;
+            text-align: center;
+          }
+          .phone-box .field-label { font-size: 7px; }
+          @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .label-container { break-after: page; }
+          }
+        </style>
+      </head>
+      <body>
+        ${labelsHtml}
+      </body>
+      </html>
+    `;
+    
+    const printWindow = window.open("", "_blank", "width=500,height=600");
+    if (printWindow) {
+      printWindow.document.write(printHtml);
+      printWindow.document.close();
+      printWindow.onload = () => {
+        printWindow.focus();
+        printWindow.print();
+      };
     }
   };
 
@@ -802,6 +957,16 @@ export default function OrderManagement({
                       >
                         <Ban className="h-4 w-4 mr-1" />
                         Cancel Order
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={printAllLabels}
+                        disabled={deliveries.length === 0}
+                        className="border-blue-500 text-blue-400 hover:bg-blue-500/10"
+                      >
+                        <Printer className="h-4 w-4 mr-1" />
+                        Print Labels ({deliveries.length})
                       </Button>
                     </div>
                   );
