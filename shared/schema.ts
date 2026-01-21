@@ -159,12 +159,28 @@ export const driverLocations = pgTable("driver_locations", {
 export const deliveryProofs = pgTable("delivery_proofs", {
   id: serial("id").primaryKey(),
   stopId: integer("stop_id").references(() => routeStops.id),
-  signature: text("signature"),
-  picture: text("picture"),
+  signature: text("signature"), // Base64 (deprecated, kept for migration)
+  signatureUrl: text("signature_url"), // Object storage URL
+  picture: text("picture"), // Base64 (deprecated, kept for migration)
+  pictureUrl: text("picture_url"), // Object storage URL
   notes: text("notes"),
   barcode: text("barcode"),
   driverId: integer("driver_id").references(() => drivers.id),
+  uploadStatus: text("upload_status").default("pending"), // pending, uploading, completed, failed
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const uploadQueue = pgTable("upload_queue", {
+  id: serial("id").primaryKey(),
+  proofId: integer("proof_id").references(() => deliveryProofs.id),
+  type: text("type").notNull(), // signature, picture
+  data: text("data").notNull(), // Base64 data
+  status: text("status").notNull().default("pending"), // pending, processing, completed, failed
+  retryCount: integer("retry_count").default(0),
+  maxRetries: integer("max_retries").default(3),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
 });
 
 export const ocrLogs = pgTable("ocr_logs", {
@@ -255,6 +271,10 @@ export const ocrLogsRelations = relations(ocrLogs, ({ one }) => ({
   delivery: one(deliveries, { fields: [ocrLogs.deliveryId], references: [deliveries.id] }),
 }));
 
+export const uploadQueueRelations = relations(uploadQueue, ({ one }) => ({
+  proof: one(deliveryProofs, { fields: [uploadQueue.proofId], references: [deliveryProofs.id] }),
+}));
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -319,6 +339,11 @@ export const insertPrescriptionSchema = createInsertSchema(prescriptions).omit({
   createdAt: true,
 });
 
+export const insertUploadQueueSchema = createInsertSchema(uploadQueue).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertPharmacy = z.infer<typeof insertPharmacySchema>;
@@ -344,6 +369,8 @@ export type InsertOcrLog = z.infer<typeof insertOcrLogSchema>;
 export type OcrLog = typeof ocrLogs.$inferSelect;
 export type InsertPrescription = z.infer<typeof insertPrescriptionSchema>;
 export type Prescription = typeof prescriptions.$inferSelect;
+export type InsertUploadQueue = z.infer<typeof insertUploadQueueSchema>;
+export type UploadQueue = typeof uploadQueue.$inferSelect;
 
 // Delivery ID counter table for atomic sequence generation
 export const deliveryIdCounters = pgTable("delivery_id_counters", {
