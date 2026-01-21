@@ -1363,7 +1363,11 @@ export default function OrderManagement({
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => printDeliveryLabel(delivery)}
+                                onClick={() => {
+                                  const batch = (batches as any[]).find((b: any) => b.id === delivery.batchId);
+                                  const pharmacyName = batch?.name?.split(' - ')[0] || "RX Delivery Pharmacy";
+                                  printDeliveryLabel(delivery, pharmacyName);
+                                }}
                                 className="h-8 w-8 p-0 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
                                 title="Print Label"
                               >
