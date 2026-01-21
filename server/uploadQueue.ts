@@ -3,7 +3,30 @@ import { db } from "./storage";
 import { uploadQueue, deliveryProofs } from "@shared/schema";
 import { eq, and, or, lt } from "drizzle-orm";
 
-const client = new Client();
+let client: Client | null = null;
+let objectStorageAvailable = false;
+
+async function initializeClient(): Promise<void> {
+  try {
+    client = new Client();
+    // Test if client works by trying to list objects
+    const testResult = await client.list();
+    objectStorageAvailable = testResult.ok;
+    if (objectStorageAvailable) {
+      console.log("✅ Object Storage initialized successfully");
+    } else {
+      console.log("⚠️ Object Storage not available, using database storage fallback");
+    }
+  } catch (error) {
+    console.log("⚠️ Object Storage not configured, using database storage fallback");
+    objectStorageAvailable = false;
+    client = null;
+  }
+}
+
+export function isObjectStorageAvailable(): boolean {
+  return objectStorageAvailable;
+}
 
 interface QueueItem {
   id: number;
@@ -43,18 +66,26 @@ export function triggerProcessing(): void {
   }
 }
 
-export function startBackgroundProcessor(): void {
+export async function startBackgroundProcessor(): Promise<void> {
   console.log("🚀 Starting background upload processor");
+  
+  // Initialize object storage client
+  await initializeClient();
   
   if (processingInterval) {
     clearInterval(processingInterval);
   }
   
-  processingInterval = setInterval(() => {
+  // Only start the processor if object storage is available
+  if (objectStorageAvailable) {
+    processingInterval = setInterval(() => {
+      triggerProcessing();
+    }, 10000);
+    
     triggerProcessing();
-  }, 10000);
-  
-  triggerProcessing();
+  } else {
+    console.log("ℹ️ Background processor disabled - using database storage");
+  }
 }
 
 export function stopBackgroundProcessor(): void {
@@ -111,6 +142,10 @@ async function processUploadItem(item: QueueItem): Promise<void> {
       .where(eq(uploadQueue.id, id));
     
     console.log(`🔄 Processing upload ${id} (${type}) for proof ${proofId}, attempt ${retryCount + 1}`);
+    
+    if (!client) {
+      throw new Error("Object storage client not initialized");
+    }
     
     const base64Data = data.replace(/^data:image\/\w+;base64,/, "");
     const buffer = Buffer.from(base64Data, "base64");
@@ -252,6 +287,10 @@ export async function retryFailedUploads(proofId?: number): Promise<number> {
 
 export async function downloadFromStorage(filename: string): Promise<Buffer | null> {
   try {
+    if (!client) {
+      console.error(`Download failed for ${filename}: Object storage client not initialized`);
+      return null;
+    }
     const result = await client.downloadAsBytes(filename);
     if (result.ok) {
       const data = result.value as unknown as Uint8Array;

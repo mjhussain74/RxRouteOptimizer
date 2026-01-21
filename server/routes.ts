@@ -5,6 +5,7 @@ import multer from "multer";
 import Papa from "papaparse";
 import { storage } from "./storage";
 import { normalizeAddress, parseAddressComponents } from "../shared/addressUtils";
+import { addToUploadQueue, startBackgroundProcessor, downloadFromStorage, getUploadStatus, isObjectStorageAvailable } from "./uploadQueue";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -413,6 +414,55 @@ export async function registerRoutes(
       }
       console.log("Client disconnected:", socket.id);
     });
+  });
+
+  // Start background upload processor
+  startBackgroundProcessor();
+
+  // Storage endpoint - serve files from object storage
+  app.get("/api/storage/*", async (req, res) => {
+    try {
+      const filename = (req.params as Record<string, string>)[0];
+      if (!filename) {
+        return res.status(400).json({ error: "Filename required" });
+      }
+      
+      const data = await downloadFromStorage(filename);
+      if (!data) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      
+      // Determine content type based on extension
+      const ext = filename.split('.').pop()?.toLowerCase();
+      const contentTypes: Record<string, string> = {
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+        'pdf': 'application/pdf'
+      };
+      const contentType = contentTypes[ext || ''] || 'application/octet-stream';
+      
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000');
+      res.send(data);
+    } catch (error) {
+      console.error("Storage download error:", error);
+      res.status(500).json({ error: "Failed to download file" });
+    }
+  });
+
+  // Upload status endpoint
+  app.get("/api/proofs/:proofId/upload-status", requireAuth, async (req, res) => {
+    try {
+      const proofId = parseInt(req.params.proofId);
+      const status = await getUploadStatus(proofId);
+      res.json(status);
+    } catch (error) {
+      console.error("Upload status error:", error);
+      res.status(500).json({ error: "Failed to get upload status" });
+    }
   });
 
   // Authentication endpoints
@@ -1625,21 +1675,42 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Signature, picture, notes, or barcode required" });
       }
 
-      // Create the delivery proof
-      console.log(`📝 Creating delivery proof for stop ${stopId} with barcode: ${barcode || 'none'}`);
+      // Create the delivery proof with uploadStatus tracking
+      const hasUploads = !!(signature || picture);
+      const useObjectStorage = isObjectStorageAvailable();
+      
+      console.log(`📝 Creating delivery proof for stop ${stopId} with barcode: ${barcode || 'none'}, hasUploads: ${hasUploads}, useObjectStorage: ${useObjectStorage}`);
+      
+      // If object storage is available, queue uploads. Otherwise, store base64 directly in DB (fallback)
       const proof = await storage.createDeliveryProof({
         stopId,
-        signature: signature || null,
-        picture: picture || null,
+        signature: useObjectStorage ? null : (signature || null), // Store in DB if no object storage
+        picture: useObjectStorage ? null : (picture || null),     // Store in DB if no object storage
         notes: notes || null,
-        barcode: barcode || null
+        barcode: barcode || null,
+        uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed"
       });
+
+      // Queue uploads for background processing only if object storage is available
+      if (useObjectStorage) {
+        if (signature) {
+          addToUploadQueue(proof.id, "signature", signature).catch(err => {
+            console.error("Failed to queue signature upload:", err);
+          });
+        }
+        if (picture) {
+          addToUploadQueue(proof.id, "picture", picture).catch(err => {
+            console.error("Failed to queue picture upload:", err);
+          });
+        }
+      }
 
       // Automatically mark the stop as completed when proof is submitted
       console.log(`✅ Proof submitted for stop ${stopId}, marking as completed`);
       const completedStop = await storage.completeRouteStop(stopId);
       
-      io.emit("proof_submitted", { stopId, proof });
+      const uploadsPendingForEmit = useObjectStorage && hasUploads;
+      io.emit("proof_submitted", { stopId, proof: { ...proof, uploadsPending: uploadsPendingForEmit } });
       io.emit("stop_status_update", { stopId, status: "completed" });
       
       // Check if all stops are completed - if so, mark route as complete
@@ -1651,7 +1722,13 @@ export async function registerRoutes(
         console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
       }
       
-      res.json({ proof, stop: completedStop });
+      // Return immediately - uploads happen in background if object storage is available
+      const uploadsPending = useObjectStorage && hasUploads;
+      res.json({ 
+        proof: { ...proof, uploadsPending }, 
+        stop: completedStop,
+        message: uploadsPending ? "Proof saved. Images uploading in background." : "Proof saved."
+      });
     } catch (error: any) {
       console.error("Proof submission error:", error);
       const errorMessage = error?.message || "Failed to submit proof";
