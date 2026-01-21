@@ -162,6 +162,17 @@ address,customer_name,customer_phone,rx_number,notes
   - New database tables: upload_queue for job persistence
   - New fields in delivery_proofs: signatureUrl, pictureUrl, uploadStatus
   - Storage endpoint (/api/storage/*) serves files from object storage
+- Local-first proof storage (2026-01-21):
+  - Proofs saved to IndexedDB on driver's device first before upload
+  - Delivery marked complete immediately, driver moves to next stop
+  - Background sync service uploads proofs automatically when online
+  - Auto-sync every 30 seconds with online/offline detection
+  - Retry logic for failed uploads (max 3 attempts)
+  - Sync status indicator in driver app header showing pending/failed counts
+  - Manual sync trigger button for drivers
+  - New client files: localProofStorage.ts (IndexedDB), proofSyncService.ts (background sync)
+  - New API endpoint: /api/routes/:routeId/stops/:stopId/complete-local
+  - localProofId field links local proofs to server records for reconciliation
 
 ## User Preferences
 - Dark theme UI preferred
