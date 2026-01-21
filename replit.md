@@ -15,6 +15,7 @@ A web-based route optimization application that takes multiple delivery addresse
 - **Frontend**: React 18 + TypeScript + Vite
 - **Backend**: Express.js + Socket.IO
 - **Database**: PostgreSQL with Drizzle ORM
+- **Object Storage**: Replit Object Storage for delivery proof images
 - **Maps**: Leaflet with OpenStreetMap tiles
 - **Geocoding**: Google Maps Geocoding API
 - **Route Optimization**: Google Routes API
@@ -85,7 +86,8 @@ A web-based route optimization application that takes multiple delivery addresse
 - **routes**: Optimized routes
 - **route_stops**: Stops within a route (includes packageScanned, priority fields)
 - **driver_locations**: Driver GPS history
-- **delivery_proofs**: Proof of delivery records
+- **delivery_proofs**: Proof of delivery records (with signatureUrl, pictureUrl, uploadStatus for object storage)
+- **upload_queue**: Background upload job queue for object storage
 - **ocr_logs**: OCR scanning history
 
 ## Usage
@@ -151,6 +153,15 @@ address,customer_name,customer_phone,rx_number,notes
   - Driver and zone management restricted to admin role only
   - Ownership checks on route optimization with batch/delivery validation
   - Prescription CRUD endpoints validate delivery ownership
+- Object storage with background upload queue (2026-01-21):
+  - Replit Object Storage integration for delivery proof images (signatures, photos)
+  - Background upload queue with retry logic (max 3 attempts per upload)
+  - Non-blocking proof submission - API returns immediately, uploads happen asynchronously
+  - Upload status tracking: pending, uploading, completed, failed, partial
+  - Graceful fallback to database storage when object storage is unavailable
+  - New database tables: upload_queue for job persistence
+  - New fields in delivery_proofs: signatureUrl, pictureUrl, uploadStatus
+  - Storage endpoint (/api/storage/*) serves files from object storage
 
 ## User Preferences
 - Dark theme UI preferred
