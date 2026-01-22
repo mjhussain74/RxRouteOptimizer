@@ -748,6 +748,48 @@ export async function registerRoutes(
     }
   });
 
+  // Get driver delivery history with full details
+  app.get("/api/drivers/:id/delivery-history", requireAuth, async (req, res) => {
+    try {
+      const driverId = parseInt(req.params.id);
+      
+      // Drivers can only access their own history
+      if (req.session.user?.role === 'driver' && req.session.user.driverId !== driverId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      // Admins and dispatchers can access (dispatchers may need reporting access)
+      
+      const driverRoutes = await storage.getRoutesByDriver(driverId);
+      
+      // Get stops with delivery details for each route
+      const routesWithDetails = await Promise.all(
+        driverRoutes.map(async (route) => {
+          const stops = await storage.getRouteStops(route.id);
+          const stopsWithDeliveries = await Promise.all(
+            stops.map(async (stop) => {
+              if (stop.deliveryId) {
+                const delivery = await storage.getDelivery(stop.deliveryId);
+                return { ...stop, delivery };
+              }
+              return stop;
+            })
+          );
+          return {
+            ...route,
+            stops: stopsWithDeliveries,
+            completedCount: stopsWithDeliveries.filter(s => s.status === 'completed').length,
+            totalCount: stopsWithDeliveries.length
+          };
+        })
+      );
+      
+      res.json(routesWithDetails);
+    } catch (error) {
+      console.error("Failed to fetch driver delivery history:", error);
+      res.status(500).json({ error: "Failed to fetch delivery history" });
+    }
+  });
+
   app.post("/api/drivers/:id/credentials", requireAdmin, async (req, res) => {
     try {
       const driverId = parseInt(req.params.id);
