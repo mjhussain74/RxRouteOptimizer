@@ -958,8 +958,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     Upcoming Stops
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  {pendingStops.slice(1, 4).map((stop: any, index: number) => (
+                <CardContent className="space-y-2 max-h-64 overflow-y-auto">
+                  {pendingStops.slice(1).map((stop: any, index: number) => (
                     <div
                       key={stop.id}
                       className="flex items-center gap-3 p-2 rounded-lg bg-slate-900/30"
@@ -1001,11 +1001,6 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       </Button>
                     </div>
                   ))}
-                  {pendingStops.length > 4 && (
-                    <p className="text-slate-500 text-xs text-center">
-                      +{pendingStops.length - 4} more stops
-                    </p>
-                  )}
                 </CardContent>
               </Card>
             )}
@@ -1065,55 +1060,115 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                   </button>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-3 bg-slate-700/50 rounded">
-                      <p className="text-slate-400 text-xs">Route Name</p>
-                      <p className="text-white font-semibold">
-                        {activeRoute.name}
-                      </p>
+                  <div className="p-3 bg-slate-700/50 rounded">
+                    <p className="text-slate-400 text-xs">Route</p>
+                    <p className="text-white font-semibold">{activeRoute.name}</p>
+                    <p className="text-slate-400 text-xs mt-1">
+                      Started: {activeRoute.createdAt ? new Date(activeRoute.createdAt).toLocaleString() : 'N/A'}
+                    </p>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="p-3 bg-slate-700/50 rounded text-center">
+                      <p className="text-2xl font-bold text-white">{(routeData as any)?.stops?.length || 0}</p>
+                      <p className="text-slate-400 text-xs">Total</p>
                     </div>
-                    <div className="p-3 bg-slate-700/50 rounded">
-                      <p className="text-slate-400 text-xs">Total Stops</p>
-                      <p className="text-white font-semibold">
-                        {(routeData as any)?.stops?.length || 0}
-                      </p>
-                    </div>
-                    <div className="p-3 bg-green-500/10 rounded border border-green-500/30">
+                    <div className="p-3 bg-green-500/10 rounded border border-green-500/30 text-center">
+                      <p className="text-2xl font-bold text-green-400">{completedStops.length}</p>
                       <p className="text-green-400 text-xs">Completed</p>
-                      <p className="text-white font-semibold">
-                        {completedStops.length}
-                      </p>
                     </div>
-                    <div className="p-3 bg-yellow-500/10 rounded border border-yellow-500/30">
+                    <div className="p-3 bg-yellow-500/10 rounded border border-yellow-500/30 text-center">
+                      <p className="text-2xl font-bold text-yellow-400">{pendingStops.length}</p>
                       <p className="text-yellow-400 text-xs">Pending</p>
-                      <p className="text-white font-semibold">
-                        {pendingStops.length}
-                      </p>
                     </div>
                   </div>
+
                   <div className="border-t border-slate-600 pt-4">
-                    <h3 className="text-white font-semibold mb-3">
-                      Completed Deliveries
+                    <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-400" />
+                      Completed Deliveries ({completedStops.length})
                     </h3>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                    <div className="space-y-3 max-h-80 overflow-y-auto">
                       {completedStops.map((stop: any, idx: number) => (
                         <div
                           key={stop.id}
-                          className="flex items-start gap-2 p-2 bg-slate-700/30 rounded"
+                          className="p-3 bg-slate-700/30 rounded border border-slate-600"
                         >
-                          <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                          <div className="flex-1">
-                            <p className="text-white text-sm">
-                              {idx + 1}. {stop.delivery?.customerName}
-                            </p>
-                            <p className="text-slate-400 text-xs">
-                              {stop.delivery?.addressText}
-                            </p>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded">
+                                  #{idx + 1}
+                                </span>
+                                <span className="text-xs font-mono text-blue-400">
+                                  {stop.delivery?.deliveryIdentifier || `DEL${stop.delivery?.id}`}
+                                </span>
+                              </div>
+                              <p className="text-white text-sm font-medium">
+                                {stop.delivery?.customerName || 'Customer'}
+                              </p>
+                              <p className="text-slate-400 text-xs mt-1">
+                                {stop.delivery?.addressText}
+                              </p>
+                              {stop.delivery?.customerPhone && (
+                                <p className="text-slate-500 text-xs mt-1">
+                                  Phone: {stop.delivery.customerPhone}
+                                </p>
+                              )}
+                              {stop.delivery?.prescriptions && stop.delivery.prescriptions.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {stop.delivery.prescriptions.map((rx: any, rxIdx: number) => (
+                                    <span key={rxIdx} className="bg-slate-600/50 text-slate-300 text-xs px-2 py-0.5 rounded">
+                                      Rx: {rx.rxNumber}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {stop.completedAt && (
+                                <p className="text-slate-500 text-xs mt-2">
+                                  Completed: {new Date(stop.completedAt).toLocaleString()}
+                                </p>
+                              )}
+                            </div>
+                            <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0" />
                           </div>
                         </div>
                       ))}
+                      {completedStops.length === 0 && (
+                        <p className="text-slate-500 text-center py-4">No completed deliveries yet</p>
+                      )}
                     </div>
                   </div>
+
+                  {pendingStops.length > 0 && (
+                    <div className="border-t border-slate-600 pt-4">
+                      <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-yellow-400" />
+                        Pending Deliveries ({pendingStops.length})
+                      </h3>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {pendingStops.map((stop: any, idx: number) => (
+                          <div
+                            key={stop.id}
+                            className="p-2 bg-slate-700/20 rounded border border-slate-700 flex items-center gap-2"
+                          >
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                              stop.priority === "urgent" 
+                                ? "bg-red-500/20 text-red-400" 
+                                : "bg-yellow-500/20 text-yellow-400"
+                            }`}>
+                              {stop.priority === "urgent" ? "URGENT" : `#${completedStops.length + idx + 1}`}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-sm truncate">{stop.delivery?.customerName || 'Customer'}</p>
+                              <p className="text-slate-500 text-xs truncate">{stop.delivery?.addressText}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <Button
                     onClick={() => setShowDeliveryReport(false)}
                     className="w-full bg-blue-600 hover:bg-blue-700"
