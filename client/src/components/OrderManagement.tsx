@@ -502,18 +502,18 @@ export default function OrderManagement({
           }
           html, body {
             font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
           }
           .label-container {
-            width: 100vw;
-            height: 100vh;
-            padding: 4px;
+            width: 100%;
+            height: 100%;
+            padding: 3px;
             overflow: hidden;
             display: block;
-            border: 1px solid #000;
           }
           .header-row {
             border-bottom: 1px solid #000;
@@ -558,13 +558,16 @@ export default function OrderManagement({
             html, body { 
               -webkit-print-color-adjust: exact; 
               print-color-adjust: exact;
+              margin: 0 !important;
+              padding: 0 !important;
               width: 100% !important;
               height: 100% !important;
             }
             .label-container {
               width: 100% !important;
               height: 100% !important;
-              border: 1px solid #000 !important;
+              margin: 0 !important;
+              padding: 3px !important;
             }
           }
         </style>
@@ -758,18 +761,18 @@ export default function OrderManagement({
           }
           html, body {
             font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
           }
           .label-container {
-            width: 100vw;
-            height: 100vh;
-            padding: 4px;
+            width: 100%;
+            height: 100%;
+            padding: 3px;
             overflow: hidden;
             display: block;
-            border: 1px solid #000;
             page-break-after: always;
             page-break-inside: avoid;
             break-after: page;
@@ -828,13 +831,16 @@ export default function OrderManagement({
             html, body { 
               -webkit-print-color-adjust: exact; 
               print-color-adjust: exact;
+              margin: 0 !important;
+              padding: 0 !important;
               width: 100% !important;
               height: 100% !important;
             }
             .label-container {
               width: 100% !important;
               height: 100% !important;
-              border: 1px solid #000 !important;
+              margin: 0 !important;
+              padding: 3px !important;
             }
           }
         </style>
