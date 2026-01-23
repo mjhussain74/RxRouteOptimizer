@@ -496,79 +496,57 @@ export default function OrderManagement({
         <title>Delivery Label - ${deliveryId}</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          @page { 
-            size: 2.4in 2in; 
-            margin: 0; 
-          }
+          @page { size: 2.4in 2in; margin: 0.1in; }
           html, body {
             font-family: Arial, sans-serif;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 230px;
-            height: 192px;
-            overflow: hidden;
+            margin: 0;
+            padding: 0;
           }
           .label-container {
-            width: 230px;
-            height: 192px;
-            padding: 5px;
+            width: 2.2in;
+            height: 1.8in;
+            padding: 4px;
+            border: 1px solid #000;
+            border-radius: 3px;
             overflow: hidden;
-            display: block;
           }
           .header-row {
             border-bottom: 1px solid #000;
-            padding-bottom: 1px;
-            margin-bottom: 1px;
+            padding-bottom: 2px;
+            margin-bottom: 2px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 7px; font-weight: bold; float: left; }
-          .date { font-size: 6px; color: #666; float: right; }
+          .pharmacy-name { font-size: 8px; font-weight: bold; float: left; }
+          .date { font-size: 7px; color: #666; float: right; }
           .delivery-id {
-            font-size: 9px;
+            font-size: 10px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 1px 2px;
+            padding: 2px 3px;
             border-radius: 2px;
-            margin-bottom: 1px;
+            margin-bottom: 2px;
             clear: both;
           }
-          .barcode-container { text-align: center; margin-bottom: 2px; }
-          .barcode-container img { max-width: 100%; height: 22px; }
-          .field { margin-bottom: 1px; }
-          .field-label { font-size: 5px; color: #666; text-transform: uppercase; margin-bottom: 0; }
-          .field-value { font-size: 7px; font-weight: 500; line-height: 1.1; }
-          .address { font-size: 7px; line-height: 1.1; }
+          .barcode-container { text-align: center; margin-bottom: 3px; }
+          .barcode-container img { max-width: 100%; height: 28px; }
+          .field { margin-bottom: 2px; }
+          .field-label { font-size: 6px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 8px; font-weight: 500; line-height: 1.1; }
+          .address { font-size: 8px; line-height: 1.1; }
           .phone-box {
-            font-size: 8px;
+            font-size: 9px;
             font-weight: bold;
             background: #e8f0f8;
             padding: 2px;
             border-radius: 2px;
             text-align: center;
             border: 1px solid #ccc;
-            margin-top: 1px;
+            margin-top: 2px;
           }
-          .phone-box .field-label { font-size: 5px; margin-bottom: 0; display: block; }
+          .phone-box .field-label { font-size: 6px; margin-bottom: 0; display: block; }
           @media print {
-            @page { 
-              size: 2.4in 2in; 
-              margin: 0; 
-            }
-            html, body { 
-              -webkit-print-color-adjust: exact; 
-              print-color-adjust: exact;
-              margin: 0 !important;
-              padding: 0 !important;
-              width: 230px !important;
-              height: 192px !important;
-            }
-            .label-container {
-              width: 230px !important;
-              height: 192px !important;
-              margin: 0 !important;
-              padding: 5px !important;
-            }
+            html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         </style>
       </head>
@@ -757,90 +735,71 @@ export default function OrderManagement({
           * { box-sizing: border-box; margin: 0; padding: 0; }
           @page { 
             size: 2.4in 2in; 
-            margin: 0; 
+            margin: 0.1in; 
           }
           html, body {
             font-family: Arial, sans-serif;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 230px;
-            height: 192px;
-            overflow: hidden;
+            margin: 0;
+            padding: 0;
           }
           .label-container {
-            width: 230px;
-            height: 192px;
-            padding: 5px;
+            width: 2.2in;
+            height: 1.8in;
+            padding: 4px;
+            border: 1px solid #000;
+            border-radius: 3px;
             overflow: hidden;
-            display: block;
             page-break-after: always;
             page-break-inside: avoid;
-            break-after: page;
-            break-inside: avoid;
           }
           .label-container:last-child {
             page-break-after: auto;
-            break-after: auto;
           }
           .header-row {
             border-bottom: 1px solid #000;
-            padding-bottom: 1px;
-            margin-bottom: 1px;
+            padding-bottom: 2px;
+            margin-bottom: 2px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 7px; font-weight: bold; float: left; }
-          .date { font-size: 6px; color: #666; float: right; }
+          .pharmacy-name { font-size: 8px; font-weight: bold; float: left; }
+          .date { font-size: 7px; color: #666; float: right; }
           .delivery-id {
-            font-size: 9px;
+            font-size: 10px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 1px 2px;
+            padding: 2px 3px;
             border-radius: 2px;
-            margin-bottom: 1px;
+            margin-bottom: 2px;
             clear: both;
           }
           .barcode-container { 
             text-align: center; 
-            margin-bottom: 2px; 
+            margin-bottom: 3px; 
           }
           .barcode-container img { 
             max-width: 100%; 
-            height: 22px; 
+            height: 28px; 
           }
-          .field { margin-bottom: 1px; }
-          .field-label { font-size: 5px; color: #666; text-transform: uppercase; margin-bottom: 0; }
-          .field-value { font-size: 7px; font-weight: 500; line-height: 1.1; }
-          .address { font-size: 7px; line-height: 1.1; }
+          .field { margin-bottom: 2px; }
+          .field-label { font-size: 6px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 8px; font-weight: 500; line-height: 1.1; }
+          .address { font-size: 8px; line-height: 1.1; }
           .phone-box {
-            font-size: 8px;
+            font-size: 9px;
             font-weight: bold;
             background: #e8f0f8;
             padding: 2px;
             border-radius: 2px;
             text-align: center;
             border: 1px solid #ccc;
-            margin-top: 1px;
+            margin-top: 2px;
           }
-          .phone-box .field-label { font-size: 5px; margin-bottom: 0; display: block; }
+          .phone-box .field-label { font-size: 6px; margin-bottom: 0; display: block; }
           @media print {
-            @page { 
-              size: 2.4in 2in; 
-              margin: 0; 
-            }
             html, body { 
               -webkit-print-color-adjust: exact; 
-              print-color-adjust: exact;
-              margin: 0 !important;
-              padding: 0 !important;
-              width: 230px !important;
-              height: 192px !important;
-            }
-            .label-container {
-              width: 230px !important;
-              height: 192px !important;
-              margin: 0 !important;
-              padding: 5px !important;
+              print-color-adjust: exact; 
             }
           }
         </style>
