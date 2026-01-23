@@ -313,8 +313,22 @@ export async function downloadFromStorage(filename: string): Promise<Buffer | nu
     }
     const result = await client.downloadAsBytes(filename);
     if (result.ok) {
-      const data = result.value as unknown as Uint8Array;
-      return Buffer.from(data);
+      // The result.value is an array with the Buffer as the first element
+      const value = result.value as any;
+      if (Buffer.isBuffer(value)) {
+        return value;
+      } else if (value instanceof Uint8Array) {
+        return Buffer.from(value);
+      } else if (Array.isArray(value) && value.length > 0 && Buffer.isBuffer(value[0])) {
+        // Object storage returns an array with the Buffer as first element
+        return value[0];
+      } else if (Array.isArray(value) && value.length > 0) {
+        // Try to convert the first element
+        return Buffer.from(value[0]);
+      } else {
+        console.error(`Unexpected download value type for ${filename}:`, typeof value);
+        return null;
+      }
     }
     console.error(`Download failed for ${filename}:`, result.error);
     return null;
