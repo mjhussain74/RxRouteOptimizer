@@ -504,12 +504,13 @@ export default function OrderManagement({
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            width: 2.4in;
+            width: 100%;
+            height: 100%;
           }
           .label-container {
-            width: 2.4in;
-            height: 2in;
-            padding: 0.1in;
+            width: 100%;
+            height: 100%;
+            padding: 4px;
             overflow: hidden;
             display: block;
           }
@@ -549,7 +550,16 @@ export default function OrderManagement({
           }
           .phone-box .field-label { font-size: 6px; margin-bottom: 0; display: block; }
           @media print {
-            html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            html, body { 
+              -webkit-print-color-adjust: exact; 
+              print-color-adjust: exact;
+              width: 100% !important;
+              height: 100% !important;
+            }
+            .label-container {
+              width: 100% !important;
+              height: 100% !important;
+            }
           }
         </style>
       </head>
@@ -744,12 +754,13 @@ export default function OrderManagement({
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            width: 2.4in;
+            width: 100%;
+            height: 100%;
           }
           .label-container {
-            width: 2.4in;
-            height: 2in;
-            padding: 0.1in;
+            width: 100%;
+            height: 100%;
+            padding: 4px;
             overflow: hidden;
             display: block;
             page-break-after: always;
@@ -805,7 +816,13 @@ export default function OrderManagement({
           @media print {
             html, body { 
               -webkit-print-color-adjust: exact; 
-              print-color-adjust: exact; 
+              print-color-adjust: exact;
+              width: 100% !important;
+              height: 100% !important;
+            }
+            .label-container {
+              width: 100% !important;
+              height: 100% !important;
             }
           }
         </style>
