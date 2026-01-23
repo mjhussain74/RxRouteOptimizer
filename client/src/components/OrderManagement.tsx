@@ -496,15 +496,15 @@ export default function OrderManagement({
         <title>Delivery Label - ${deliveryId}</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          @page { size: 3in 2.4in; margin: 0.1in; }
+          @page { size: 2.4in 3in; margin: 0.1in; }
           html, body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
           }
           .label-container {
-            width: 2.8in;
-            min-height: 2.1in;
+            width: 2.2in;
+            min-height: 2.7in;
             padding: 6px;
             border: 2px solid #000;
             border-radius: 4px;
@@ -733,7 +733,7 @@ export default function OrderManagement({
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           @page { 
-            size: 3in 2.4in; 
+            size: 2.4in 3in; 
             margin: 0.1in; 
           }
           html, body {
@@ -742,8 +742,8 @@ export default function OrderManagement({
             padding: 0;
           }
           .label-container {
-            width: 2.8in;
-            min-height: 2.1in;
+            width: 2.2in;
+            min-height: 2.7in;
             padding: 6px;
             border: 2px solid #000;
             border-radius: 4px;
