@@ -504,17 +504,13 @@ export default function OrderManagement({
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            width: 2.4in;
-            height: 2in;
-            max-width: 2.4in;
-            max-height: 2in;
+            width: 100vw;
+            height: 100vh;
           }
           .label-container {
-            width: 2.4in;
-            height: 2in;
-            max-width: 2.4in;
-            max-height: 2in;
-            padding: 0.08in;
+            width: 100vw;
+            height: 100vh;
+            padding: 4px;
             overflow: hidden;
             display: block;
             border: 1px solid #000;
@@ -562,12 +558,12 @@ export default function OrderManagement({
             html, body { 
               -webkit-print-color-adjust: exact; 
               print-color-adjust: exact;
-              width: 2.4in !important;
-              height: 2in !important;
+              width: 100% !important;
+              height: 100% !important;
             }
             .label-container {
-              width: 2.4in !important;
-              height: 2in !important;
+              width: 100% !important;
+              height: 100% !important;
               border: 1px solid #000 !important;
             }
           }
@@ -764,16 +760,13 @@ export default function OrderManagement({
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            width: 2.4in;
-            height: 2in;
-            max-width: 2.4in;
+            width: 100vw;
+            height: 100vh;
           }
           .label-container {
-            width: 2.4in;
-            height: 2in;
-            max-width: 2.4in;
-            max-height: 2in;
-            padding: 0.08in;
+            width: 100vw;
+            height: 100vh;
+            padding: 4px;
             overflow: hidden;
             display: block;
             border: 1px solid #000;
@@ -835,12 +828,12 @@ export default function OrderManagement({
             html, body { 
               -webkit-print-color-adjust: exact; 
               print-color-adjust: exact;
-              width: 2.4in !important;
-              height: 2in !important;
+              width: 100% !important;
+              height: 100% !important;
             }
             .label-container {
-              width: 2.4in !important;
-              height: 2in !important;
+              width: 100% !important;
+              height: 100% !important;
               border: 1px solid #000 !important;
             }
           }
