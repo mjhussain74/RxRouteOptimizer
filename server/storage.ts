@@ -174,7 +174,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async validateUserPassword(username: string, password: string): Promise<SafeUser | null> {
-    const result = await db.select().from(users).where(eq(users.username, username));
+    // Case-insensitive username lookup
+    const result = await db.select().from(users).where(
+      drizzleSql`LOWER(${users.username}) = LOWER(${username})`
+    );
     if (!result[0]) return null;
     
     const isValid = await verifyPassword(password, result[0].password);
@@ -185,7 +188,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async validateDriverPassword(username: string, password: string): Promise<Driver | null> {
-    const result = await db.select().from(drivers).where(eq(drivers.username, username));
+    // Case-insensitive username lookup
+    const result = await db.select().from(drivers).where(
+      drizzleSql`LOWER(${drivers.username}) = LOWER(${username})`
+    );
     if (!result[0] || !result[0].password) return null;
     
     const isValid = await verifyPassword(password, result[0].password);
