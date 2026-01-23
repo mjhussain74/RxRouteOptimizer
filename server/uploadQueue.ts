@@ -1,6 +1,6 @@
 import { Client } from "@replit/object-storage";
 import { db } from "./storage";
-import { uploadQueue, deliveryProofs } from "@shared/schema";
+import { uploadQueue, deliveryProofs, deliveries } from "@shared/schema";
 import { eq, and, or, lt } from "drizzle-orm";
 
 let client: Client | null = null;
@@ -147,11 +147,31 @@ async function processUploadItem(item: QueueItem): Promise<void> {
       throw new Error("Object storage client not initialized");
     }
     
+    // Fetch the proof to get the delivery ID
+    const proofResult = await db.select().from(deliveryProofs).where(eq(deliveryProofs.id, proofId));
+    const proof = proofResult[0];
+    
+    // Get the delivery identifier for folder naming
+    let folderName = `proof_${proofId}`; // Fallback
+    if (proof?.deliveryId) {
+      const deliveryResult = await db.select().from(deliveries).where(eq(deliveries.id, proof.deliveryId));
+      const delivery = deliveryResult[0];
+      // Use delivery identifier if it exists and looks valid (not empty)
+      if (delivery?.deliveryIdentifier && delivery.deliveryIdentifier.trim().length > 0) {
+        folderName = delivery.deliveryIdentifier.trim();
+      } else if (delivery?.id) {
+        // Fallback to delivery ID if no identifier
+        folderName = `DEL${delivery.id}`;
+      }
+    }
+    
+    console.log(`📁 Using folder name: ${folderName} for proof ${proofId}`);
+    
     const base64Data = data.replace(/^data:image\/\w+;base64,/, "");
     const buffer = Buffer.from(base64Data, "base64");
     
     const timestamp = Date.now();
-    const filename = `proofs/${proofId}/${type}_${timestamp}.png`;
+    const filename = `proofs/${folderName}/${type}_${timestamp}.png`;
     
     const uploadResult = await client.uploadFromBytes(filename, buffer);
     

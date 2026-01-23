@@ -496,56 +496,54 @@ export default function OrderManagement({
         <title>Delivery Label - ${deliveryId}</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          @page { size: 4in 3in; margin: 0.15in; }
+          @page { size: 2.4in 3in; margin: 0.1in; }
           html, body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
           }
           .label-container {
-            width: 3.7in;
-            min-height: 2.5in;
-            padding: 8px;
+            width: 2.2in;
+            min-height: 2.7in;
+            padding: 6px;
             border: 2px solid #000;
             border-radius: 4px;
           }
           .header-row {
             border-bottom: 1px solid #000;
-            padding-bottom: 4px;
-            margin-bottom: 6px;
+            padding-bottom: 3px;
+            margin-bottom: 4px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 12px; font-weight: bold; float: left; }
-          .date { font-size: 10px; color: #666; float: right; }
+          .pharmacy-name { font-size: 10px; font-weight: bold; float: left; }
+          .date { font-size: 9px; color: #666; float: right; }
           .delivery-id {
-            font-size: 14px;
+            font-size: 12px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 4px 6px;
+            padding: 3px 4px;
             border-radius: 3px;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
             clear: both;
           }
-          .barcode-container { text-align: center; margin-bottom: 8px; }
-          .barcode-container img { max-width: 100%; height: 40px; }
-          .content-row { overflow: hidden; }
-          .left-col { float: left; width: calc(100% - 100px); }
-          .right-col { float: right; width: 90px; }
-          .field { margin-bottom: 4px; }
-          .field-label { font-size: 8px; color: #666; text-transform: uppercase; }
-          .field-value { font-size: 11px; font-weight: 500; line-height: 1.3; }
-          .address { font-size: 10px; line-height: 1.2; }
+          .barcode-container { text-align: center; margin-bottom: 6px; }
+          .barcode-container img { max-width: 100%; height: 35px; }
+          .field { margin-bottom: 3px; }
+          .field-label { font-size: 7px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 9px; font-weight: 500; line-height: 1.2; }
+          .address { font-size: 9px; line-height: 1.2; }
           .phone-box {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: bold;
             background: #e8f0f8;
-            padding: 6px;
+            padding: 4px;
             border-radius: 3px;
             text-align: center;
             border: 1px solid #ccc;
+            margin-top: 4px;
           }
-          .phone-box .field-label { font-size: 8px; margin-bottom: 2px; display: block; }
+          .phone-box .field-label { font-size: 7px; margin-bottom: 1px; display: block; }
           @media print {
             html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
@@ -561,24 +559,18 @@ export default function OrderManagement({
           <div class="barcode-container">
             <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
           </div>
-          <div class="content-row">
-            <div class="left-col">
-              <div class="field">
-                <div class="field-label">Deliver To</div>
-                <div class="field-value address">${delivery.addressText}</div>
-              </div>
-              <div class="field">
-                <div class="field-label">Patient(s)</div>
-                <div class="field-value">${allPatientNames}</div>
-              </div>
-              ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
-            </div>
-            <div class="right-col">
-              <div class="phone-box">
-                <div class="field-label">PHONE</div>
-                ${allPatientPhones}
-              </div>
-            </div>
+          <div class="field">
+            <div class="field-label">Deliver To</div>
+            <div class="field-value address">${delivery.addressText}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Patient(s)</div>
+            <div class="field-value">${allPatientNames}</div>
+          </div>
+          ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
+          <div class="phone-box">
+            <div class="field-label">PHONE</div>
+            ${allPatientPhones}
           </div>
         </div>
       </body>
@@ -716,24 +708,18 @@ export default function OrderManagement({
           <div class="barcode-container">
             <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
           </div>
-          <div class="content-row">
-            <div class="left-col">
-              <div class="field">
-                <div class="field-label">Deliver To</div>
-                <div class="field-value address">${delivery.addressText}</div>
-              </div>
-              <div class="field">
-                <div class="field-label">Patient(s)</div>
-                <div class="field-value">${allPatientNames}</div>
-              </div>
-              ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
-            </div>
-            <div class="right-col">
-              <div class="phone-box">
-                <div class="field-label">PHONE</div>
-                ${allPatientPhones}
-              </div>
-            </div>
+          <div class="field">
+            <div class="field-label">Deliver To</div>
+            <div class="field-value address">${delivery.addressText}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Patient(s)</div>
+            <div class="field-value">${allPatientNames}</div>
+          </div>
+          ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
+          <div class="phone-box">
+            <div class="field-label">PHONE</div>
+            ${allPatientPhones}
           </div>
         </div>
       `;
@@ -747,8 +733,8 @@ export default function OrderManagement({
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           @page { 
-            size: 4in 3in; 
-            margin: 0.15in; 
+            size: 2.4in 3in; 
+            margin: 0.1in; 
           }
           html, body {
             font-family: Arial, sans-serif;
@@ -756,8 +742,8 @@ export default function OrderManagement({
             padding: 0;
           }
           .label-container {
-            width: 3.7in;
-            min-height: 2.5in;
+            width: 2.2in;
+            min-height: 2.7in;
             padding: 8px;
             border: 2px solid #000;
             border-radius: 4px;
@@ -769,55 +755,45 @@ export default function OrderManagement({
           }
           .header-row {
             border-bottom: 1px solid #000;
-            padding-bottom: 4px;
-            margin-bottom: 6px;
+            padding-bottom: 3px;
+            margin-bottom: 4px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 12px; font-weight: bold; float: left; }
-          .date { font-size: 10px; color: #666; float: right; }
+          .pharmacy-name { font-size: 10px; font-weight: bold; float: left; }
+          .date { font-size: 9px; color: #666; float: right; }
           .delivery-id {
-            font-size: 14px;
+            font-size: 12px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 4px 6px;
+            padding: 3px 4px;
             border-radius: 3px;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
             clear: both;
           }
           .barcode-container { 
             text-align: center; 
-            margin-bottom: 8px; 
+            margin-bottom: 6px; 
           }
           .barcode-container img { 
             max-width: 100%; 
-            height: 40px; 
+            height: 35px; 
           }
-          .content-row {
-            overflow: hidden;
-          }
-          .left-col { 
-            float: left;
-            width: calc(100% - 100px);
-          }
-          .right-col { 
-            float: right;
-            width: 90px;
-          }
-          .field { margin-bottom: 4px; }
-          .field-label { font-size: 8px; color: #666; text-transform: uppercase; }
-          .field-value { font-size: 11px; font-weight: 500; line-height: 1.3; }
-          .address { font-size: 10px; line-height: 1.2; }
+          .field { margin-bottom: 3px; }
+          .field-label { font-size: 7px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 9px; font-weight: 500; line-height: 1.2; }
+          .address { font-size: 9px; line-height: 1.2; }
           .phone-box {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: bold;
             background: #e8f0f8;
-            padding: 6px;
+            padding: 4px;
             border-radius: 3px;
             text-align: center;
             border: 1px solid #ccc;
+            margin-top: 4px;
           }
-          .phone-box .field-label { font-size: 8px; margin-bottom: 2px; display: block; }
+          .phone-box .field-label { font-size: 7px; margin-bottom: 1px; display: block; }
           @media print {
             html, body { 
               -webkit-print-color-adjust: exact; 
