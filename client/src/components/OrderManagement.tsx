@@ -517,39 +517,39 @@ export default function OrderManagement({
           }
           .header-row {
             border-bottom: 1px solid #000;
-            padding-bottom: 2px;
-            margin-bottom: 3px;
+            padding-bottom: 1px;
+            margin-bottom: 1px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 9px; font-weight: bold; float: left; }
-          .date { font-size: 8px; color: #666; float: right; }
+          .pharmacy-name { font-size: 7px; font-weight: bold; float: left; }
+          .date { font-size: 6px; color: #666; float: right; }
           .delivery-id {
-            font-size: 11px;
+            font-size: 9px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 2px 4px;
+            padding: 1px 2px;
             border-radius: 2px;
-            margin-bottom: 3px;
+            margin-bottom: 1px;
             clear: both;
           }
-          .barcode-container { text-align: center; margin-bottom: 4px; }
-          .barcode-container img { max-width: 100%; height: 32px; }
-          .field { margin-bottom: 3px; }
-          .field-label { font-size: 7px; color: #666; text-transform: uppercase; }
-          .field-value { font-size: 9px; font-weight: 500; line-height: 1.2; }
-          .address { font-size: 9px; line-height: 1.2; }
+          .barcode-container { text-align: center; margin-bottom: 2px; }
+          .barcode-container img { max-width: 100%; height: 22px; }
+          .field { margin-bottom: 1px; }
+          .field-label { font-size: 5px; color: #666; text-transform: uppercase; margin-bottom: 0; }
+          .field-value { font-size: 7px; font-weight: 500; line-height: 1.1; }
+          .address { font-size: 7px; line-height: 1.1; }
           .phone-box {
-            font-size: 10px;
+            font-size: 8px;
             font-weight: bold;
             background: #e8f0f8;
-            padding: 3px;
+            padding: 2px;
             border-radius: 2px;
             text-align: center;
             border: 1px solid #ccc;
-            margin-top: 3px;
+            margin-top: 1px;
           }
-          .phone-box .field-label { font-size: 7px; margin-bottom: 0; display: block; }
+          .phone-box .field-label { font-size: 5px; margin-bottom: 0; display: block; }
           @media print {
             @page { 
               size: 2.4in 2in; 
@@ -781,45 +781,45 @@ export default function OrderManagement({
           }
           .header-row {
             border-bottom: 1px solid #000;
-            padding-bottom: 2px;
-            margin-bottom: 3px;
+            padding-bottom: 1px;
+            margin-bottom: 1px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 9px; font-weight: bold; float: left; }
-          .date { font-size: 8px; color: #666; float: right; }
+          .pharmacy-name { font-size: 7px; font-weight: bold; float: left; }
+          .date { font-size: 6px; color: #666; float: right; }
           .delivery-id {
-            font-size: 11px;
+            font-size: 9px;
             font-weight: bold;
             text-align: center;
             background: #f0f0f0;
-            padding: 2px 4px;
+            padding: 1px 2px;
             border-radius: 2px;
-            margin-bottom: 3px;
+            margin-bottom: 1px;
             clear: both;
           }
           .barcode-container { 
             text-align: center; 
-            margin-bottom: 4px; 
+            margin-bottom: 2px; 
           }
           .barcode-container img { 
             max-width: 100%; 
-            height: 32px; 
+            height: 22px; 
           }
-          .field { margin-bottom: 3px; }
-          .field-label { font-size: 7px; color: #666; text-transform: uppercase; }
-          .field-value { font-size: 9px; font-weight: 500; line-height: 1.2; }
-          .address { font-size: 9px; line-height: 1.2; }
+          .field { margin-bottom: 1px; }
+          .field-label { font-size: 5px; color: #666; text-transform: uppercase; margin-bottom: 0; }
+          .field-value { font-size: 7px; font-weight: 500; line-height: 1.1; }
+          .address { font-size: 7px; line-height: 1.1; }
           .phone-box {
-            font-size: 10px;
+            font-size: 8px;
             font-weight: bold;
             background: #e8f0f8;
-            padding: 3px;
+            padding: 2px;
             border-radius: 2px;
             text-align: center;
             border: 1px solid #ccc;
-            margin-top: 3px;
+            margin-top: 1px;
           }
-          .phone-box .field-label { font-size: 7px; margin-bottom: 0; display: block; }
+          .phone-box .field-label { font-size: 5px; margin-bottom: 0; display: block; }
           @media print {
             @page { 
               size: 2.4in 2in; 
