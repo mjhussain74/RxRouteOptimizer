@@ -496,16 +496,23 @@ export default function OrderManagement({
         <title>Delivery Label - ${deliveryId}</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          @page { size: 2.4in 2in; margin: 0; }
-          html, body {
+          @page { size: auto; margin: 0; }
+          html {
+            width: 2.4in;
+            height: 2in;
+            overflow: hidden;
+          }
+          body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 0;
+            padding: 0.05in;
+            width: 2.4in;
+            height: 2in;
+            overflow: hidden;
           }
           .label-container {
-            width: 2.3in;
-            max-height: 1.9in;
-            padding: 0.05in;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
           }
           .header-row {
@@ -731,15 +738,15 @@ export default function OrderManagement({
         <title>Delivery Labels - ${selectedBatch?.name || 'Batch'}</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          @page { size: 2.4in 2in; margin: 0; }
+          @page { size: auto; margin: 0; }
           html, body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
           }
           .label-container {
-            width: 2.3in;
-            max-height: 1.9in;
+            width: 2.4in;
+            height: 2in;
             padding: 0.05in;
             overflow: hidden;
             page-break-after: always;
