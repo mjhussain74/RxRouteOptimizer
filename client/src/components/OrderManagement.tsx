@@ -497,21 +497,21 @@ export default function OrderManagement({
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           @page { 
-            size: 61mm 51mm; 
+            size: 2.4in 2in; 
             margin: 0; 
           }
           html, body {
             font-family: Arial, sans-serif;
             margin: 0 !important;
             padding: 0 !important;
-            width: 61mm;
-            height: 51mm;
+            width: 230px;
+            height: 192px;
             overflow: hidden;
           }
           .label-container {
-            width: 61mm;
-            height: 51mm;
-            padding: 2mm;
+            width: 230px;
+            height: 192px;
+            padding: 5px;
             overflow: hidden;
             display: block;
           }
@@ -552,7 +552,7 @@ export default function OrderManagement({
           .phone-box .field-label { font-size: 5px; margin-bottom: 0; display: block; }
           @media print {
             @page { 
-              size: 61mm 51mm; 
+              size: 2.4in 2in; 
               margin: 0; 
             }
             html, body { 
@@ -560,14 +560,14 @@ export default function OrderManagement({
               print-color-adjust: exact;
               margin: 0 !important;
               padding: 0 !important;
-              width: 61mm !important;
-              height: 51mm !important;
+              width: 230px !important;
+              height: 192px !important;
             }
             .label-container {
-              width: 61mm !important;
-              height: 51mm !important;
+              width: 230px !important;
+              height: 192px !important;
               margin: 0 !important;
-              padding: 2mm !important;
+              padding: 5px !important;
             }
           }
         </style>
@@ -756,21 +756,21 @@ export default function OrderManagement({
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           @page { 
-            size: 61mm 51mm; 
+            size: 2.4in 2in; 
             margin: 0; 
           }
           html, body {
             font-family: Arial, sans-serif;
             margin: 0 !important;
             padding: 0 !important;
-            width: 61mm;
-            height: 51mm;
+            width: 230px;
+            height: 192px;
             overflow: hidden;
           }
           .label-container {
-            width: 61mm;
-            height: 51mm;
-            padding: 2mm;
+            width: 230px;
+            height: 192px;
+            padding: 5px;
             overflow: hidden;
             display: block;
             page-break-after: always;
@@ -825,7 +825,7 @@ export default function OrderManagement({
           .phone-box .field-label { font-size: 5px; margin-bottom: 0; display: block; }
           @media print {
             @page { 
-              size: 61mm 51mm; 
+              size: 2.4in 2in; 
               margin: 0; 
             }
             html, body { 
@@ -833,14 +833,14 @@ export default function OrderManagement({
               print-color-adjust: exact;
               margin: 0 !important;
               padding: 0 !important;
-              width: 61mm !important;
-              height: 51mm !important;
+              width: 230px !important;
+              height: 192px !important;
             }
             .label-container {
-              width: 61mm !important;
-              height: 51mm !important;
+              width: 230px !important;
+              height: 192px !important;
               margin: 0 !important;
-              padding: 2mm !important;
+              padding: 5px !important;
             }
           }
         </style>
