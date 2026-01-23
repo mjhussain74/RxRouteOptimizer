@@ -504,13 +504,13 @@ export default function OrderManagement({
             font-family: Arial, sans-serif;
             margin: 0 !important;
             padding: 0 !important;
-            width: 100%;
-            height: 100%;
+            width: 2.4in;
+            height: 2in;
             overflow: hidden;
           }
           .label-container {
-            width: 100%;
-            height: 100%;
+            width: 2.4in;
+            height: 2in;
             padding: 3px;
             overflow: hidden;
             display: block;
@@ -560,12 +560,12 @@ export default function OrderManagement({
               print-color-adjust: exact;
               margin: 0 !important;
               padding: 0 !important;
-              width: 100% !important;
-              height: 100% !important;
+              width: 2.4in !important;
+              height: 2in !important;
             }
             .label-container {
-              width: 100% !important;
-              height: 100% !important;
+              width: 2.4in !important;
+              height: 2in !important;
               margin: 0 !important;
               padding: 3px !important;
             }
@@ -763,13 +763,13 @@ export default function OrderManagement({
             font-family: Arial, sans-serif;
             margin: 0 !important;
             padding: 0 !important;
-            width: 100%;
-            height: 100%;
+            width: 2.4in;
+            height: 2in;
             overflow: hidden;
           }
           .label-container {
-            width: 100%;
-            height: 100%;
+            width: 2.4in;
+            height: 2in;
             padding: 3px;
             overflow: hidden;
             display: block;
@@ -833,12 +833,12 @@ export default function OrderManagement({
               print-color-adjust: exact;
               margin: 0 !important;
               padding: 0 !important;
-              width: 100% !important;
-              height: 100% !important;
+              width: 2.4in !important;
+              height: 2in !important;
             }
             .label-container {
-              width: 100% !important;
-              height: 100% !important;
+              width: 2.4in !important;
+              height: 2in !important;
               margin: 0 !important;
               padding: 3px !important;
             }
