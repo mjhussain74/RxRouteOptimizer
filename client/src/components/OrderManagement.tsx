@@ -435,16 +435,19 @@ export default function OrderManagement({
     [uploadMutation],
   );
 
-  const printDeliveryLabel = (delivery: Delivery, pharmacyName: string = "RX Delivery Pharmacy") => {
+  const printDeliveryLabel = (
+    delivery: Delivery,
+    pharmacyName: string = "RX Delivery Pharmacy",
+  ) => {
     const today = new Date().toLocaleDateString();
     const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
-    
+
     // Collect all patient names and phones from prescriptions
     const patientNames: string[] = [];
     const patientPhones: string[] = [];
-    
+
     if (delivery.prescriptions && delivery.prescriptions.length > 0) {
-      delivery.prescriptions.forEach(rx => {
+      delivery.prescriptions.forEach((rx) => {
         if (rx.patientName && !patientNames.includes(rx.patientName)) {
           patientNames.push(rx.patientName);
         }
@@ -453,7 +456,7 @@ export default function OrderManagement({
         }
       });
     }
-    
+
     // Fallback to delivery-level customer info if no prescription data
     if (patientNames.length === 0 && delivery.customerName) {
       patientNames.push(delivery.customerName);
@@ -461,9 +464,11 @@ export default function OrderManagement({
     if (patientPhones.length === 0 && delivery.customerPhone) {
       patientPhones.push(delivery.customerPhone);
     }
-    
-    const allPatientNames = patientNames.length > 0 ? patientNames.join(", ") : "N/A";
-    const allPatientPhones = patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
+
+    const allPatientNames =
+      patientNames.length > 0 ? patientNames.join(", ") : "N/A";
+    const allPatientPhones =
+      patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
 
     const canvas = document.createElement("canvas");
     try {
@@ -495,34 +500,61 @@ export default function OrderManagement({
       <head>
         <title>Delivery Label - ${deliveryId}</title>
         <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          @page { size: auto; margin: 0; }
-          html {
-            width: 2.4in;
-            height: 2in;
-            overflow: hidden;
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
           }
+
+          /* 🔑 THIS IS THE MOST IMPORTANT PART */
+          @media print {
+            @page {
+              size: 62mm 50mm;   /* WIDTH = tape, HEIGHT = feed */
+              margin: 0;
+            }
+
+            html, body {
+              width: 62mm;
+              height: 50mm;
+              margin: 0;
+              padding: 0;
+              overflow: hidden;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          }
+
           body {
             font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0.05in;
-            width: 2.4in;
-            height: 2in;
-            overflow: hidden;
           }
+
+          /* Padding belongs INSIDE the label, not on body */
           .label-container {
-            width: 100%;
-            height: 100%;
+            width: 62mm;
+            height: 50mm;
+            padding: 2mm;
             overflow: hidden;
           }
+
           .header-row {
             border-bottom: 1px solid #000;
             padding-bottom: 2px;
             margin-bottom: 2px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 8px; font-weight: bold; float: left; }
-          .date { font-size: 7px; color: #666; float: right; }
+
+          .pharmacy-name {
+            font-size: 8px;
+            font-weight: bold;
+            float: left;
+          }
+
+          .date {
+            font-size: 7px;
+            color: #666;
+            float: right;
+          }
+
           .delivery-id {
             font-size: 10px;
             font-weight: bold;
@@ -533,12 +565,40 @@ export default function OrderManagement({
             margin-bottom: 2px;
             clear: both;
           }
-          .barcode-container { text-align: center; margin-bottom: 3px; }
-          .barcode-container img { max-width: 100%; height: 28px; }
-          .field { margin-bottom: 2px; }
-          .field-label { font-size: 6px; color: #666; text-transform: uppercase; }
-          .field-value { font-size: 8px; font-weight: 500; line-height: 1.1; }
-          .address { font-size: 8px; line-height: 1.1; }
+
+          .barcode-container {
+            text-align: center;
+            margin-bottom: 2mm;
+          }
+
+          /* ⚠️ physical units – prevents width overflow */
+          .barcode-container img {
+            width: 100%;
+            height: 8mm;
+            object-fit: contain;
+          }
+
+          .field {
+            margin-bottom: 2px;
+          }
+
+          .field-label {
+            font-size: 6px;
+            color: #666;
+            text-transform: uppercase;
+          }
+
+          .field-value {
+            font-size: 8px;
+            font-weight: 500;
+            line-height: 1.1;
+          }
+
+          .address {
+            font-size: 8px;
+            line-height: 1.1;
+          }
+
           .phone-box {
             font-size: 9px;
             font-weight: bold;
@@ -549,31 +609,47 @@ export default function OrderManagement({
             border: 1px solid #ccc;
             margin-top: 2px;
           }
-          .phone-box .field-label { font-size: 6px; margin-bottom: 0; display: block; }
-          @media print {
-            html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+          .phone-box .field-label {
+            font-size: 6px;
+            display: block;
           }
         </style>
       </head>
+
       <body>
         <div class="label-container">
           <div class="header-row">
             <div class="pharmacy-name">${pharmacyName}</div>
             <div class="date">${today}</div>
           </div>
+
           <div class="delivery-id">${deliveryId}</div>
+
           <div class="barcode-container">
             <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
           </div>
+
           <div class="field">
             <div class="field-label">Deliver To</div>
             <div class="field-value address">${delivery.addressText}</div>
           </div>
+
           <div class="field">
             <div class="field-label">Patient(s)</div>
             <div class="field-value">${allPatientNames}</div>
           </div>
-          ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
+
+          ${
+            delivery.notes
+              ? `
+            <div class="field">
+              <div class="field-label">Notes</div>
+              <div class="field-value">${delivery.notes}</div>
+            </div>`
+              : ""
+          }
+
           <div class="phone-box">
             <div class="field-label">PHONE</div>
             ${allPatientPhones}
@@ -643,68 +719,74 @@ export default function OrderManagement({
   // Print all labels for the selected batch (uses all deliveries, not filtered)
   const printAllLabels = () => {
     if (!activeBatchId || deliveries.length === 0) return;
-    
+
     // Get pharmacy name from batch
-    const selectedBatch = (batches as any[]).find((b: any) => b.id === activeBatchId);
-    const pharmacyName = selectedBatch?.name?.split(' - ')[0] || "RX Delivery Pharmacy";
+    const selectedBatch = (batches as any[]).find(
+      (b: any) => b.id === activeBatchId,
+    );
+    const pharmacyName =
+      selectedBatch?.name?.split(" - ")[0] || "RX Delivery Pharmacy";
     const today = new Date().toLocaleDateString();
-    
+
     // Generate label HTML for each delivery (all deliveries in batch, ignoring search filter)
-    const labelsHtml = deliveries.map((delivery) => {
-      const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
-      
-      // Collect all patient names and phones from prescriptions
-      const patientNames: string[] = [];
-      const patientPhones: string[] = [];
-      
-      if (delivery.prescriptions && delivery.prescriptions.length > 0) {
-        delivery.prescriptions.forEach(rx => {
-          if (rx.patientName && !patientNames.includes(rx.patientName)) {
-            patientNames.push(rx.patientName);
-          }
-          if (rx.patientPhone && !patientPhones.includes(rx.patientPhone)) {
-            patientPhones.push(rx.patientPhone);
-          }
-        });
-      }
-      
-      // Fallback to delivery-level customer info if no prescription data
-      if (patientNames.length === 0 && delivery.customerName) {
-        patientNames.push(delivery.customerName);
-      }
-      if (patientPhones.length === 0 && delivery.customerPhone) {
-        patientPhones.push(delivery.customerPhone);
-      }
-      
-      const allPatientNames = patientNames.length > 0 ? patientNames.join(", ") : "N/A";
-      const allPatientPhones = patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
-      
-      // Generate barcode for this delivery
-      const canvas = document.createElement("canvas");
-      try {
-        const dpr = window.devicePixelRatio || 1;
-        const ctx = canvas.getContext("2d");
-        const logicalWidth = 400;
-        const logicalHeight = 120;
-        canvas.width = logicalWidth * dpr;
-        canvas.height = logicalHeight * dpr;
-        if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        JsBarcode(canvas, deliveryId, {
-          format: "CODE128",
-          width: 3,
-          height: 80,
-          displayValue: false,
-          margin: 20,
-          background: "#ffffff",
-          lineColor: "#000000",
-          flat: true,
-        });
-      } catch (err) {
-        console.error("Barcode generation error:", err);
-      }
-      const barcodeDataUrl = canvas.toDataURL("image/png");
-      
-      return `
+    const labelsHtml = deliveries
+      .map((delivery) => {
+        const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
+
+        // Collect all patient names and phones from prescriptions
+        const patientNames: string[] = [];
+        const patientPhones: string[] = [];
+
+        if (delivery.prescriptions && delivery.prescriptions.length > 0) {
+          delivery.prescriptions.forEach((rx) => {
+            if (rx.patientName && !patientNames.includes(rx.patientName)) {
+              patientNames.push(rx.patientName);
+            }
+            if (rx.patientPhone && !patientPhones.includes(rx.patientPhone)) {
+              patientPhones.push(rx.patientPhone);
+            }
+          });
+        }
+
+        // Fallback to delivery-level customer info if no prescription data
+        if (patientNames.length === 0 && delivery.customerName) {
+          patientNames.push(delivery.customerName);
+        }
+        if (patientPhones.length === 0 && delivery.customerPhone) {
+          patientPhones.push(delivery.customerPhone);
+        }
+
+        const allPatientNames =
+          patientNames.length > 0 ? patientNames.join(", ") : "N/A";
+        const allPatientPhones =
+          patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
+
+        // Generate barcode for this delivery
+        const canvas = document.createElement("canvas");
+        try {
+          const dpr = window.devicePixelRatio || 1;
+          const ctx = canvas.getContext("2d");
+          const logicalWidth = 400;
+          const logicalHeight = 120;
+          canvas.width = logicalWidth * dpr;
+          canvas.height = logicalHeight * dpr;
+          if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          JsBarcode(canvas, deliveryId, {
+            format: "CODE128",
+            width: 3,
+            height: 80,
+            displayValue: false,
+            margin: 20,
+            background: "#ffffff",
+            lineColor: "#000000",
+            flat: true,
+          });
+        } catch (err) {
+          console.error("Barcode generation error:", err);
+        }
+        const barcodeDataUrl = canvas.toDataURL("image/png");
+
+        return `
         <div class="label-container">
           <div class="header-row">
             <div class="pharmacy-name">${pharmacyName}</div>
@@ -729,40 +811,75 @@ export default function OrderManagement({
           </div>
         </div>
       `;
-    }).join('');
-    
+      })
+      .join("");
+
     const printHtml = `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Delivery Labels - ${selectedBatch?.name || 'Batch'}</title>
+        <title>Delivery Labels - ${selectedBatch?.name || "Batch"}</title>
         <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          @page { size: auto; margin: 0; }
-          html, body {
-            font-family: Arial, sans-serif;
+          * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
           }
+
+          /* 🔑 CRITICAL: define the PRINT PAGE, not element size */
+          @media print {
+            @page {
+              size: 62mm 50mm;    /* WIDTH = tape, HEIGHT = feed */
+              margin: 0;
+            }
+
+            html, body {
+              width: 62mm;
+              margin: 0;
+              padding: 0;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          }
+
+          body {
+            font-family: Arial, sans-serif;
+          }
+
+          /* ONE LABEL = ONE PAGE */
           .label-container {
-            width: 2.4in;
-            height: 2in;
-            padding: 0.05in;
+            width: 62mm;
+            height: 50mm;
+            padding: 2mm;
             overflow: hidden;
+
             page-break-after: always;
             page-break-inside: avoid;
           }
+
           .label-container:last-child {
             page-break-after: auto;
           }
+
           .header-row {
             border-bottom: 1px solid #000;
             padding-bottom: 2px;
             margin-bottom: 2px;
             overflow: hidden;
           }
-          .pharmacy-name { font-size: 8px; font-weight: bold; float: left; }
-          .date { font-size: 7px; color: #666; float: right; }
+
+          .pharmacy-name {
+            font-size: 8px;
+            font-weight: bold;
+            float: left;
+          }
+
+          .date {
+            font-size: 7px;
+            color: #666;
+            float: right;
+          }
+
           .delivery-id {
             font-size: 10px;
             font-weight: bold;
@@ -773,18 +890,40 @@ export default function OrderManagement({
             margin-bottom: 2px;
             clear: both;
           }
-          .barcode-container { 
-            text-align: center; 
-            margin-bottom: 3px; 
+
+          .barcode-container {
+            text-align: center;
+            margin-bottom: 2mm;
           }
-          .barcode-container img { 
-            max-width: 100%; 
-            height: 28px; 
+
+          /* ⚠️ Physical units prevent width overflow */
+          .barcode-container img {
+            width: 100%;
+            height: 8mm;
+            object-fit: contain;
           }
-          .field { margin-bottom: 2px; }
-          .field-label { font-size: 6px; color: #666; text-transform: uppercase; }
-          .field-value { font-size: 8px; font-weight: 500; line-height: 1.1; }
-          .address { font-size: 8px; line-height: 1.1; }
+
+          .field {
+            margin-bottom: 2px;
+          }
+
+          .field-label {
+            font-size: 6px;
+            color: #666;
+            text-transform: uppercase;
+          }
+
+          .field-value {
+            font-size: 8px;
+            font-weight: 500;
+            line-height: 1.1;
+          }
+
+          .address {
+            font-size: 8px;
+            line-height: 1.1;
+          }
+
           .phone-box {
             font-size: 9px;
             font-weight: bold;
@@ -795,21 +934,20 @@ export default function OrderManagement({
             border: 1px solid #ccc;
             margin-top: 2px;
           }
-          .phone-box .field-label { font-size: 6px; margin-bottom: 0; display: block; }
-          @media print {
-            html, body { 
-              -webkit-print-color-adjust: exact; 
-              print-color-adjust: exact; 
-            }
+
+          .phone-box .field-label {
+            font-size: 6px;
+            display: block;
           }
         </style>
       </head>
+
       <body>
         ${labelsHtml}
       </body>
       </html>
     `;
-    
+
     const printWindow = window.open("", "_blank", "width=500,height=600");
     if (printWindow) {
       printWindow.document.write(printHtml);
@@ -1342,8 +1480,12 @@ export default function OrderManagement({
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => {
-                                  const batch = (batches as any[]).find((b: any) => b.id === delivery.batchId);
-                                  const pharmacyName = batch?.name?.split(' - ')[0] || "RX Delivery Pharmacy";
+                                  const batch = (batches as any[]).find(
+                                    (b: any) => b.id === delivery.batchId,
+                                  );
+                                  const pharmacyName =
+                                    batch?.name?.split(" - ")[0] ||
+                                    "RX Delivery Pharmacy";
                                   printDeliveryLabel(delivery, pharmacyName);
                                 }}
                                 className="h-8 w-8 p-0 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
@@ -1596,8 +1738,7 @@ export default function OrderManagement({
             {splitDelivery && (
               <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
                 <p className="text-white font-medium text-sm mb-1">
-                  {splitDelivery.deliveryIdentifier ||
-                    `DEL${splitDelivery.id}`}
+                  {splitDelivery.deliveryIdentifier || `DEL${splitDelivery.id}`}
                 </p>
                 <p className="text-slate-400 text-xs">
                   {splitDelivery.addressText}
