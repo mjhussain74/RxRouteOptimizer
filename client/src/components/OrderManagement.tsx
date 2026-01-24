@@ -509,18 +509,23 @@ export default function OrderManagement({
           /* 🔑 THIS IS THE MOST IMPORTANT PART */
           @media print {
             @page {
-              size: 62mm 50mm;   /* WIDTH = tape, HEIGHT = feed */
+              size: 62mm auto;   /* WIDTH = tape, HEIGHT = feed */
               margin: 0;
             }
 
             html, body {
               width: 62mm;
-              height: 50mm;
+              min-width: 62mm;
+              max-width: 62mm;
               margin: 0;
               padding: 0;
               overflow: hidden;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
+            }
+
+            body {
+              display: block;
             }
           }
 
