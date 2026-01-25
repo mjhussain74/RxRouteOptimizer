@@ -537,8 +537,7 @@ export default function OrderManagement({
           .label-container {
             width: 62mm;
             height: 50mm;
-            padding-left: 4mm;
-            box-sizing: border-box;
+            padding-left: 2mm;
             overflow: hidden;
           }
 
