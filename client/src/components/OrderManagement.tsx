@@ -509,7 +509,7 @@ export default function OrderManagement({
           /* 🔑 THIS IS THE MOST IMPORTANT PART */
           @media print {
             @page {
-              size: 62mm auto;   /* WIDTH = tape, HEIGHT = feed */
+              size: 62mm 50mm;   /* WIDTH = tape, HEIGHT = feed */
               margin: 0;
             }
 
@@ -532,6 +532,16 @@ export default function OrderManagement({
           body {
             font-family: Arial, sans-serif;
           }
+
+          .label {
+            width: 58mm;
+            height: 50mm;
+            padding-left: 3.4mm;
+            box-sizing: border-box;
+            overflow: hidden;
+          }
+
+          
 
           /* Padding belongs INSIDE the label, not on body */
           .label-container {
