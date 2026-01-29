@@ -236,7 +236,9 @@ function optimizeRouteNearestNeighbor(
 async function optimizeRouteWithGoogle(
   startLat: number,
   startLng: number,
-  deliveries: Array<{ id: number; lat: number; lng: number }>
+  deliveries: Array<{ id: number; lat: number; lng: number }>,
+  endLat?: number,
+  endLng?: number
 ): Promise<{ order: number[]; distance: number; duration: number } | null> {
   try {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -249,12 +251,16 @@ async function optimizeRouteWithGoogle(
       location: { latitude: d.lat, longitude: d.lng }
     }));
 
+    // Use end address if provided, otherwise return to start
+    const destLat = endLat !== undefined ? endLat : startLat;
+    const destLng = endLng !== undefined ? endLng : startLng;
+
     const requestBody = {
       origin: {
         location: { latitude: startLat, longitude: startLng }
       },
       destination: {
-        location: { latitude: startLat, longitude: startLng }
+        location: { latitude: destLat, longitude: destLng }
       },
       intermediates: waypoints,
       optimizeWaypointOrder: true,
@@ -1406,11 +1412,14 @@ export async function registerRoutes(
 
   app.post("/api/routes/optimize", requireStaff, async (req, res) => {
     try {
-      const { batchId, deliveryIds, zoneId, startLat, startLng, startAddress, routeName } = req.body;
+      const { batchId, deliveryIds, zoneId, startLat, startLng, startAddress, endLat, endLng, endAddress, routeName } = req.body;
 
       if (startLat === undefined || startLng === undefined) {
         return res.status(400).json({ error: "Missing required fields" });
       }
+
+      // Use end address if provided, otherwise route ends at last delivery
+      const hasEndAddress = endLat !== undefined && endLng !== undefined;
 
       let geocodedDeliveries: any[] = [];
       
@@ -1497,11 +1506,14 @@ export async function registerRoutes(
       }
 
       // Optimize normal deliveries (if any)
+      // Pass end address to the last segment of route optimization
       if (normalDeliveries.length > 0) {
         const normalResult = await optimizeRouteWithGoogle(
           currentLat,
           currentLng,
-          normalDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+          normalDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! })),
+          hasEndAddress ? endLat : undefined,
+          hasEndAddress ? endLng : undefined
         );
         if (normalResult && normalResult.order.length > 0) {
           optimizedOrder = [...optimizedOrder, ...normalResult.order];
@@ -1518,6 +1530,18 @@ export async function registerRoutes(
           totalDistance += fallbackResult.distance;
           estimatedDuration += fallbackResult.duration;
         }
+      } else if (urgentDeliveries.length > 0 && hasEndAddress) {
+        // If only urgent deliveries and we have an end address, add distance to end
+        const lastDeliveryId = optimizedOrder[optimizedOrder.length - 1];
+        const lastDelivery = urgentDeliveries.find(d => d.id === lastDeliveryId);
+        if (lastDelivery) {
+          const distToEnd = Math.sqrt(
+            Math.pow((endLat! - lastDelivery.lat!) * 111, 2) +
+            Math.pow((endLng! - lastDelivery.lng!) * 111 * Math.cos(lastDelivery.lat! * Math.PI / 180), 2)
+          );
+          totalDistance += distToEnd;
+          estimatedDuration += Math.round(distToEnd * 2); // ~2 min per km
+        }
       }
 
       if (optimizedOrder.length === 0) {
@@ -1532,6 +1556,9 @@ export async function registerRoutes(
         startLat,
         startLng,
         startAddress: startAddress || "Starting Point",
+        endLat: hasEndAddress ? endLat : null,
+        endLng: hasEndAddress ? endLng : null,
+        endAddress: hasEndAddress ? (endAddress || "End Point") : null,
         estimatedDuration,
         estimatedDistance: totalDistance,
         optimizedOrder

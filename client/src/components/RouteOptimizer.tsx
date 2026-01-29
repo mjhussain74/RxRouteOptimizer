@@ -59,8 +59,12 @@ export default function RouteOptimizer({
   const [startAddress, setStartAddress] = useState("");
   const [startLat, setStartLat] = useState<number>(40.7128);
   const [startLng, setStartLng] = useState<number>(-74.006);
+  const [endAddress, setEndAddress] = useState("");
+  const [endLat, setEndLat] = useState<number | null>(null);
+  const [endLng, setEndLng] = useState<number | null>(null);
   const [routeName, setRouteName] = useState("");
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isGeocodingEnd, setIsGeocodingEnd] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<number | null>(null);
   const [selectedDeliveryIds, setSelectedDeliveryIds] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -234,17 +238,47 @@ export default function RouteOptimizer({
     }
   };
 
+  const handleGeocodeEnd = async () => {
+    if (!endAddress.trim()) return;
+    
+    setIsGeocodingEnd(true);
+    try {
+      const response = await fetch(
+        `/api/geocode?address=${encodeURIComponent(endAddress)}`,
+        { method: "GET", credentials: "include" }
+      );
+      const data = await response.json();
+      if (data && data.lat !== undefined && data.lng !== undefined) {
+        setEndLat(data.lat);
+        setEndLng(data.lng);
+      }
+    } catch (error) {
+      console.error('Geocoding error:', error);
+    } finally {
+      setIsGeocodingEnd(false);
+    }
+  };
+
   const handleOptimize = () => {
     if (selectedDeliveryIds.size === 0) return;
 
-    optimizeMutation.mutate({
+    const payload: any = {
       deliveryIds: Array.from(selectedDeliveryIds),
       zoneId: selectedZoneId,
       startLat,
       startLng,
       startAddress: startAddress.trim() || "Starting Point",
       routeName: routeName.trim() || `Route ${new Date().toLocaleTimeString()}`,
-    });
+    };
+
+    // Include end address if provided and geocoded
+    if (endAddress.trim() && endLat !== null && endLng !== null) {
+      payload.endLat = endLat;
+      payload.endLng = endLng;
+      payload.endAddress = endAddress.trim();
+    }
+
+    optimizeMutation.mutate(payload);
   };
 
   const toggleDeliverySelection = (id: number) => {
@@ -474,6 +508,38 @@ export default function RouteOptimizer({
               </div>
               <p className="text-slate-500 text-xs mt-1">
                 Coordinates: {startLat.toFixed(4)}, {startLng.toFixed(4)}
+              </p>
+            </div>
+
+            <div>
+              <Label className="text-slate-300">Route End Address (optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="e.g., 456 Return St, New York, NY"
+                  value={endAddress}
+                  onChange={(e) => setEndAddress(e.target.value)}
+                  className="bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleGeocodeEnd}
+                  disabled={!endAddress || isGeocodingEnd}
+                  className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                >
+                  {isGeocodingEnd ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Navigation className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              {endLat !== null && endLng !== null && (
+                <p className="text-slate-500 text-xs mt-1">
+                  End coordinates: {endLat.toFixed(4)}, {endLng.toFixed(4)}
+                </p>
+              )}
+              <p className="text-slate-500 text-xs mt-1">
+                Last delivery will be optimized to end at this location
               </p>
             </div>
 

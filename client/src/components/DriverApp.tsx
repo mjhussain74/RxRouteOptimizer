@@ -833,7 +833,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     <div className="bg-slate-900/50 rounded-lg p-3">
                       <p className="text-slate-500">Distance</p>
                       <p className="text-white font-bold text-lg">
-                        {route.estimatedDistance?.toFixed(1) || 0} km
+                        {((route.estimatedDistance || 0) * 0.621371).toFixed(1)} mi
                       </p>
                     </div>
                   </div>
