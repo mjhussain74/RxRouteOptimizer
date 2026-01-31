@@ -1053,6 +1053,26 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                   <p className="text-slate-400">
                     You've completed all {completedStops.length} deliveries.
                   </p>
+                  {route?.endAddress && (
+                    <div className="mt-4 pt-4 border-t border-green-500/30">
+                      <p className="text-slate-300 text-sm mb-2">Return to:</p>
+                      <p className="text-white font-medium">{route.endAddress}</p>
+                      <Button
+                        onClick={() => {
+                          if (route.endLat && route.endLng) {
+                            window.open(
+                              `https://www.google.com/maps/dir/?api=1&destination=${route.endLat},${route.endLng}`,
+                              "_blank"
+                            );
+                          }
+                        }}
+                        className="mt-3 bg-blue-500 hover:bg-blue-600"
+                      >
+                        <Navigation className="h-4 w-4 mr-2" />
+                        Navigate to End
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -1080,6 +1100,11 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     <p className="text-slate-400 text-xs mt-1">
                       Started: {activeRoute.createdAt ? new Date(activeRoute.createdAt).toLocaleString() : 'N/A'}
                     </p>
+                    {route?.endAddress && (
+                      <p className="text-blue-400 text-xs mt-1">
+                        End: {route.endAddress}
+                      </p>
+                    )}
                   </div>
                   
                   <div className="grid grid-cols-3 gap-3">
