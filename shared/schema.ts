@@ -1,4 +1,13 @@
-import { pgTable, text, serial, integer, boolean, timestamp, real, json } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  serial,
+  integer,
+  boolean,
+  timestamp,
+  real,
+  json,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -37,8 +46,12 @@ export const deliveryZones = pgTable("delivery_zones", {
 
 export const driverZones = pgTable("driver_zones", {
   id: serial("id").primaryKey(),
-  driverId: integer("driver_id").references(() => drivers.id).notNull(),
-  zoneId: integer("zone_id").references(() => deliveryZones.id).notNull(),
+  driverId: integer("driver_id")
+    .references(() => drivers.id)
+    .notNull(),
+  zoneId: integer("zone_id")
+    .references(() => deliveryZones.id)
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -95,13 +108,16 @@ export const deliveries = pgTable("deliveries", {
   ocrConfidence: real("ocr_confidence"),
   ocrVerified: boolean("ocr_verified").default(false),
   scannedBarcode: text("scanned_barcode"),
+  routingEligible: boolean("routing_eligible").notNull().default(false), // true after RX barcode scan in Order Management
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // New prescriptions table - stores individual Rx records linked to deliveries
 export const prescriptions = pgTable("prescriptions", {
   id: serial("id").primaryKey(),
-  deliveryId: integer("delivery_id").references(() => deliveries.id).notNull(),
+  deliveryId: integer("delivery_id")
+    .references(() => deliveries.id)
+    .notNull(),
   batchId: integer("batch_id").references(() => deliveryBatches.id),
   rxNumber: text("rx_number").notNull(),
   patientName: text("patient_name"),
@@ -123,9 +139,6 @@ export const routes = pgTable("routes", {
   startLat: real("start_lat"),
   startLng: real("start_lng"),
   startAddress: text("start_address"),
-  endLat: real("end_lat"),
-  endLng: real("end_lng"),
-  endAddress: text("end_address"),
   estimatedDuration: integer("estimated_duration"),
   estimatedDistance: real("estimated_distance"),
   polyline: text("polyline"),
@@ -211,12 +224,21 @@ export const deliveryZonesRelations = relations(deliveryZones, ({ many }) => ({
 }));
 
 export const driverZonesRelations = relations(driverZones, ({ one }) => ({
-  driver: one(drivers, { fields: [driverZones.driverId], references: [drivers.id] }),
-  zone: one(deliveryZones, { fields: [driverZones.zoneId], references: [deliveryZones.id] }),
+  driver: one(drivers, {
+    fields: [driverZones.driverId],
+    references: [drivers.id],
+  }),
+  zone: one(deliveryZones, {
+    fields: [driverZones.zoneId],
+    references: [deliveryZones.id],
+  }),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
-  pharmacy: one(pharmacies, { fields: [users.pharmacyId], references: [pharmacies.id] }),
+  pharmacy: one(pharmacies, {
+    fields: [users.pharmacyId],
+    references: [pharmacies.id],
+  }),
   batches: many(deliveryBatches),
 }));
 
@@ -228,56 +250,110 @@ export const driversRelations = relations(drivers, ({ one, many }) => ({
   proofs: many(deliveryProofs),
 }));
 
-export const deliveryBatchesRelations = relations(deliveryBatches, ({ one, many }) => ({
-  pharmacy: one(pharmacies, { fields: [deliveryBatches.pharmacyId], references: [pharmacies.id] }),
-  uploadedByUser: one(users, { fields: [deliveryBatches.uploadedBy], references: [users.id] }),
-  deliveries: many(deliveries),
-  routes: many(routes),
-}));
+export const deliveryBatchesRelations = relations(
+  deliveryBatches,
+  ({ one, many }) => ({
+    pharmacy: one(pharmacies, {
+      fields: [deliveryBatches.pharmacyId],
+      references: [pharmacies.id],
+    }),
+    uploadedByUser: one(users, {
+      fields: [deliveryBatches.uploadedBy],
+      references: [users.id],
+    }),
+    deliveries: many(deliveries),
+    routes: many(routes),
+  }),
+);
 
 export const deliveriesRelations = relations(deliveries, ({ one, many }) => ({
-  batch: one(deliveryBatches, { fields: [deliveries.batchId], references: [deliveryBatches.id] }),
-  pharmacy: one(pharmacies, { fields: [deliveries.pharmacyId], references: [pharmacies.id] }),
-  zone: one(deliveryZones, { fields: [deliveries.zoneId], references: [deliveryZones.id] }),
+  batch: one(deliveryBatches, {
+    fields: [deliveries.batchId],
+    references: [deliveryBatches.id],
+  }),
+  pharmacy: one(pharmacies, {
+    fields: [deliveries.pharmacyId],
+    references: [pharmacies.id],
+  }),
+  zone: one(deliveryZones, {
+    fields: [deliveries.zoneId],
+    references: [deliveryZones.id],
+  }),
   prescriptions: many(prescriptions),
   routeStops: many(routeStops),
   ocrLogs: many(ocrLogs),
 }));
 
 export const prescriptionsRelations = relations(prescriptions, ({ one }) => ({
-  delivery: one(deliveries, { fields: [prescriptions.deliveryId], references: [deliveries.id] }),
-  batch: one(deliveryBatches, { fields: [prescriptions.batchId], references: [deliveryBatches.id] }),
-  createdByUser: one(users, { fields: [prescriptions.createdBy], references: [users.id] }),
+  delivery: one(deliveries, {
+    fields: [prescriptions.deliveryId],
+    references: [deliveries.id],
+  }),
+  batch: one(deliveryBatches, {
+    fields: [prescriptions.batchId],
+    references: [deliveryBatches.id],
+  }),
+  createdByUser: one(users, {
+    fields: [prescriptions.createdBy],
+    references: [users.id],
+  }),
 }));
 
 export const routesRelations = relations(routes, ({ one, many }) => ({
-  batch: one(deliveryBatches, { fields: [routes.batchId], references: [deliveryBatches.id] }),
+  batch: one(deliveryBatches, {
+    fields: [routes.batchId],
+    references: [deliveryBatches.id],
+  }),
   driver: one(drivers, { fields: [routes.driverId], references: [drivers.id] }),
-  zone: one(deliveryZones, { fields: [routes.zoneId], references: [deliveryZones.id] }),
+  zone: one(deliveryZones, {
+    fields: [routes.zoneId],
+    references: [deliveryZones.id],
+  }),
   stops: many(routeStops),
 }));
 
 export const routeStopsRelations = relations(routeStops, ({ one, many }) => ({
   route: one(routes, { fields: [routeStops.routeId], references: [routes.id] }),
-  delivery: one(deliveries, { fields: [routeStops.deliveryId], references: [deliveries.id] }),
+  delivery: one(deliveries, {
+    fields: [routeStops.deliveryId],
+    references: [deliveries.id],
+  }),
   proofs: many(deliveryProofs),
 }));
 
-export const driverLocationsRelations = relations(driverLocations, ({ one }) => ({
-  driver: one(drivers, { fields: [driverLocations.driverId], references: [drivers.id] }),
-}));
+export const driverLocationsRelations = relations(
+  driverLocations,
+  ({ one }) => ({
+    driver: one(drivers, {
+      fields: [driverLocations.driverId],
+      references: [drivers.id],
+    }),
+  }),
+);
 
 export const deliveryProofsRelations = relations(deliveryProofs, ({ one }) => ({
-  stop: one(routeStops, { fields: [deliveryProofs.stopId], references: [routeStops.id] }),
-  driver: one(drivers, { fields: [deliveryProofs.driverId], references: [drivers.id] }),
+  stop: one(routeStops, {
+    fields: [deliveryProofs.stopId],
+    references: [routeStops.id],
+  }),
+  driver: one(drivers, {
+    fields: [deliveryProofs.driverId],
+    references: [drivers.id],
+  }),
 }));
 
 export const ocrLogsRelations = relations(ocrLogs, ({ one }) => ({
-  delivery: one(deliveries, { fields: [ocrLogs.deliveryId], references: [deliveries.id] }),
+  delivery: one(deliveries, {
+    fields: [ocrLogs.deliveryId],
+    references: [deliveries.id],
+  }),
 }));
 
 export const uploadQueueRelations = relations(uploadQueue, ({ one }) => ({
-  proof: one(deliveryProofs, { fields: [uploadQueue.proofId], references: [deliveryProofs.id] }),
+  proof: one(deliveryProofs, {
+    fields: [uploadQueue.proofId],
+    references: [deliveryProofs.id],
+  }),
 }));
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -307,7 +383,9 @@ export const insertDriverSchema = createInsertSchema(drivers).omit({
   createdAt: true,
 });
 
-export const insertDeliveryBatchSchema = createInsertSchema(deliveryBatches).omit({
+export const insertDeliveryBatchSchema = createInsertSchema(
+  deliveryBatches,
+).omit({
   id: true,
   createdAt: true,
 });
@@ -317,19 +395,23 @@ export const insertDeliverySchema = createInsertSchema(deliveries).omit({
   createdAt: true,
 });
 
-export const insertRouteSchema = createInsertSchema(routes).omit({
-  id: true,
-  createdAt: true,
-}).extend({
-  optimizedOrder: z.array(z.number()).nullable().optional(),
-});
+export const insertRouteSchema = createInsertSchema(routes)
+  .omit({
+    id: true,
+    createdAt: true,
+  })
+  .extend({
+    optimizedOrder: z.array(z.number()).nullable().optional(),
+  });
 
 export const insertRouteStopSchema = createInsertSchema(routeStops).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertDeliveryProofSchema = createInsertSchema(deliveryProofs).omit({
+export const insertDeliveryProofSchema = createInsertSchema(
+  deliveryProofs,
+).omit({
   id: true,
   createdAt: true,
 });
