@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Upload,
   FileSpreadsheet,
-  Camera,
   Edit,
   Trash2,
   Save,
@@ -72,6 +71,7 @@ interface Delivery {
   status: string;
   ocrConfidence: number | null;
   ocrVerified: boolean | null;
+  routingEligible?: boolean;
   prescriptions?: Prescription[];
 }
 
@@ -102,8 +102,11 @@ export default function OrderManagement({
   const [uploadProgress, setUploadProgress] = useState<string>("");
   const [editingDelivery, setEditingDelivery] =
     useState<EditingDelivery | null>(null);
-  const [showOcrScanner, setShowOcrScanner] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [rxNotFoundDialog, setRxNotFoundDialog] = useState<{
+    rxNumber: string;
+  } | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
   const [showAddManual, setShowAddManual] = useState(false);
   const [newDelivery, setNewDelivery] = useState({
     addressText: "",
@@ -229,6 +232,7 @@ export default function OrderManagement({
           batchId: activeBatchId,
           status: "pending",
           priority: "normal",
+          routingEligible: true, // Manually added orders are immediately routing eligible
         }),
         credentials: "include",
       });
@@ -541,7 +545,7 @@ export default function OrderManagement({
             overflow: hidden;
           }
 
-          
+
 
           /* Padding belongs INSIDE the label, not on body */
           .label-container {
@@ -704,6 +708,40 @@ export default function OrderManagement({
     setIsDragging(false);
   }, []);
 
+  // USB barcode scan: search uploaded deliveries by RX number; if found mark routing eligible, else show "RX NOT FOUND" with option to add
+  const handleBarcodeScan = useCallback(
+    (rxNumber: string) => {
+      const trimmed = rxNumber.trim();
+      if (!trimmed || !activeBatchId) return;
+
+      const match = deliveries.find((d) => {
+        if (d.rxNumber?.toLowerCase() === trimmed.toLowerCase()) return true;
+        return d.prescriptions?.some(
+          (rx) => rx.rxNumber?.toLowerCase() === trimmed.toLowerCase(),
+        );
+      });
+
+      if (match) {
+        updateDeliveryMutation.mutate(
+          { id: match.id, routingEligible: true },
+          {
+            onSuccess: () => {
+              queryClient.invalidateQueries({
+                queryKey: [`/api/batches/${activeBatchId}`],
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["/api/deliveries/active"],
+              });
+            },
+          },
+        );
+      } else {
+        setRxNotFoundDialog({ rxNumber: trimmed });
+      }
+    },
+    [activeBatchId, deliveries, updateDeliveryMutation, queryClient],
+  );
+
   const filteredDeliveries = deliveries.filter((d) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -731,9 +769,10 @@ export default function OrderManagement({
     }
   };
 
-  // Print all labels for the selected batch (uses all deliveries, not filtered)
+  // Print labels only for routing-eligible deliveries in the selected batch
+  const eligibleForRouting = deliveries.filter((d) => d.routingEligible);
   const printAllLabels = () => {
-    if (!activeBatchId || deliveries.length === 0) return;
+    if (!activeBatchId || eligibleForRouting.length === 0) return;
 
     // Get pharmacy name from batch
     const selectedBatch = (batches as any[]).find(
@@ -743,8 +782,8 @@ export default function OrderManagement({
       selectedBatch?.name?.split(" - ")[0] || "RX Delivery Pharmacy";
     const today = new Date().toLocaleDateString();
 
-    // Generate label HTML for each delivery (all deliveries in batch, ignoring search filter)
-    const labelsHtml = deliveries
+    // Generate label HTML only for routing-eligible deliveries
+    const labelsHtml = eligibleForRouting
       .map((delivery) => {
         const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
 
@@ -983,15 +1022,36 @@ export default function OrderManagement({
             Upload orders via CSV/Excel or scan prescriptions
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={() => setShowOcrScanner(true)}
-            variant="outline"
-            className="border-slate-600 text-slate-300 hover:bg-slate-700"
-          >
-            <Camera className="h-4 w-4 mr-2" />
-            Scan RX Label
-          </Button>
+        <div className="flex gap-2 items-center flex-wrap">
+          <div className="flex items-center gap-2">
+            <Input
+              ref={barcodeInputRef}
+              type="text"
+              autoComplete="off"
+              placeholder="Scan RX with USB scanner or type + Enter"
+              className="w-64 bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const value = (e.target as HTMLInputElement).value.trim();
+                  if (value) {
+                    handleBarcodeScan(value);
+                    (e.target as HTMLInputElement).value = "";
+                  }
+                  e.preventDefault();
+                }
+              }}
+            />
+            <Button
+              onClick={() => barcodeInputRef.current?.focus()}
+              variant="outline"
+              size="sm"
+              className="border-slate-600 text-slate-300 hover:bg-slate-700"
+              title="Focus scan field then scan prescription barcode with USB scanner"
+            >
+              <Search className="h-4 w-4 mr-1" />
+              Scan RX
+            </Button>
+          </div>
           <Button
             onClick={() => setShowAddManual(true)}
             className="bg-blue-600 hover:bg-blue-700"
@@ -1092,11 +1152,11 @@ export default function OrderManagement({
                         size="sm"
                         variant="outline"
                         onClick={printAllLabels}
-                        disabled={deliveries.length === 0}
+                        disabled={eligibleForRouting.length === 0}
                         className="border-blue-500 text-blue-400 hover:bg-blue-500/10"
                       >
                         <Printer className="h-4 w-4 mr-1" />
-                        Print Labels ({deliveries.length})
+                        Print Labels ({eligibleForRouting.length})
                       </Button>
                     </div>
                   );
@@ -1230,6 +1290,9 @@ export default function OrderManagement({
                       Status
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Routing
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                       Delivery ID
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
@@ -1320,6 +1383,17 @@ export default function OrderManagement({
                             {delivery.status}
                           </span>
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {delivery.routingEligible ? (
+                          <span className="text-xs px-2 py-1 rounded bg-green-500/20 text-green-400">
+                            Eligible
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 text-xs">
+                            Not eligible
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-white font-mono">
                         <span className="text-blue-400 font-medium">
@@ -1638,27 +1712,49 @@ export default function OrderManagement({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showOcrScanner} onOpenChange={setShowOcrScanner}>
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-white">Scan RX Label</DialogTitle>
-          </DialogHeader>
-          <OcrScanner
-            onComplete={(data) => {
-              setNewDelivery({
-                addressText: data.address || "",
-                customerName: data.patientName || "",
-                customerPhone: "",
-                rxNumber: data.rxNumber || "",
-                notes: "",
-              });
-              setShowOcrScanner(false);
-              setShowAddManual(true);
-            }}
-            onCancel={() => setShowOcrScanner(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      <AlertDialog
+        open={!!rxNotFoundDialog}
+        onOpenChange={(open) => !open && setRxNotFoundDialog(null)}
+      >
+        <AlertDialogContent className="bg-slate-800 border-slate-700">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">
+              RX NUMBER NOT FOUND
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {rxNotFoundDialog && (
+                <>
+                  No order in this batch matches RX number:{" "}
+                  <span className="font-mono font-semibold text-white">
+                    {rxNotFoundDialog.rxNumber}
+                  </span>
+                  . Add this prescription to the order?
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-slate-700 border-slate-600 text-white hover:bg-slate-600">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (rxNotFoundDialog) {
+                  setNewDelivery((prev) => ({
+                    ...prev,
+                    rxNumber: rxNotFoundDialog.rxNumber,
+                  }));
+                  setShowAddManual(true);
+                  setRxNotFoundDialog(null);
+                }
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Add to order
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={!!confirmAction}
@@ -1973,190 +2069,6 @@ export default function OrderManagement({
           </div>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-interface OcrScannerProps {
-  onComplete: (data: {
-    rxNumber?: string;
-    patientName?: string;
-    address?: string;
-  }) => void;
-  onCancel: () => void;
-}
-
-function OcrScanner({ onComplete, onCancel }: OcrScannerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [error, setError] = useState("");
-  const [debugText, setDebugText] = useState("");
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setCameraActive(true);
-      }
-    } catch {
-      setError("Unable to access camera.");
-    }
-  };
-
-  const stopCamera = () => {
-    const stream = videoRef.current?.srcObject as MediaStream | null;
-    stream?.getTracks().forEach((t) => t.stop());
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setCameraActive(false);
-  };
-
-  // OCR IMPROVEMENT: image preprocessing - convert to grayscale with contrast boost
-  const preprocess = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
-    const img = ctx.getImageData(0, 0, w, h);
-    const d = img.data;
-    for (let i = 0; i < d.length; i += 4) {
-      // Convert to grayscale
-      const gray = d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
-      // Apply contrast enhancement instead of harsh binarization
-      const contrast = 1.5;
-      const enhanced = Math.min(
-        255,
-        Math.max(0, (gray - 128) * contrast + 128),
-      );
-      d[i] = d[i + 1] = d[i + 2] = enhanced;
-    }
-    ctx.putImageData(img, 0, 0);
-  };
-
-  const captureAndProcess = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    setIsProcessing(true);
-    setError("");
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d")!;
-
-    // High-DPI capture
-    const scale = 3;
-    canvas.width = video.videoWidth * scale;
-    canvas.height = video.videoHeight * scale;
-    ctx.scale(scale, scale);
-    ctx.drawImage(video, 0, 0);
-
-    preprocess(ctx, canvas.width, canvas.height);
-
-    try {
-      const Tesseract = await import("tesseract.js");
-
-      // Create worker with explicit logger for debugging
-      const worker = await Tesseract.createWorker("eng", 1, {
-        logger: (m: any) => console.log("[Tesseract]", m),
-      });
-
-      // Use less restrictive parameters for better recognition
-      await worker.setParameters({
-        preserve_interword_spaces: "1",
-      });
-
-      console.log("[OCR] Starting recognition...");
-      const result = await worker.recognize(canvas);
-      await worker.terminate();
-
-      const ocrData = result.data as any;
-      const text = ocrData.text || "";
-      console.log("[OCR] Raw text:", text);
-      setDebugText(text || "No text detected");
-
-      // Use all text if no high-confidence words found
-      const words = ocrData.words?.filter((w: any) => w.confidence > 60) || [];
-      const cleanText =
-        words.length > 0 ? words.map((w: any) => w.text).join(" ") : text;
-
-      const rxMatch =
-        cleanText.match(/RX\s*#?\s*(\d{6,})/i) ||
-        cleanText.match(/\b(\d{7,})\b/);
-
-      let patientName = "";
-      const lines =
-        ocrData.lines || text.split("\n").map((t: string) => ({ text: t }));
-      for (const line of lines.map((l: any) => l.text.trim())) {
-        if (/^(Patient|Name|PT)/i.test(line)) {
-          patientName = line.replace(/^(Patient|Name|PT)[:\s]*/i, "").trim();
-          break;
-        }
-      }
-
-      let address = "";
-      const addrLine = lines.find((l: any) =>
-        /\d+\s+.*(Street|St|Avenue|Ave|Road|Rd|Blvd|Drive|Dr|Lane|Ln)/i.test(
-          l.text,
-        ),
-      );
-      if (addrLine) address = addrLine.text.trim();
-
-      onComplete({
-        rxNumber: rxMatch?.[1] || "",
-        patientName,
-        address,
-      });
-    } catch {
-      setError("OCR failed. Please retry with better lighting.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      {error && <div className="text-red-500">{error}</div>}
-
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        className={cameraActive ? "block w-full rounded" : "hidden"}
-      />
-
-      <canvas ref={canvasRef} className="hidden" />
-
-      {!cameraActive && (
-        <Button onClick={startCamera}>
-          <Camera className="mr-2 h-4 w-4" />
-          Start Camera
-        </Button>
-      )}
-
-      {debugText && (
-        <pre className="bg-slate-800 text-xs p-2 max-h-32 overflow-y-auto text-white">
-          {debugText}
-        </pre>
-      )}
-
-      <div className="flex justify-between">
-        <Button
-          variant="outline"
-          onClick={() => {
-            stopCamera();
-            onCancel();
-          }}
-        >
-          Cancel
-        </Button>
-        <Button
-          onClick={captureAndProcess}
-          disabled={!cameraActive || isProcessing}
-        >
-          {isProcessing ? "Processing…" : "Capture & Process"}
-        </Button>
-      </div>
     </div>
   );
 }
