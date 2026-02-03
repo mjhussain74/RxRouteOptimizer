@@ -1556,9 +1556,6 @@ export async function registerRoutes(
         startLat,
         startLng,
         startAddress: startAddress || "Starting Point",
-        endLat: hasEndAddress ? endLat : null,
-        endLng: hasEndAddress ? endLng : null,
-        endAddress: hasEndAddress ? (endAddress || "End Point") : null,
         estimatedDuration,
         estimatedDistance: totalDistance,
         optimizedOrder
@@ -2183,6 +2180,26 @@ export async function registerRoutes(
       // Check pharmacy ownership
       if (!await checkDeliveryOwnership(deliveryId, req.session)) {
         return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+      
+      // If marking as routing eligible, check if geocoding is needed
+      if (req.body.routingEligible === true) {
+        const existingDelivery = await storage.getDelivery(deliveryId);
+        if (existingDelivery && (existingDelivery.lat === null || existingDelivery.lng === null) && existingDelivery.addressText) {
+          // Geocode the address
+          const geocoded = await geocodeAddress(existingDelivery.addressText);
+          if (geocoded) {
+            req.body.lat = geocoded.lat;
+            req.body.lng = geocoded.lng;
+            // Only change status to geocoded if it was pending
+            if (existingDelivery.status === "pending") {
+              req.body.status = "geocoded";
+            }
+            console.log(`✅ Geocoded delivery ${deliveryId} when marking routing eligible`);
+          } else {
+            console.log(`⚠️ Failed to geocode delivery ${deliveryId}: ${existingDelivery.addressText}`);
+          }
+        }
       }
       
       const delivery = await storage.updateDelivery(deliveryId, req.body);
