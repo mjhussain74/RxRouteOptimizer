@@ -714,10 +714,13 @@ export default function OrderManagement({
       const trimmed = rxNumber.trim();
       if (!trimmed || !activeBatchId) return;
 
+      // Strip trailing non-numeric characters from scanned RX
+      const cleanedRx = trimmed.replace(/\D+$/, '');
+
       const match = deliveries.find((d) => {
-        if (d.rxNumber?.toLowerCase() === trimmed.toLowerCase()) return true;
+        if (d.rxNumber?.toLowerCase() === cleanedRx.toLowerCase()) return true;
         return d.prescriptions?.some(
-          (rx) => rx.rxNumber?.toLowerCase() === trimmed.toLowerCase(),
+          (rx) => rx.rxNumber?.toLowerCase() === cleanedRx.toLowerCase(),
         );
       });
 
@@ -736,7 +739,7 @@ export default function OrderManagement({
           },
         );
       } else {
-        setRxNotFoundDialog({ rxNumber: trimmed });
+        setRxNotFoundDialog({ rxNumber: cleanedRx });
       }
     },
     [activeBatchId, deliveries, updateDeliveryMutation, queryClient],
