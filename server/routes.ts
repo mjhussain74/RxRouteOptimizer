@@ -2143,8 +2143,29 @@ export async function registerRoutes(
       
       // Create the delivery (rxNumber is stored on prescription, not delivery)
       const { rxNumber, ...deliveryData } = req.body;
+      
+      // Geocode the address if lat/lng not provided
+      let lat = deliveryData.lat;
+      let lng = deliveryData.lng;
+      let status = deliveryData.status || "pending";
+      
+      if ((!lat || !lng) && deliveryData.addressText) {
+        const geocoded = await geocodeAddress(deliveryData.addressText);
+        if (geocoded) {
+          lat = geocoded.lat;
+          lng = geocoded.lng;
+          status = "geocoded";
+          console.log(`✅ Geocoded manually added delivery: ${deliveryData.addressText}`);
+        } else {
+          console.log(`⚠️ Failed to geocode manually added delivery: ${deliveryData.addressText}`);
+        }
+      }
+      
       const delivery = await storage.createDelivery({
         ...deliveryData,
+        lat,
+        lng,
+        status,
         deliveryIdentifier,
         rxNumber: null // No longer storing RX on delivery directly
       });
