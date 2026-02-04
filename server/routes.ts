@@ -2203,18 +2203,34 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied to this delivery" });
       }
       
+      // Extract only valid delivery fields (filter out prescriptions and other non-delivery fields)
+      const validFields = [
+        'deliveryIdentifier', 'batchId', 'pharmacyId', 'zoneId', 'addressText',
+        'streetAddress', 'city', 'state', 'zipCode', 'normalizedAddressHash',
+        'lat', 'lng', 'customerName', 'customerPhone', 'rxNumber', 'notes',
+        'priority', 'status', 'prescriptionCount', 'ocrImageUrl', 'ocrConfidence',
+        'ocrVerified', 'scannedBarcode', 'routingEligible'
+      ];
+      
+      const updateData: Record<string, any> = {};
+      for (const field of validFields) {
+        if (req.body[field] !== undefined) {
+          updateData[field] = req.body[field];
+        }
+      }
+      
       // If marking as routing eligible, check if geocoding is needed
-      if (req.body.routingEligible === true) {
+      if (updateData.routingEligible === true) {
         const existingDelivery = await storage.getDelivery(deliveryId);
         if (existingDelivery && (existingDelivery.lat === null || existingDelivery.lng === null) && existingDelivery.addressText) {
           // Geocode the address
           const geocoded = await geocodeAddress(existingDelivery.addressText);
           if (geocoded) {
-            req.body.lat = geocoded.lat;
-            req.body.lng = geocoded.lng;
+            updateData.lat = geocoded.lat;
+            updateData.lng = geocoded.lng;
             // Only change status to geocoded if it was pending
             if (existingDelivery.status === "pending") {
-              req.body.status = "geocoded";
+              updateData.status = "geocoded";
             }
             console.log(`✅ Geocoded delivery ${deliveryId} when marking routing eligible`);
           } else {
@@ -2223,12 +2239,13 @@ export async function registerRoutes(
         }
       }
       
-      const delivery = await storage.updateDelivery(deliveryId, req.body);
+      const delivery = await storage.updateDelivery(deliveryId, updateData);
       if (!delivery) {
         return res.status(404).json({ error: "Delivery not found" });
       }
       res.json(delivery);
     } catch (error) {
+      console.error("Update delivery error:", error);
       res.status(500).json({ error: "Failed to update delivery" });
     }
   });
