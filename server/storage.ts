@@ -734,6 +734,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteDelivery(id: number): Promise<boolean> {
+    // Delete associated prescriptions first (foreign key constraint)
+    await db.delete(prescriptions).where(eq(prescriptions.deliveryId, id));
+    
+    // Now delete the delivery
     const result = await db
       .delete(deliveries)
       .where(eq(deliveries.id, id))

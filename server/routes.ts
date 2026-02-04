@@ -2248,6 +2248,7 @@ export async function registerRoutes(
       }
       res.json({ success: true });
     } catch (error) {
+      console.error("Delete delivery error:", error);
       res.status(500).json({ error: "Failed to delete delivery" });
     }
   });
