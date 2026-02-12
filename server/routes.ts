@@ -746,12 +746,11 @@ export async function registerRoutes(
     try {
       const driverId = parseInt(req.params.id);
       
-      // Drivers can only access their own info, admins can access all
       if (req.session.user?.role === 'driver' && req.session.user.driverId !== driverId) {
         return res.status(403).json({ error: "Access denied" });
       }
       if (req.session.user?.role === 'dispatcher') {
-        return res.status(403).json({ error: "Admin access required" });
+        return res.status(403).json({ error: "Staff access required" });
       }
       
       const driver = await storage.getDriver(driverId);
@@ -2083,7 +2082,7 @@ export async function registerRoutes(
   });
 
   // Driver zone assignment (admin only)
-  app.get("/api/drivers/:id/zones", requireAdmin, async (req, res) => {
+  app.get("/api/drivers/:id/zones", requireAdminOrPharmacyAdmin, async (req, res) => {
     try {
       const zones = await storage.getDriverZones(parseInt(req.params.id));
       res.json(zones);
@@ -2092,7 +2091,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/drivers/:id/zones", requireAdmin, async (req, res) => {
+  app.post("/api/drivers/:id/zones", requireAdminOrPharmacyAdmin, async (req, res) => {
     try {
       const { zoneId } = req.body;
       const driverZone = await storage.assignDriverToZone(parseInt(req.params.id), zoneId);
@@ -2102,7 +2101,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/drivers/:driverId/zones/:zoneId", requireAdmin, async (req, res) => {
+  app.delete("/api/drivers/:driverId/zones/:zoneId", requireAdminOrPharmacyAdmin, async (req, res) => {
     try {
       const success = await storage.removeDriverFromZone(
         parseInt(req.params.driverId),
@@ -2483,6 +2482,108 @@ export async function registerRoutes(
       res.json(delivery);
     } catch (error) {
       res.status(500).json({ error: "Failed to update delivery status" });
+    }
+  });
+
+  // Remove a stop from a route (staff only)
+  app.delete("/api/routes/:routeId/stops/:stopId", requireStaff, async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.routeId);
+      const stopId = parseInt(req.params.stopId);
+
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+
+      const route = await storage.getRoute(routeId);
+      if (!route || route.status === 'completed' || route.status === 'cancelled') {
+        return res.status(400).json({ error: "Cannot modify a completed or cancelled route" });
+      }
+
+      const stop = await storage.getRouteStop(stopId);
+      if (!stop || stop.routeId !== routeId) {
+        return res.status(404).json({ error: "Stop not found in this route" });
+      }
+
+      if (stop.status === 'completed') {
+        return res.status(400).json({ error: "Cannot remove a completed stop" });
+      }
+
+      const deleted = await storage.deleteRouteStop(stopId);
+      if (!deleted) {
+        return res.status(500).json({ error: "Failed to remove stop" });
+      }
+
+      await storage.resequenceRouteStops(routeId);
+
+      const remainingStops = await storage.getRouteStops(routeId);
+      if (remainingStops.filter(s => s.status !== 'cancelled').length === 0) {
+        await storage.cancelRoute(routeId);
+      }
+
+      io.emit("route_modified", { routeId });
+      res.json({ success: true, routeId, removedStopId: stopId });
+    } catch (error) {
+      console.error("Remove stop error:", error);
+      res.status(500).json({ error: "Failed to remove stop from route" });
+    }
+  });
+
+  // Add a delivery as a new stop to an existing route (staff only)
+  app.post("/api/routes/:routeId/stops", requireStaff, async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.routeId);
+      const { deliveryId } = req.body;
+
+      if (!deliveryId) {
+        return res.status(400).json({ error: "deliveryId is required" });
+      }
+
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+
+      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this delivery" });
+      }
+
+      const route = await storage.getRoute(routeId);
+      if (!route || route.status === 'completed' || route.status === 'cancelled') {
+        return res.status(400).json({ error: "Cannot modify a completed or cancelled route" });
+      }
+
+      const alreadyInRoute = await storage.getDeliveryIdsInActiveRoutes([deliveryId]);
+      if (alreadyInRoute.length > 0) {
+        return res.status(400).json({ error: "This delivery is already in an active route" });
+      }
+
+      const delivery = await storage.getDelivery(deliveryId);
+      if (!delivery || !delivery.lat || !delivery.lng) {
+        return res.status(400).json({ error: "Delivery not found or not geocoded" });
+      }
+
+      if (delivery.status === 'complete' || delivery.status === 'cancelled') {
+        return res.status(400).json({ error: "Cannot add a completed or cancelled delivery to a route" });
+      }
+
+      const existingStops = await storage.getRouteStops(routeId);
+      const maxSequence = existingStops.reduce((max, s) => Math.max(max, s.sequence || 0), 0);
+
+      const newStop = await storage.createRouteStop({
+        routeId,
+        deliveryId,
+        sequence: maxSequence + 1,
+        status: "pending",
+        priority: delivery.priority || "normal"
+      });
+
+      await storage.updateDeliveryStatus(deliveryId, 'active');
+
+      io.emit("route_modified", { routeId });
+      res.json(newStop);
+    } catch (error) {
+      console.error("Add stop error:", error);
+      res.status(500).json({ error: "Failed to add stop to route" });
     }
   });
 

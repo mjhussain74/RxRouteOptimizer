@@ -70,6 +70,9 @@ A web-based route optimization application that takes multiple delivery addresse
 - `POST /api/routes/:routeId/stops/:stopId/complete` - Mark stop as completed
 - `POST /api/routes/:routeId/stops/:stopId/scan` - Mark package as scanned
 - `POST /api/routes/:routeId/stops/:stopId/urgent` - Mark stop as urgent (reorders route)
+- `POST /api/routes/:id/cancel` - Cancel route and release pending deliveries
+- `DELETE /api/routes/:routeId/stops/:stopId` - Remove stop from route
+- `POST /api/routes/:routeId/stops` - Add delivery as new stop to existing route
 - `GET /api/zones` - List all delivery zones
 - `POST /api/zones` - Create a delivery zone
 - `PUT /api/zones/:id` - Update a delivery zone
@@ -173,6 +176,20 @@ address,customer_name,customer_phone,rx_number,notes
   - New client files: localProofStorage.ts (IndexedDB), proofSyncService.ts (background sync)
   - New API endpoint: /api/routes/:routeId/stops/:stopId/complete-local
   - localProofId field links local proofs to server records for reconciliation
+- Duplicate route prevention and route modification (2026-02-12):
+  - Deliveries already in active routes cannot be added to new routes
+  - "In Route" badge shown on active deliveries in Route Optimizer
+  - Route cancellation releases pending stops back to available pool
+  - Individual stops can be removed from routes (DELETE /api/routes/:routeId/stops/:stopId)
+  - New deliveries can be added to existing routes (POST /api/routes/:routeId/stops)
+  - New API endpoints: POST /api/routes/:id/cancel, DELETE/POST route stops
+- Pharmacy Admin role (2026-02-12):
+  - New pharmacy_admin role with full pharmacy-scoped access
+  - PharmacyAdminDashboard with Orders, Optimize Routes, View Routes, Zones, Drivers, Reports tabs
+  - Can manage drivers, zones, routes within their pharmacy scope
+  - Cannot access pharmacy management or user management (admin-only)
+  - Green color scheme to distinguish from admin (purple) and dispatcher (blue)
+  - requireAdminOrPharmacyAdmin middleware for driver and zone management endpoints
 
 ## User Preferences
 - Dark theme UI preferred

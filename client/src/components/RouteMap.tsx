@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MapPin, Truck, CheckCircle, Clock, Send, User, Navigation, XCircle } from "lucide-react";
+import { MapPin, Truck, CheckCircle, Clock, Send, User, Navigation, XCircle, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -107,6 +107,25 @@ export default function RouteMap({
       if (!response.ok) {
         const err = await response.json();
         throw new Error(err.error || "Failed to cancel route");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/routes/${selectedRouteId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/deliveries/active"] });
+    },
+  });
+
+  const removeStopMutation = useMutation({
+    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Failed to remove stop");
       }
       return response.json();
     },
@@ -356,7 +375,22 @@ export default function RouteMap({
                       {stop.status === "completed" ? (
                         <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0" />
                       ) : (
-                        <Clock className="h-5 w-5 text-slate-500 flex-shrink-0" />
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Clock className="h-5 w-5 text-slate-500" />
+                          {route && !['completed', 'cancelled'].includes(route.status) && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Remove this stop from the route?`)) {
+                                  removeStopMutation.mutate({ routeId: selectedRouteId!, stopId: stop.id });
+                                }
+                              }}
+                              className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors"
+                              title="Remove stop from route"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   ))}

@@ -205,6 +205,8 @@ export interface IStorage {
 
   getDeliveryIdsInActiveRoutes(deliveryIds: number[]): Promise<number[]>;
   cancelRoute(routeId: number): Promise<Route | undefined>;
+  deleteRouteStop(stopId: number): Promise<boolean>;
+  resequenceRouteStops(routeId: number): Promise<void>;
 
   // Delivery matching methods
   findDeliveryByNormalizedAddress(
@@ -1257,6 +1259,32 @@ export class DatabaseStorage implements IStorage {
     }
 
     return targetDelivery;
+  }
+
+  async deleteRouteStop(stopId: number): Promise<boolean> {
+    const stop = await this.getRouteStop(stopId);
+    if (!stop) return false;
+
+    if (stop.deliveryId) {
+      await db
+        .update(deliveries)
+        .set({ status: "geocoded" })
+        .where(eq(deliveries.id, stop.deliveryId));
+    }
+
+    await db.delete(routeStops).where(eq(routeStops.id, stopId));
+    return true;
+  }
+
+  async resequenceRouteStops(routeId: number): Promise<void> {
+    const stops = await this.getRouteStops(routeId);
+    const activeStops = stops.filter(s => s.status !== 'cancelled');
+    for (let i = 0; i < activeStops.length; i++) {
+      await db
+        .update(routeStops)
+        .set({ sequence: i + 1 })
+        .where(eq(routeStops.id, activeStops[i].id));
+    }
   }
 }
 
