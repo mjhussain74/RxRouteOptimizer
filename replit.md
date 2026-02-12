@@ -191,6 +191,17 @@ address,customer_name,customer_phone,rx_number,notes
   - Green color scheme to distinguish from admin (purple) and dispatcher (blue)
   - requireAdminOrPharmacyAdmin middleware for driver and zone management endpoints
 
+- Delivery Orders refactoring (2026-02-12):
+  - New delivery_orders table: RX number as durable identity (UNIQUE per pharmacy)
+  - CSV uploads upsert into delivery_orders - no duplicates on re-upload
+  - Upload history tracking via delivery_order_uploads table
+  - Status flow: IMPORTED → ROUTE_ELIGIBLE (barcode scan) → ROUTED → DELIVERED
+  - Barcode scan activates orders (IMPORTED → ROUTE_ELIGIBLE)
+  - Route optimization creates deliveries from ROUTE_ELIGIBLE orders
+  - OrderManagement UI rewritten for delivery_orders with status badges, upload count
+  - RouteOptimizer fetches ROUTE_ELIGIBLE orders, passes orderIds to optimize endpoint
+  - New API endpoints: /api/delivery-orders, /api/delivery-orders/eligible, /api/delivery-orders/:id/scan, /api/delivery-orders/scan-barcode, /api/delivery-orders/:id/status
+
 ## User Preferences
 - Dark theme UI preferred
 - Mobile-first approach for driver app

@@ -7,6 +7,7 @@ import {
   timestamp,
   real,
   json,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -458,6 +459,83 @@ export type InsertPrescription = z.infer<typeof insertPrescriptionSchema>;
 export type Prescription = typeof prescriptions.$inferSelect;
 export type InsertUploadQueue = z.infer<typeof insertUploadQueueSchema>;
 export type UploadQueue = typeof uploadQueue.$inferSelect;
+
+export const deliveryOrders = pgTable("delivery_orders", {
+  id: serial("id").primaryKey(),
+  rxNumber: text("rx_number").notNull(),
+  pharmacyId: integer("pharmacy_id").references(() => pharmacies.id).notNull(),
+  batchId: integer("batch_id").references(() => deliveryBatches.id),
+  fillDate: text("fill_date"),
+  deliveryStatus: text("delivery_status").notNull().default("IMPORTED"),
+  routeId: integer("route_id").references(() => routes.id),
+  addressText: text("address_text").notNull(),
+  streetAddress: text("street_address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  normalizedAddressHash: text("normalized_address_hash"),
+  lat: real("lat"),
+  lng: real("lng"),
+  customerName: text("customer_name"),
+  customerPhone: text("customer_phone"),
+  notes: text("notes"),
+  priority: text("priority").default("normal"),
+  uploadCount: integer("upload_count").notNull().default(1),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  scannedAt: timestamp("scanned_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  pharmacyRxUnique: uniqueIndex("delivery_orders_pharmacy_rx_unique").on(table.pharmacyId, table.rxNumber),
+}));
+
+export const deliveryOrderUploads = pgTable("delivery_order_uploads", {
+  id: serial("id").primaryKey(),
+  deliveryOrderId: integer("delivery_order_id").references(() => deliveryOrders.id).notNull(),
+  batchId: integer("batch_id").references(() => deliveryBatches.id).notNull(),
+  fileName: text("file_name"),
+  seenAt: timestamp("seen_at").defaultNow().notNull(),
+});
+
+export const deliveryOrdersRelations = relations(deliveryOrders, ({ one, many }) => ({
+  pharmacy: one(pharmacies, {
+    fields: [deliveryOrders.pharmacyId],
+    references: [pharmacies.id],
+  }),
+  batch: one(deliveryBatches, {
+    fields: [deliveryOrders.batchId],
+    references: [deliveryBatches.id],
+  }),
+  route: one(routes, {
+    fields: [deliveryOrders.routeId],
+    references: [routes.id],
+  }),
+  uploads: many(deliveryOrderUploads),
+}));
+
+export const deliveryOrderUploadsRelations = relations(deliveryOrderUploads, ({ one }) => ({
+  deliveryOrder: one(deliveryOrders, {
+    fields: [deliveryOrderUploads.deliveryOrderId],
+    references: [deliveryOrders.id],
+  }),
+  batch: one(deliveryBatches, {
+    fields: [deliveryOrderUploads.batchId],
+    references: [deliveryBatches.id],
+  }),
+}));
+
+export const insertDeliveryOrderSchema = createInsertSchema(deliveryOrders).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertDeliveryOrderUploadSchema = createInsertSchema(deliveryOrderUploads).omit({
+  id: true,
+});
+
+export type InsertDeliveryOrder = z.infer<typeof insertDeliveryOrderSchema>;
+export type DeliveryOrder = typeof deliveryOrders.$inferSelect;
+export type InsertDeliveryOrderUpload = z.infer<typeof insertDeliveryOrderUploadSchema>;
+export type DeliveryOrderUpload = typeof deliveryOrderUploads.$inferSelect;
 
 // Delivery ID counter table for atomic sequence generation
 export const deliveryIdCounters = pgTable("delivery_id_counters", {

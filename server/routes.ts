@@ -950,39 +950,33 @@ export async function registerRoutes(
         pharmacyId
       });
 
-      const deliveries: any[] = [];
-      const prescriptions: any[] = [];
       let skippedCount = 0;
       const skippedReasons: string[] = [];
+      let newOrderCount = 0;
+      let updatedOrderCount = 0;
+      const orderResults: any[] = [];
       
-      // Debug: Log the column names from the first row
       if (parsed.data.length > 0) {
         const firstRow = parsed.data[0] as any;
         console.log("CSV Column names detected:", Object.keys(firstRow));
         console.log("First row sample data:", JSON.stringify(firstRow).substring(0, 500));
       }
       
-      // Map to track deliveries by normalized address hash
-      const addressDeliveryMap = new Map<string, any>();
-      
-      // Helper function to clean Excel formula format (="value" -> value)
       const cleanExcelValue = (val: any): string => {
         if (!val) return '';
         let str = String(val).trim();
-        // Remove Excel formula wrapper ="..." 
         if (str.startsWith('="') && str.endsWith('"')) {
           str = str.slice(2, -1);
         }
-        // Also handle just = prefix
         if (str.startsWith('=')) {
           str = str.slice(1);
         }
         return str.trim();
       };
       
+      const fileName = req.file.originalname || 'upload.csv';
+      
       for (const row of parsed.data as any[]) {
-        // Support both old format (address column) and new format (separate address fields)
-        // Column names are case-insensitive - check multiple variations
         const streetAddress = cleanExcelValue(row.PATADDRESS || row.pataddress || row.PatAddress || 
                               row.patientaddress || row.PatientAddress || 
                               row.street || row.Street || row.STREET || '');
@@ -993,19 +987,15 @@ export async function registerRoutes(
         const zipCode = cleanExcelValue(row.PATZIP || row.patzip || row.PatZip || 
                         row.zip || row.Zip || row.ZIP || row.zipcode || row.ZipCode || '');
         
-        // Check if we have component address fields or a full address
         let addressText: string;
         let normalizedData: { streetAddress: string; city: string; state: string; zipCode: string; normalizedHash: string; fullAddress: string } | null = null;
         
         if (streetAddress && city) {
-          // New format with separate fields - use state from CSV or default to MI
           normalizedData = normalizeAddress(streetAddress, city, state || 'MI', zipCode);
           addressText = normalizedData.fullAddress;
         } else {
-          // Old format with single address column
           addressText = row.address || row.Address || row.ADDRESS || '';
           
-          // Try to parse and normalize the full address
           if (addressText) {
             const parsed = parseAddressComponents(addressText, 'MI');
             if (parsed) {
@@ -1021,7 +1011,6 @@ export async function registerRoutes(
           continue;
         }
 
-        // Get RX number (required field) - support multiple column name variations
         const rxNumber = cleanExcelValue(row.RXNO || row.rxno || row.RxNo || row.Rxno ||
                          row.rx_number || row.Rx_Number || row.RX_NUMBER ||
                          row.rx_no || row.Rx_No || row.RX_NO ||
@@ -1033,7 +1022,6 @@ export async function registerRoutes(
           continue;
         }
 
-        // Get customer info - support multiple column name variations
         const customerName = cleanExcelValue(row.PATIENTNAME || row.patientname || row.PatientName ||
                              row.patname || row.PatName || row.PATNAME ||
                              row.customer_name || row.customerName || row.CustomerName ||
@@ -1045,82 +1033,222 @@ export async function registerRoutes(
         const notes = cleanExcelValue(row.delivery || row.Delivery || row.DELIVERY ||
                       row.notes || row.Notes || row.NOTES ||
                       row.comments || row.Comments || row.DRUGNAME || row.drugname || '');
+        const fillDate = cleanExcelValue(row.FILLDATE || row.filldate || row.FillDate ||
+                         row.fill_date || row.Fill_Date || row.FILL_DATE || '');
         
-        // Check if we already have an ACTIVE delivery for this address (address consolidation)
-        // Only consolidate with deliveries that are not completed or cancelled
-        let delivery: any;
-        const addressKey = normalizedData?.normalizedHash || addressText.toLowerCase().trim();
+        if (!pharmacyId) {
+          skippedCount++;
+          skippedReasons.push(`No pharmacy associated with your account`);
+          continue;
+        }
+
+        // Geocode the address for new orders
+        let lat: number | null = null;
+        let lng: number | null = null;
         
-        // Check in-memory map first, but verify the delivery is still active
-        const cachedDelivery = addressDeliveryMap.get(addressKey);
-        const isActive = cachedDelivery && 
-          cachedDelivery.status !== 'complete' && 
-          cachedDelivery.status !== 'completed' && 
-          cachedDelivery.status !== 'cancelled';
-        
-        if (isActive) {
-          // Use existing active delivery
-          delivery = cachedDelivery;
-        } else {
-          // Create new delivery (either no cached delivery, or cached one is completed/cancelled)
+        // Check if this RX already exists for this pharmacy
+        const existingOrder = await storage.findDeliveryOrderByRx(pharmacyId, rxNumber);
+        if (!existingOrder) {
           const geocoded = await geocodeAddress(addressText);
-          const deliveryIdentifier = await storage.generateUniqueDeliveryIdentifier();
-          
-          delivery = await storage.createDelivery({
-            batchId: batch.id,
-            deliveryIdentifier,
-            addressText,
-            streetAddress: normalizedData?.streetAddress || null,
-            city: normalizedData?.city || null,
-            state: normalizedData?.state || null,
-            zipCode: normalizedData?.zipCode || null,
-            normalizedAddressHash: normalizedData?.normalizedHash || null,
-            lat: geocoded?.lat || null,
-            lng: geocoded?.lng || null,
-            customerName,
-            customerPhone,
-            rxNumber: null, // No longer storing single RX on delivery
-            notes,
-            priority: row.priority || "normal",
-            status: geocoded ? "geocoded" : "pending"
-          });
-          
-          deliveries.push(delivery);
-          addressDeliveryMap.set(addressKey, delivery);
-          
-          // Small delay to avoid rate limiting on geocoding
+          lat = geocoded?.lat || null;
+          lng = geocoded?.lng || null;
           await new Promise(resolve => setTimeout(resolve, 100));
         }
         
-        // Create prescription linked to delivery
-        const prescription = await storage.createPrescription({
-          deliveryId: delivery.id,
-          batchId: batch.id,
+        // Upsert into delivery_orders - no duplicates
+        const { order, isNew } = await storage.upsertDeliveryOrder({
           rxNumber,
-          patientName: customerName,
-          patientPhone: customerPhone,
+          pharmacyId,
+          fillDate: fillDate || null,
+          deliveryStatus: existingOrder ? existingOrder.deliveryStatus : 'IMPORTED',
+          addressText,
+          streetAddress: normalizedData?.streetAddress || null,
+          city: normalizedData?.city || null,
+          state: normalizedData?.state || null,
+          zipCode: normalizedData?.zipCode || null,
+          normalizedAddressHash: normalizedData?.normalizedHash || null,
+          lat,
+          lng,
+          customerName,
+          customerPhone,
           notes,
-          entryMethod: "upload"
-        });
+          priority: row.priority || "normal",
+          lastSeenAt: new Date(),
+          uploadCount: 1,
+        }, batch.id, fileName);
         
-        prescriptions.push(prescription);
+        orderResults.push(order);
+        if (isNew) {
+          newOrderCount++;
+        } else {
+          updatedOrderCount++;
+        }
       }
 
       await storage.updateBatchStatus(batch.id, "ready");
 
       res.json({
         batch,
-        deliveries,
-        prescriptions,
-        geocodedCount: deliveries.filter((d: any) => d.lat && d.lng).length,
-        totalDeliveries: deliveries.length,
-        totalPrescriptions: prescriptions.length,
+        orders: orderResults,
+        newOrderCount,
+        updatedOrderCount,
+        totalRows: parsed.data.length,
         skippedCount,
         skippedReasons: skippedReasons.slice(0, 5)
       });
     } catch (error) {
       console.error("Upload error:", error);
       res.status(500).json({ error: "Failed to process CSV" });
+    }
+  });
+
+  // Delivery Orders API
+  app.get("/api/delivery-orders", requireStaff, async (req, res) => {
+    try {
+      const session = req.session as any;
+      const pharmacyId = session?.user?.pharmacyId;
+      
+      if (session?.user?.role === 'admin') {
+        const orders = await storage.getAllDeliveryOrders();
+        return res.json(orders);
+      }
+      
+      if (!pharmacyId) {
+        return res.json([]);
+      }
+      
+      const orders = await storage.getDeliveryOrdersByPharmacy(pharmacyId);
+      res.json(orders);
+    } catch (error) {
+      console.error("Error fetching delivery orders:", error);
+      res.status(500).json({ error: "Failed to fetch delivery orders" });
+    }
+  });
+
+  app.get("/api/delivery-orders/by-batch/:batchId", requireStaff, async (req, res) => {
+    try {
+      const batchId = parseInt(req.params.batchId);
+      if (!await checkBatchOwnership(batchId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this batch" });
+      }
+      const orders = await storage.getDeliveryOrdersByBatch(batchId);
+      res.json(orders);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch delivery orders for batch" });
+    }
+  });
+
+  app.get("/api/delivery-orders/eligible", requireStaff, async (req, res) => {
+    try {
+      const session = req.session as any;
+      const pharmacyId = session?.user?.pharmacyId;
+      
+      if (session?.user?.role === 'admin') {
+        const allOrders = await storage.getAllDeliveryOrders();
+        return res.json(allOrders.filter(o => o.deliveryStatus === 'ROUTE_ELIGIBLE'));
+      }
+      
+      if (!pharmacyId) {
+        return res.json([]);
+      }
+      
+      const orders = await storage.getRouteEligibleOrders(pharmacyId);
+      res.json(orders);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch eligible orders" });
+    }
+  });
+
+  app.get("/api/delivery-orders/:id", requireStaff, async (req, res) => {
+    try {
+      const order = await storage.getDeliveryOrder(parseInt(req.params.id));
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch delivery order" });
+    }
+  });
+
+  app.get("/api/delivery-orders/:id/uploads", requireStaff, async (req, res) => {
+    try {
+      const uploads = await storage.getDeliveryOrderUploads(parseInt(req.params.id));
+      res.json(uploads);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch upload history" });
+    }
+  });
+
+  app.post("/api/delivery-orders/:id/scan", requireStaff, async (req, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      const order = await storage.getDeliveryOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      if (order.deliveryStatus === 'ROUTED' || order.deliveryStatus === 'DELIVERED') {
+        return res.status(400).json({ error: `Order is already ${order.deliveryStatus}` });
+      }
+      
+      const updated = await storage.updateDeliveryOrderStatus(orderId, 'ROUTE_ELIGIBLE');
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to scan order" });
+    }
+  });
+
+  app.post("/api/delivery-orders/scan-barcode", requireStaff, async (req, res) => {
+    try {
+      const { barcode } = req.body;
+      if (!barcode) {
+        return res.status(400).json({ error: "Barcode is required" });
+      }
+      
+      const session = req.session as any;
+      const pharmacyId = session?.user?.pharmacyId;
+      
+      // Strip trailing non-numeric characters from barcode
+      const cleanBarcode = barcode.replace(/[^0-9]+$/, '');
+      
+      // Search across all pharmacy orders if admin, or scoped to pharmacy
+      let order;
+      if (pharmacyId) {
+        order = await storage.findDeliveryOrderByRx(pharmacyId, cleanBarcode);
+        if (!order) {
+          order = await storage.findDeliveryOrderByRx(pharmacyId, barcode);
+        }
+      }
+      
+      if (!order) {
+        return res.status(404).json({ error: `No order found for RX: ${cleanBarcode}` });
+      }
+      
+      if (order.deliveryStatus === 'ROUTED' || order.deliveryStatus === 'DELIVERED') {
+        return res.json({ order, alreadyProcessed: true, message: `Order is already ${order.deliveryStatus}` });
+      }
+      
+      const updated = await storage.updateDeliveryOrderStatus(order.id, 'ROUTE_ELIGIBLE');
+      res.json({ order: updated, alreadyProcessed: false, message: 'Order marked as route-eligible' });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to process barcode scan" });
+    }
+  });
+
+  app.post("/api/delivery-orders/:id/status", requireStaff, async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (!['IMPORTED', 'ROUTE_ELIGIBLE', 'ROUTED', 'DELIVERED'].includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+      const updated = await storage.updateDeliveryOrderStatus(parseInt(req.params.id), status);
+      if (!updated) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update order status" });
     }
   });
 
@@ -1440,21 +1568,53 @@ export async function registerRoutes(
 
   app.post("/api/routes/optimize", requireStaff, async (req, res) => {
     try {
-      const { batchId, deliveryIds, zoneId, startLat, startLng, startAddress, endLat, endLng, endAddress, routeName } = req.body;
+      const { batchId, deliveryIds, orderIds, zoneId, startLat, startLng, startAddress, endLat, endLng, endAddress, routeName } = req.body;
 
       if (startLat === undefined || startLng === undefined) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
-      // Use end address if provided, otherwise route ends at last delivery
       const hasEndAddress = endLat !== undefined && endLng !== undefined;
 
       let geocodedDeliveries: any[] = [];
+      let orderIdsForStatusUpdate: number[] = [];
       
-      // Support both old batch-based and new deliveryIds-based approach
-      if (deliveryIds && Array.isArray(deliveryIds) && deliveryIds.length > 0) {
-        // New approach: use selected delivery IDs
-        // Verify ownership of all delivery IDs
+      if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
+        // New delivery_orders approach: create deliveries from ROUTE_ELIGIBLE orders
+        const orders = await Promise.all(
+          orderIds.map(id => storage.getDeliveryOrder(id))
+        );
+        const validOrders = orders.filter(o => o && o.lat && o.lng && o.deliveryStatus === 'ROUTE_ELIGIBLE') as any[];
+        
+        if (validOrders.length === 0) {
+          return res.status(400).json({ error: "No geocoded route-eligible orders found" });
+        }
+        
+        // Create delivery records from delivery_orders for the route
+        for (const order of validOrders) {
+          const deliveryIdentifier = await storage.generateUniqueDeliveryIdentifier();
+          const delivery = await storage.createDelivery({
+            batchId: order.batchId,
+            deliveryIdentifier,
+            addressText: order.addressText,
+            streetAddress: order.streetAddress || null,
+            city: order.city || null,
+            state: order.state || null,
+            zipCode: order.zipCode || null,
+            normalizedAddressHash: order.normalizedAddressHash || null,
+            lat: order.lat,
+            lng: order.lng,
+            customerName: order.customerName,
+            customerPhone: order.customerPhone,
+            rxNumber: order.rxNumber,
+            notes: order.notes,
+            priority: order.priority || "normal",
+            status: "geocoded"
+          });
+          geocodedDeliveries.push({ ...delivery, priority: order.priority || "normal" });
+          orderIdsForStatusUpdate.push(order.id);
+        }
+      } else if (deliveryIds && Array.isArray(deliveryIds) && deliveryIds.length > 0) {
         for (const id of deliveryIds) {
           if (!await checkDeliveryOwnership(id, req.session)) {
             return res.status(403).json({ error: "Access denied to one or more deliveries" });
@@ -1466,12 +1626,10 @@ export async function registerRoutes(
         );
         geocodedDeliveries = allDeliveries.filter(d => d && d.lat && d.lng) as any[];
       } else if (batchId) {
-        // Check batch ownership
         if (!await checkBatchOwnership(batchId, req.session)) {
           return res.status(403).json({ error: "Access denied to this batch" });
         }
         
-        // Old approach: use batch
         const batch = await storage.getBatch(batchId);
         if (!batch) {
           return res.status(404).json({ error: "Batch not found" });
@@ -1479,7 +1637,7 @@ export async function registerRoutes(
         const deliveries = await storage.getDeliveriesByBatch(batchId);
         geocodedDeliveries = deliveries.filter(d => d.lat && d.lng);
       } else {
-        return res.status(400).json({ error: "Either batchId or deliveryIds is required" });
+        return res.status(400).json({ error: "Either batchId, deliveryIds, or orderIds is required" });
       }
 
       if (geocodedDeliveries.length === 0) {
@@ -1611,6 +1769,12 @@ export async function registerRoutes(
         if (delivery) {
           await storage.updateDeliveryStatus(delivery.id, 'active');
         }
+      }
+
+      // Mark delivery_orders as ROUTED and link to route
+      for (const orderId of orderIdsForStatusUpdate) {
+        await storage.updateDeliveryOrderStatus(orderId, 'ROUTED');
+        await storage.updateDeliveryOrderRoute(orderId, route.id);
       }
 
       const stops = await storage.getRouteStops(route.id);

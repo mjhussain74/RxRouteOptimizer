@@ -26,6 +26,8 @@ import {
   ocrLogs,
   prescriptions,
   deliveryIdCounters,
+  deliveryOrders,
+  deliveryOrderUploads,
   type User,
   type InsertUser,
   type Driver,
@@ -51,6 +53,10 @@ import {
   type InsertOcrLog,
   type Prescription,
   type InsertPrescription,
+  type DeliveryOrder,
+  type InsertDeliveryOrder,
+  type DeliveryOrderUpload,
+  type InsertDeliveryOrderUpload,
 } from "@shared/schema";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -207,6 +213,17 @@ export interface IStorage {
   cancelRoute(routeId: number): Promise<Route | undefined>;
   deleteRouteStop(stopId: number): Promise<boolean>;
   resequenceRouteStops(routeId: number): Promise<void>;
+
+  // Delivery Orders methods
+  getDeliveryOrdersByPharmacy(pharmacyId: number): Promise<DeliveryOrder[]>;
+  getDeliveryOrdersByBatch(batchId: number): Promise<DeliveryOrder[]>;
+  getDeliveryOrder(id: number): Promise<DeliveryOrder | undefined>;
+  findDeliveryOrderByRx(pharmacyId: number, rxNumber: string): Promise<DeliveryOrder | undefined>;
+  upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }>;
+  updateDeliveryOrderStatus(id: number, status: string): Promise<DeliveryOrder | undefined>;
+  getDeliveryOrderUploads(orderId: number): Promise<DeliveryOrderUpload[]>;
+  getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]>;
+  getAllDeliveryOrders(): Promise<DeliveryOrder[]>;
 
   // Delivery matching methods
   findDeliveryByNormalizedAddress(
@@ -1259,6 +1276,154 @@ export class DatabaseStorage implements IStorage {
     }
 
     return targetDelivery;
+  }
+
+  // Delivery Orders implementation
+  async getDeliveryOrdersByPharmacy(pharmacyId: number): Promise<DeliveryOrder[]> {
+    return db
+      .select()
+      .from(deliveryOrders)
+      .where(eq(deliveryOrders.pharmacyId, pharmacyId))
+      .orderBy(desc(deliveryOrders.lastSeenAt));
+  }
+
+  async getDeliveryOrdersByBatch(batchId: number): Promise<DeliveryOrder[]> {
+    const uploads = await db
+      .select({ deliveryOrderId: deliveryOrderUploads.deliveryOrderId })
+      .from(deliveryOrderUploads)
+      .where(eq(deliveryOrderUploads.batchId, batchId));
+    
+    if (uploads.length === 0) return [];
+    
+    const orderIds = uploads.map(u => u.deliveryOrderId);
+    return db
+      .select()
+      .from(deliveryOrders)
+      .where(inArray(deliveryOrders.id, orderIds))
+      .orderBy(desc(deliveryOrders.lastSeenAt));
+  }
+
+  async getDeliveryOrder(id: number): Promise<DeliveryOrder | undefined> {
+    const result = await db
+      .select()
+      .from(deliveryOrders)
+      .where(eq(deliveryOrders.id, id));
+    return result[0];
+  }
+
+  async findDeliveryOrderByRx(pharmacyId: number, rxNumber: string): Promise<DeliveryOrder | undefined> {
+    const result = await db
+      .select()
+      .from(deliveryOrders)
+      .where(and(
+        eq(deliveryOrders.pharmacyId, pharmacyId),
+        eq(deliveryOrders.rxNumber, rxNumber)
+      ));
+    return result[0];
+  }
+
+  async upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }> {
+    const existing = await this.findDeliveryOrderByRx(data.pharmacyId, data.rxNumber);
+    
+    if (existing) {
+      const updated = await db
+        .update(deliveryOrders)
+        .set({
+          lastSeenAt: new Date(),
+          uploadCount: (existing.uploadCount || 1) + 1,
+          addressText: data.addressText || existing.addressText,
+          streetAddress: data.streetAddress || existing.streetAddress,
+          city: data.city || existing.city,
+          state: data.state || existing.state,
+          zipCode: data.zipCode || existing.zipCode,
+          normalizedAddressHash: data.normalizedAddressHash || existing.normalizedAddressHash,
+          lat: data.lat ?? existing.lat,
+          lng: data.lng ?? existing.lng,
+          customerName: data.customerName || existing.customerName,
+          customerPhone: data.customerPhone || existing.customerPhone,
+          notes: data.notes || existing.notes,
+          fillDate: data.fillDate || existing.fillDate,
+          batchId: batchId,
+        })
+        .where(eq(deliveryOrders.id, existing.id))
+        .returning();
+      
+      await db.insert(deliveryOrderUploads).values({
+        deliveryOrderId: existing.id,
+        batchId,
+        fileName: fileName || null,
+        seenAt: new Date(),
+      });
+      
+      return { order: updated[0], isNew: false };
+    } else {
+      const created = await db
+        .insert(deliveryOrders)
+        .values({
+          ...data,
+          batchId,
+          lastSeenAt: new Date(),
+          uploadCount: 1,
+        })
+        .returning();
+      
+      await db.insert(deliveryOrderUploads).values({
+        deliveryOrderId: created[0].id,
+        batchId,
+        fileName: fileName || null,
+        seenAt: new Date(),
+      });
+      
+      return { order: created[0], isNew: true };
+    }
+  }
+
+  async updateDeliveryOrderStatus(id: number, status: string): Promise<DeliveryOrder | undefined> {
+    const updates: any = { deliveryStatus: status };
+    if (status === 'ROUTE_ELIGIBLE') {
+      updates.scannedAt = new Date();
+    }
+    const result = await db
+      .update(deliveryOrders)
+      .set(updates)
+      .where(eq(deliveryOrders.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async updateDeliveryOrderRoute(id: number, routeId: number): Promise<DeliveryOrder | undefined> {
+    const result = await db
+      .update(deliveryOrders)
+      .set({ routeId })
+      .where(eq(deliveryOrders.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getDeliveryOrderUploads(orderId: number): Promise<DeliveryOrderUpload[]> {
+    return db
+      .select()
+      .from(deliveryOrderUploads)
+      .where(eq(deliveryOrderUploads.deliveryOrderId, orderId))
+      .orderBy(desc(deliveryOrderUploads.seenAt));
+  }
+
+  async getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]> {
+    return db
+      .select()
+      .from(deliveryOrders)
+      .where(and(
+        eq(deliveryOrders.pharmacyId, pharmacyId),
+        eq(deliveryOrders.deliveryStatus, 'ROUTE_ELIGIBLE')
+      ))
+      .orderBy(desc(deliveryOrders.lastSeenAt));
+  }
+
+  async getAllDeliveryOrders(): Promise<DeliveryOrder[]> {
+    return db
+      .select()
+      .from(deliveryOrders)
+      .orderBy(desc(deliveryOrders.lastSeenAt));
   }
 
   async deleteRouteStop(stopId: number): Promise<boolean> {

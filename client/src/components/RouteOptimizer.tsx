@@ -19,29 +19,25 @@ interface DeliveryZone {
   isActive: boolean;
 }
 
-interface Prescription {
+interface DeliveryOrder {
   id: number;
-  deliveryId: number;
   rxNumber: string;
-  patientName: string | null;
-  patientPhone: string | null;
-}
-
-interface Delivery {
-  id: number;
-  batchId: number;
-  deliveryIdentifier: string | null;
+  pharmacyId: number;
+  batchId: number | null;
+  fillDate: string | null;
+  deliveryStatus: string;
+  routeId: number | null;
   addressText: string;
   lat: number | null;
   lng: number | null;
   customerName: string | null;
   customerPhone: string | null;
-  rxNumber: string | null;
+  notes: string | null;
   priority: string | null;
-  status: string;
-  zoneId: number | null;
-  prescriptions?: Prescription[];
-  inActiveRoute?: boolean;
+  uploadCount: number;
+  lastSeenAt: string;
+  scannedAt: string | null;
+  createdAt: string;
 }
 
 interface RouteOptimizerProps {
@@ -81,67 +77,47 @@ export default function RouteOptimizer({
     queryKey: ["/api/zones"],
   });
 
-  const { data: activeDeliveries = [], isLoading: deliveriesLoading } = useQuery<Delivery[]>({
-    queryKey: ["/api/deliveries/active", selectedZoneId],
+  const { data: eligibleOrders = [], isLoading: deliveriesLoading } = useQuery<DeliveryOrder[]>({
+    queryKey: ["/api/delivery-orders/eligible"],
     queryFn: async () => {
-      const url = selectedZoneId 
-        ? `/api/deliveries/active?zoneId=${selectedZoneId}`
-        : "/api/deliveries/active";
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to fetch deliveries");
+      const res = await fetch("/api/delivery-orders/eligible", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch eligible orders");
       return res.json();
     },
   });
 
   const filteredDeliveries = useMemo(() => {
-    if (!searchQuery.trim()) return activeDeliveries;
+    if (!searchQuery.trim()) return eligibleOrders;
     const query = searchQuery.toLowerCase();
-    return activeDeliveries.filter(d => {
-      // Search in prescriptions
-      const prescriptionMatch = d.prescriptions?.some(
-        rx => rx.rxNumber?.toLowerCase().includes(query)
-      );
-      return (
-        d.addressText?.toLowerCase().includes(query) ||
-        d.customerName?.toLowerCase().includes(query) ||
-        d.rxNumber?.toLowerCase().includes(query) ||
-        d.deliveryIdentifier?.toLowerCase().includes(query) ||
-        prescriptionMatch
-      );
-    });
-  }, [activeDeliveries, searchQuery]);
+    return eligibleOrders.filter(d => (
+      d.addressText?.toLowerCase().includes(query) ||
+      d.customerName?.toLowerCase().includes(query) ||
+      d.rxNumber?.toLowerCase().includes(query)
+    ));
+  }, [eligibleOrders, searchQuery]);
 
   const urgentCount = useMemo(() => {
     return Array.from(selectedDeliveryIds).filter(id => {
-      const delivery = activeDeliveries.find(d => d.id === id);
-      return delivery?.priority === "urgent";
+      const order = eligibleOrders.find(d => d.id === id);
+      return order?.priority === "urgent";
     }).length;
-  }, [selectedDeliveryIds, activeDeliveries]);
+  }, [selectedDeliveryIds, eligibleOrders]);
 
-  // Auto-select orders when their RX is scanned
   useEffect(() => {
     if (lastScannedRx) {
-      // Find delivery by RX number - check both legacy rxNumber field and prescriptions array
-      const matchingDelivery = activeDeliveries.find(d => {
-        // Check legacy rxNumber field
-        if (d.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()) {
-          return true;
-        }
-        // Check prescriptions array
-        return d.prescriptions?.some(
-          rx => rx.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()
-        );
-      });
+      const matchingOrder = eligibleOrders.find(d =>
+        d.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()
+      );
       
-      if (matchingDelivery) {
-        setSelectedDeliveryIds(prev => new Set([...prev, matchingDelivery.id]));
+      if (matchingOrder) {
+        setSelectedDeliveryIds(prev => new Set([...prev, matchingOrder.id]));
         setScanError(null);
       } else {
-        setScanError(`RX ${lastScannedRx} not found in active orders`);
+        setScanError(`RX ${lastScannedRx} not found in eligible orders`);
       }
       setLastScannedRx(null);
     }
-  }, [lastScannedRx, activeDeliveries]);
+  }, [lastScannedRx, eligibleOrders]);
 
   // Cleanup scanner on unmount
   useEffect(() => {
@@ -212,7 +188,8 @@ export default function RouteOptimizer({
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/deliveries/active"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
       setSelectedDeliveryIds(new Set());
       onRouteCreated(data.route.id);
     },
@@ -264,7 +241,7 @@ export default function RouteOptimizer({
     if (selectedDeliveryIds.size === 0) return;
 
     const payload: any = {
-      deliveryIds: Array.from(selectedDeliveryIds),
+      orderIds: Array.from(selectedDeliveryIds),
       zoneId: selectedZoneId,
       startLat,
       startLng,
@@ -272,7 +249,6 @@ export default function RouteOptimizer({
       routeName: routeName.trim() || `Route ${new Date().toLocaleTimeString()}`,
     };
 
-    // Include end address if provided and geocoded
     if (endAddress.trim() && endLat !== null && endLng !== null) {
       payload.endLat = endLat;
       payload.endLng = endLng;
@@ -298,27 +274,12 @@ export default function RouteOptimizer({
     setSelectedDeliveryIds(newSet);
   };
 
-  const isDeliveryScanned = (delivery: Delivery) => {
-    // Check legacy rxNumber field
-    if (delivery.rxNumber && scannedRxNumbers.has(delivery.rxNumber)) {
-      return true;
-    }
-    // Check if any prescription is scanned
-    if (delivery.prescriptions && delivery.prescriptions.length > 0) {
-      return delivery.prescriptions.some(rx => scannedRxNumbers.has(rx.rxNumber));
-    }
-    return false;
+  const isOrderScanned = (order: DeliveryOrder) => {
+    return scannedRxNumbers.has(order.rxNumber);
   };
 
-  const getAllRxNumbers = (delivery: Delivery): string[] => {
-    const rxNumbers: string[] = [];
-    if (delivery.rxNumber) {
-      rxNumbers.push(delivery.rxNumber);
-    }
-    if (delivery.prescriptions) {
-      delivery.prescriptions.forEach(rx => rxNumbers.push(rx.rxNumber));
-    }
-    return rxNumbers;
+  const getAllRxNumbers = (order: DeliveryOrder): string[] => {
+    return [order.rxNumber];
   };
 
   const clearSelection = () => {
@@ -615,7 +576,7 @@ export default function RouteOptimizer({
             <CardTitle className="text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-blue-400" />
-                Active Orders ({activeDeliveries.length})
+                Route-Eligible Orders ({eligibleOrders.length})
               </div>
               <div className="flex gap-2">
                 <Button
@@ -660,38 +621,33 @@ export default function RouteOptimizer({
               </div>
             ) : filteredDeliveries.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
-                {activeDeliveries.length === 0 
-                  ? "No active orders available. Orders that are complete or cancelled are excluded."
+                {eligibleOrders.length === 0 
+                  ? "No route-eligible orders. Scan barcodes in Orders tab to make them eligible."
                   : "No orders match your search."}
               </div>
             ) : (
               <div className="max-h-[500px] overflow-y-auto space-y-2">
-                {filteredDeliveries.map((delivery) => {
-                  const isSelected = selectedDeliveryIds.has(delivery.id);
+                {filteredDeliveries.map((order) => {
+                  const isSelected = selectedDeliveryIds.has(order.id);
                   return (
                     <div
-                      key={delivery.id}
-                      onClick={() => toggleDeliverySelection(delivery.id)}
+                      key={order.id}
+                      onClick={() => toggleDeliverySelection(order.id)}
                       className={`flex items-start gap-3 rounded-lg p-3 transition-colors cursor-pointer ${
                         isSelected
                           ? "bg-blue-500/20 border border-blue-500/50"
                           : "bg-slate-900/30 hover:bg-slate-900/50 border border-transparent"
-                      } ${delivery.priority === "urgent" ? "border-l-4 border-l-red-500" : ""}`}
+                      } ${order.priority === "urgent" ? "border-l-4 border-l-red-500" : ""}`}
                     >
                       <Checkbox
                         checked={isSelected}
-                        onCheckedChange={() => toggleDeliverySelection(delivery.id)}
+                        onCheckedChange={() => toggleDeliverySelection(order.id)}
                         className="mt-1"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-white text-sm truncate">{delivery.addressText}</p>
-                          {delivery.inActiveRoute && (
-                            <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">
-                              In Route
-                            </span>
-                          )}
-                          {delivery.priority === "urgent" && (
+                          <p className="text-white text-sm truncate">{order.addressText}</p>
+                          {order.priority === "urgent" && (
                             <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded flex items-center gap-1">
                               <AlertTriangle className="h-3 w-3" />
                               Urgent
@@ -699,31 +655,17 @@ export default function RouteOptimizer({
                           )}
                         </div>
                         <div className="flex flex-wrap gap-2 mt-1">
-                          {delivery.customerName && (
-                            <p className="text-slate-500 text-xs">{delivery.customerName}</p>
+                          {order.customerName && (
+                            <p className="text-slate-500 text-xs">{order.customerName}</p>
                           )}
-                          {delivery.deliveryIdentifier && (
-                            <span className="text-xs text-blue-400 font-medium">
-                              {delivery.deliveryIdentifier}
+                          <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
+                            RX: {order.rxNumber}
+                          </span>
+                          {order.uploadCount > 1 && (
+                            <span className="text-xs text-amber-400 px-1.5 py-0.5 rounded bg-amber-500/10">
+                              Seen {order.uploadCount}x
                             </span>
                           )}
-                          {/* Show prescriptions if available */}
-                          {delivery.prescriptions && delivery.prescriptions.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {delivery.prescriptions.map((rx) => (
-                                <span
-                                  key={rx.id}
-                                  className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400"
-                                >
-                                  {rx.rxNumber}
-                                </span>
-                              ))}
-                            </div>
-                          ) : delivery.rxNumber ? (
-                            <p className="text-xs font-mono text-slate-500">
-                              RX: {delivery.rxNumber}
-                            </p>
-                          ) : null}
                         </div>
                       </div>
                     </div>

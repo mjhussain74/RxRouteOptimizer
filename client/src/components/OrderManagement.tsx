@@ -3,11 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Upload,
   FileSpreadsheet,
-  Edit,
-  Trash2,
-  Save,
-  X,
-  Plus,
   Search,
   AlertCircle,
   CheckCircle,
@@ -15,16 +10,14 @@ import {
   AlertTriangle,
   Ban,
   Check,
-  Split,
-  Merge,
   Download,
   Printer,
+  Eye,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,24 +31,14 @@ import {
 import * as XLSX from "xlsx";
 import JsBarcode from "jsbarcode";
 
-interface Prescription {
+interface DeliveryOrder {
   id: number;
-  deliveryId: number;
-  batchId: number | null;
   rxNumber: string;
-  patientName: string | null;
-  patientPhone: string | null;
-  notes: string | null;
-  entryMethod: string | null;
-  scannedAt: string | null;
-  createdAt: string;
-}
-
-interface Delivery {
-  id: number;
+  pharmacyId: number;
   batchId: number | null;
-  pharmacyId: number | null;
-  deliveryIdentifier: string | null;
+  fillDate: string | null;
+  deliveryStatus: string;
+  routeId: number | null;
   addressText: string;
   streetAddress: string | null;
   city: string | null;
@@ -65,18 +48,12 @@ interface Delivery {
   lng: number | null;
   customerName: string | null;
   customerPhone: string | null;
-  rxNumber: string | null;
   notes: string | null;
   priority: string | null;
-  status: string;
-  ocrConfidence: number | null;
-  ocrVerified: boolean | null;
-  routingEligible?: boolean;
-  prescriptions?: Prescription[];
-}
-
-interface EditingDelivery extends Partial<Delivery> {
-  id: number;
+  uploadCount: number;
+  lastSeenAt: string;
+  scannedAt: string | null;
+  createdAt: string;
 }
 
 interface OrderManagementProps {
@@ -85,6 +62,29 @@ interface OrderManagementProps {
   onBatchCreated?: (batchId: number) => void;
   onBatchSelected?: (batchId: number | null) => void;
 }
+
+const STATUS_COLORS: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
+  IMPORTED: {
+    bg: "bg-yellow-500/20",
+    text: "text-yellow-400",
+    icon: <AlertCircle className="h-4 w-4 text-yellow-400" />,
+  },
+  ROUTE_ELIGIBLE: {
+    bg: "bg-green-500/20",
+    text: "text-green-400",
+    icon: <CheckCircle className="h-4 w-4 text-green-400" />,
+  },
+  ROUTED: {
+    bg: "bg-blue-500/20",
+    text: "text-blue-400",
+    icon: <CheckCircle className="h-4 w-4 text-blue-400" />,
+  },
+  DELIVERED: {
+    bg: "bg-purple-500/20",
+    text: "text-purple-400",
+    icon: <CheckCircle className="h-4 w-4 text-purple-400" />,
+  },
+};
 
 export default function OrderManagement({
   batchId,
@@ -100,38 +100,20 @@ export default function OrderManagement({
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>("");
-  const [editingDelivery, setEditingDelivery] =
-    useState<EditingDelivery | null>(null);
+  const [uploadResult, setUploadResult] = useState<{
+    newOrderCount: number;
+    updatedOrderCount: number;
+    totalRows: number;
+    skippedCount: number;
+    skippedReasons: string[];
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [rxNotFoundDialog, setRxNotFoundDialog] = useState<{
-    rxNumber: string;
-  } | null>(null);
+  const [scanMessage, setScanMessage] = useState<{ text: string; type: "success" | "warning" | "error" } | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
-  const [showAddManual, setShowAddManual] = useState(false);
-  const [newDelivery, setNewDelivery] = useState({
-    addressText: "",
-    customerName: "",
-    customerPhone: "",
-    rxNumber: "",
-    notes: "",
-  });
   const [confirmAction, setConfirmAction] = useState<{
-    type: "complete" | "cancel" | "delete";
+    type: "complete" | "cancel";
     batchId?: number;
-    deliveryId?: number;
   } | null>(null);
-
-  const [showSplitDialog, setShowSplitDialog] = useState(false);
-  const [splitDelivery, setSplitDelivery] = useState<Delivery | null>(null);
-  const [selectedPrescriptionsForSplit, setSelectedPrescriptionsForSplit] =
-    useState<number[]>([]);
-
-  const [showMergeDialog, setShowMergeDialog] = useState(false);
-  const [mergeTargetDelivery, setMergeTargetDelivery] =
-    useState<Delivery | null>(null);
-  const [selectedDeliveriesForMerge, setSelectedDeliveriesForMerge] = useState<
-    number[]
-  >([]);
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -139,12 +121,12 @@ export default function OrderManagement({
 
   const activeBatchId = selectedBatchId || batchId;
 
-  const { data: batchData } = useQuery({
-    queryKey: [`/api/batches/${activeBatchId}`],
-    enabled: !!activeBatchId,
+  const { data: orders = [] } = useQuery<DeliveryOrder[]>({
+    queryKey: activeBatchId
+      ? [`/api/delivery-orders/by-batch/${activeBatchId}`]
+      : ["/api/delivery-orders"],
+    enabled: true,
   });
-
-  const deliveries: Delivery[] = (batchData as any)?.deliveries || [];
 
   const handleBatchChange = (newBatchId: number | null) => {
     setSelectedBatchId(newBatchId);
@@ -173,9 +155,25 @@ export default function OrderManagement({
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
-      if (onBatchCreated) {
+      if (activeBatchId) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      if (onBatchCreated && data.batch) {
         onBatchCreated(data.batch.id);
       }
+      if (data.batch) {
+        setSelectedBatchId(data.batch.id);
+      }
+      setUploadResult({
+        newOrderCount: data.newOrderCount || 0,
+        updatedOrderCount: data.updatedOrderCount || 0,
+        totalRows: data.totalRows || 0,
+        skippedCount: data.skippedCount || 0,
+        skippedReasons: data.skippedReasons || [],
+      });
       setIsUploading(false);
       setUploadProgress("");
     },
@@ -186,108 +184,44 @@ export default function OrderManagement({
     },
   });
 
-  const updateDeliveryMutation = useMutation({
-    mutationFn: async (delivery: EditingDelivery) => {
-      const response = await fetch(`/api/deliveries/${delivery.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(delivery),
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Update failed");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
-      });
-      setEditingDelivery(null);
-    },
-  });
-
-  const deleteDeliveryMutation = useMutation({
-    mutationFn: async (deliveryId: number) => {
-      const response = await fetch(`/api/deliveries/${deliveryId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Delete failed");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
-    },
-  });
-
-  const addDeliveryMutation = useMutation({
-    mutationFn: async (delivery: typeof newDelivery) => {
-      const response = await fetch(`/api/deliveries`, {
+  const scanBarcodeMutation = useMutation({
+    mutationFn: async (barcode: string) => {
+      const response = await fetch("/api/delivery-orders/scan-barcode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...delivery,
-          batchId: activeBatchId,
-          status: "pending",
-          priority: "normal",
-          routingEligible: true, // Manually added orders are immediately routing eligible
-        }),
+        body: JSON.stringify({ barcode }),
         credentials: "include",
       });
-      if (!response.ok) throw new Error("Failed to add order");
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: "Scan failed" }));
+        throw new Error(err.error || "Scan failed");
+      }
       return response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
-      setShowAddManual(false);
-      setNewDelivery({
-        addressText: "",
-        customerName: "",
-        customerPhone: "",
-        rxNumber: "",
-        notes: "",
-      });
+    onSuccess: (data) => {
+      if (activeBatchId) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+
+      if (data.alreadyProcessed) {
+        setScanMessage({ text: data.message || "Already scanned", type: "warning" });
+      } else {
+        setScanMessage({ text: data.message || "Scanned successfully - marked ROUTE_ELIGIBLE", type: "success" });
+      }
+      setTimeout(() => setScanMessage(null), 4000);
+    },
+    onError: (error: Error) => {
+      setScanMessage({ text: error.message, type: "error" });
+      setTimeout(() => setScanMessage(null), 4000);
     },
   });
 
-  const setPriorityMutation = useMutation({
-    mutationFn: async ({
-      deliveryId,
-      priority,
-    }: {
-      deliveryId: number;
-      priority: string;
-    }) => {
-      const response = await fetch(`/api/deliveries/${deliveryId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priority }),
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to update priority");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
-      });
-    },
-  });
-
-  const setStatusMutation = useMutation({
-    mutationFn: async ({
-      deliveryId,
-      status,
-    }: {
-      deliveryId: number;
-      status: string;
-    }) => {
-      const response = await fetch(`/api/deliveries/${deliveryId}/status`, {
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ orderId, status }: { orderId: number; status: string }) => {
+      const response = await fetch(`/api/delivery-orders/${orderId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -297,10 +231,31 @@ export default function OrderManagement({
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
+      if (activeBatchId) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+    },
+  });
+
+  const markScanMutation = useMutation({
+    mutationFn: async (orderId: number) => {
+      const response = await fetch(`/api/delivery-orders/${orderId}/scan`, {
+        method: "POST",
+        credentials: "include",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
+      if (!response.ok) throw new Error("Failed to mark as scanned");
+      return response.json();
+    },
+    onSuccess: () => {
+      if (activeBatchId) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
     },
   });
 
@@ -322,75 +277,12 @@ export default function OrderManagement({
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
-      });
       queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
-    },
-  });
-
-  const splitDeliveryMutation = useMutation({
-    mutationFn: async ({
-      deliveryId,
-      prescriptionIds,
-    }: {
-      deliveryId: number;
-      prescriptionIds: number[];
-    }) => {
-      const response = await fetch(`/api/deliveries/${deliveryId}/split`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prescriptionIds }),
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to split delivery");
+      if (activeBatchId) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
       }
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
-      setShowSplitDialog(false);
-      setSplitDelivery(null);
-      setSelectedPrescriptionsForSplit([]);
-    },
-  });
-
-  const mergeDeliveriesMutation = useMutation({
-    mutationFn: async ({
-      targetDeliveryId,
-      sourceDeliveryIds,
-    }: {
-      targetDeliveryId: number;
-      sourceDeliveryIds: number[];
-    }) => {
-      const response = await fetch(
-        `/api/deliveries/${targetDeliveryId}/merge`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sourceDeliveryIds }),
-          credentials: "include",
-        },
-      );
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to merge deliveries");
-      }
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [`/api/batches/${activeBatchId}`],
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/batches"] });
-      setShowMergeDialog(false);
-      setMergeTargetDelivery(null);
-      setSelectedDeliveriesForMerge([]);
     },
   });
 
@@ -401,6 +293,7 @@ export default function OrderManagement({
       if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
         setIsUploading(true);
         setUploadProgress("Processing Excel file...");
+        setUploadResult(null);
 
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -429,6 +322,7 @@ export default function OrderManagement({
       } else if (fileName.endsWith(".csv")) {
         setIsUploading(true);
         setUploadProgress("Uploading CSV file...");
+        setUploadResult(null);
         uploadMutation.mutate(file);
       } else {
         setUploadProgress(
@@ -440,39 +334,11 @@ export default function OrderManagement({
   );
 
   const printDeliveryLabel = (
-    delivery: Delivery,
+    order: DeliveryOrder,
     pharmacyName: string = "RX Delivery Pharmacy",
   ) => {
     const today = new Date().toLocaleDateString();
-    const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
-
-    // Collect all patient names and phones from prescriptions
-    const patientNames: string[] = [];
-    const patientPhones: string[] = [];
-
-    if (delivery.prescriptions && delivery.prescriptions.length > 0) {
-      delivery.prescriptions.forEach((rx) => {
-        if (rx.patientName && !patientNames.includes(rx.patientName)) {
-          patientNames.push(rx.patientName);
-        }
-        if (rx.patientPhone && !patientPhones.includes(rx.patientPhone)) {
-          patientPhones.push(rx.patientPhone);
-        }
-      });
-    }
-
-    // Fallback to delivery-level customer info if no prescription data
-    if (patientNames.length === 0 && delivery.customerName) {
-      patientNames.push(delivery.customerName);
-    }
-    if (patientPhones.length === 0 && delivery.customerPhone) {
-      patientPhones.push(delivery.customerPhone);
-    }
-
-    const allPatientNames =
-      patientNames.length > 0 ? patientNames.join(", ") : "N/A";
-    const allPatientPhones =
-      patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
+    const labelId = order.rxNumber || `ORD-${order.id}`;
 
     const canvas = document.createElement("canvas");
     try {
@@ -483,7 +349,7 @@ export default function OrderManagement({
       canvas.width = logicalWidth * dpr;
       canvas.height = logicalHeight * dpr;
       if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      JsBarcode(canvas, deliveryId, {
+      JsBarcode(canvas, labelId, {
         format: "CODE128",
         width: 3,
         height: 80,
@@ -502,176 +368,53 @@ export default function OrderManagement({
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Delivery Label - ${deliveryId}</title>
+        <title>Delivery Label - ${labelId}</title>
         <style>
-          * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
-
-          /* 🔑 THIS IS THE MOST IMPORTANT PART */
+          * { box-sizing: border-box; margin: 0; padding: 0; }
           @media print {
-            @page {
-              size: 62mm 50mm;   /* WIDTH = tape, HEIGHT = feed */
-              margin: 0;
-            }
-
-            html, body {
-              width: 62mm;
-              min-width: 62mm;
-              max-width: 62mm;
-              margin: 0;
-              padding: 0;
-              overflow: hidden;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-
-            body {
-              display: block;
-            }
+            @page { size: 62mm 50mm; margin: 0; }
+            html, body { width: 62mm; min-width: 62mm; max-width: 62mm; margin: 0; padding: 0; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            body { display: block; }
           }
-
-          body {
-            font-family: Arial, sans-serif;
-          }
-
-          .label {
-            width: 58mm;
-            height: 50mm;
-            padding-left: 3.4mm;
-            box-sizing: border-box;
-            overflow: hidden;
-          }
-
-
-
-          /* Padding belongs INSIDE the label, not on body */
-          .label-container {
-            width: 62mm;
-            height: 50mm;
-            padding-left: 4mm;
-            overflow: hidden;
-          }
-
-          .header-row {
-            border-bottom: 1px solid #000;
-            padding-bottom: 2px;
-            margin-bottom: 2px;
-            overflow: hidden;
-          }
-
-          .pharmacy-name {
-            font-size: 8px;
-            font-weight: bold;
-            float: left;
-          }
-
-          .date {
-            font-size: 7px;
-            color: #666;
-            float: right;
-          }
-
-          .delivery-id {
-            font-size: 10px;
-            font-weight: bold;
-            text-align: center;
-            background: #f0f0f0;
-            padding: 2px 3px;
-            border-radius: 2px;
-            margin-bottom: 2px;
-            clear: both;
-          }
-
-          .barcode-container {
-            text-align: center;
-            margin-bottom: 2mm;
-          }
-
-          /* ⚠️ physical units – prevents width overflow */
-          .barcode-container img {
-            width: 100%;
-            height: 8mm;
-            object-fit: contain;
-          }
-
-          .field {
-            margin-bottom: 2px;
-          }
-
-          .field-label {
-            font-size: 6px;
-            color: #666;
-            text-transform: uppercase;
-          }
-
-          .field-value {
-            font-size: 8px;
-            font-weight: 500;
-            line-height: 1.1;
-          }
-
-          .address {
-            font-size: 8px;
-            line-height: 1.1;
-          }
-
-          .phone-box {
-            font-size: 9px;
-            font-weight: bold;
-            background: #e8f0f8;
-            padding: 2px;
-            border-radius: 2px;
-            text-align: center;
-            border: 1px solid #ccc;
-            margin-top: 2px;
-          }
-
-          .phone-box .field-label {
-            font-size: 6px;
-            display: block;
-          }
+          body { font-family: Arial, sans-serif; }
+          .label { width: 58mm; height: 50mm; padding-left: 3.4mm; box-sizing: border-box; overflow: hidden; }
+          .label-container { width: 62mm; height: 50mm; padding-left: 4mm; overflow: hidden; }
+          .header-row { border-bottom: 1px solid #000; padding-bottom: 2px; margin-bottom: 2px; overflow: hidden; }
+          .pharmacy-name { font-size: 8px; font-weight: bold; float: left; }
+          .date { font-size: 7px; color: #666; float: right; }
+          .delivery-id { font-size: 10px; font-weight: bold; text-align: center; background: #f0f0f0; padding: 2px 3px; border-radius: 2px; margin-bottom: 2px; clear: both; }
+          .barcode-container { text-align: center; margin-bottom: 2mm; }
+          .barcode-container img { width: 100%; height: 8mm; object-fit: contain; }
+          .field { margin-bottom: 2px; }
+          .field-label { font-size: 6px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 8px; font-weight: 500; line-height: 1.1; }
+          .address { font-size: 8px; line-height: 1.1; }
+          .phone-box { font-size: 9px; font-weight: bold; background: #e8f0f8; padding: 2px; border-radius: 2px; text-align: center; border: 1px solid #ccc; margin-top: 2px; }
+          .phone-box .field-label { font-size: 6px; display: block; }
         </style>
       </head>
-
       <body>
         <div class="label-container">
           <div class="header-row">
             <div class="pharmacy-name">${pharmacyName}</div>
             <div class="date">${today}</div>
           </div>
-
-          <div class="delivery-id">${deliveryId}</div>
-
+          <div class="delivery-id">${labelId}</div>
           <div class="barcode-container">
-            <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
+            <img src="${barcodeDataUrl}" alt="Barcode: ${labelId}" />
           </div>
-
           <div class="field">
             <div class="field-label">Deliver To</div>
-            <div class="field-value address">${delivery.addressText}</div>
+            <div class="field-value address">${order.addressText}</div>
           </div>
-
           <div class="field">
-            <div class="field-label">Patient(s)</div>
-            <div class="field-value">${allPatientNames}</div>
+            <div class="field-label">Customer</div>
+            <div class="field-value">${order.customerName || "N/A"}</div>
           </div>
-
-          ${
-            delivery.notes
-              ? `
-            <div class="field">
-              <div class="field-label">Notes</div>
-              <div class="field-value">${delivery.notes}</div>
-            </div>`
-              : ""
-          }
-
+          ${order.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${order.notes}</div></div>` : ""}
           <div class="phone-box">
             <div class="field-label">PHONE</div>
-            ${allPatientPhones}
+            ${order.customerPhone || "N/A"}
           </div>
         </div>
       </body>
@@ -708,76 +451,34 @@ export default function OrderManagement({
     setIsDragging(false);
   }, []);
 
-  // USB barcode scan: search uploaded deliveries by RX number; if found mark routing eligible, else show "RX NOT FOUND" with option to add
   const handleBarcodeScan = useCallback(
-    (rxNumber: string) => {
-      const trimmed = rxNumber.trim();
-      if (!trimmed || !activeBatchId) return;
-
-      // Strip trailing non-numeric characters from scanned RX
-      const cleanedRx = trimmed.replace(/\D+$/, '');
-
-      const match = deliveries.find((d) => {
-        if (d.rxNumber?.toLowerCase() === cleanedRx.toLowerCase()) return true;
-        return d.prescriptions?.some(
-          (rx) => rx.rxNumber?.toLowerCase() === cleanedRx.toLowerCase(),
-        );
-      });
-
-      if (match) {
-        updateDeliveryMutation.mutate(
-          { id: match.id, routingEligible: true },
-          {
-            onSuccess: () => {
-              queryClient.invalidateQueries({
-                queryKey: [`/api/batches/${activeBatchId}`],
-              });
-              queryClient.invalidateQueries({
-                queryKey: ["/api/deliveries/active"],
-              });
-            },
-          },
-        );
-      } else {
-        setRxNotFoundDialog({ rxNumber: cleanedRx });
-      }
+    (barcode: string) => {
+      const trimmed = barcode.trim();
+      if (!trimmed) return;
+      scanBarcodeMutation.mutate(trimmed);
     },
-    [activeBatchId, deliveries, updateDeliveryMutation, queryClient],
+    [scanBarcodeMutation],
   );
 
-  const filteredDeliveries = deliveries.filter((d) => {
+  const filteredOrders = orders.filter((o) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
-
-    // Search in prescription Rx numbers
-    const prescriptionMatch = d.prescriptions?.some(
-      (rx) =>
-        rx.rxNumber?.toLowerCase().includes(query) ||
-        rx.patientName?.toLowerCase().includes(query),
-    );
-
     return (
-      d.addressText?.toLowerCase().includes(query) ||
-      d.customerName?.toLowerCase().includes(query) ||
-      d.rxNumber?.toLowerCase().includes(query) ||
-      d.customerPhone?.includes(query) ||
-      d.deliveryIdentifier?.toLowerCase().includes(query) ||
-      prescriptionMatch
+      o.rxNumber?.toLowerCase().includes(query) ||
+      o.addressText?.toLowerCase().includes(query) ||
+      o.customerName?.toLowerCase().includes(query) ||
+      o.customerPhone?.includes(query) ||
+      o.deliveryStatus?.toLowerCase().includes(query)
     );
   });
 
-  const handleSaveEdit = () => {
-    if (editingDelivery) {
-      updateDeliveryMutation.mutate(editingDelivery);
-    }
-  };
+  const eligibleForRouting = orders.filter(
+    (o) => o.deliveryStatus === "ROUTE_ELIGIBLE",
+  );
 
-  // Print labels only for routing-eligible deliveries in the selected batch
-  const eligibleForRouting = deliveries.filter((d) => d.routingEligible);
   const printAllLabels = () => {
-    if (!activeBatchId || eligibleForRouting.length === 0) return;
+    if (eligibleForRouting.length === 0) return;
 
-    // Get pharmacy name from batch
     const selectedBatch = (batches as any[]).find(
       (b: any) => b.id === activeBatchId,
     );
@@ -785,40 +486,10 @@ export default function OrderManagement({
       selectedBatch?.name?.split(" - ")[0] || "RX Delivery Pharmacy";
     const today = new Date().toLocaleDateString();
 
-    // Generate label HTML only for routing-eligible deliveries
     const labelsHtml = eligibleForRouting
-      .map((delivery) => {
-        const deliveryId = delivery.deliveryIdentifier || `DEL${delivery.id}`;
+      .map((order) => {
+        const labelId = order.rxNumber || `ORD-${order.id}`;
 
-        // Collect all patient names and phones from prescriptions
-        const patientNames: string[] = [];
-        const patientPhones: string[] = [];
-
-        if (delivery.prescriptions && delivery.prescriptions.length > 0) {
-          delivery.prescriptions.forEach((rx) => {
-            if (rx.patientName && !patientNames.includes(rx.patientName)) {
-              patientNames.push(rx.patientName);
-            }
-            if (rx.patientPhone && !patientPhones.includes(rx.patientPhone)) {
-              patientPhones.push(rx.patientPhone);
-            }
-          });
-        }
-
-        // Fallback to delivery-level customer info if no prescription data
-        if (patientNames.length === 0 && delivery.customerName) {
-          patientNames.push(delivery.customerName);
-        }
-        if (patientPhones.length === 0 && delivery.customerPhone) {
-          patientPhones.push(delivery.customerPhone);
-        }
-
-        const allPatientNames =
-          patientNames.length > 0 ? patientNames.join(", ") : "N/A";
-        const allPatientPhones =
-          patientPhones.length > 0 ? patientPhones.join(", ") : "N/A";
-
-        // Generate barcode for this delivery
         const canvas = document.createElement("canvas");
         try {
           const dpr = window.devicePixelRatio || 1;
@@ -828,7 +499,7 @@ export default function OrderManagement({
           canvas.width = logicalWidth * dpr;
           canvas.height = logicalHeight * dpr;
           if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          JsBarcode(canvas, deliveryId, {
+          JsBarcode(canvas, labelId, {
             format: "CODE128",
             width: 3,
             height: 80,
@@ -849,22 +520,22 @@ export default function OrderManagement({
             <div class="pharmacy-name">${pharmacyName}</div>
             <div class="date">${today}</div>
           </div>
-          <div class="delivery-id">${deliveryId}</div>
+          <div class="delivery-id">${labelId}</div>
           <div class="barcode-container">
-            <img src="${barcodeDataUrl}" alt="Barcode: ${deliveryId}" />
+            <img src="${barcodeDataUrl}" alt="Barcode: ${labelId}" />
           </div>
           <div class="field">
             <div class="field-label">Deliver To</div>
-            <div class="field-value address">${delivery.addressText}</div>
+            <div class="field-value address">${order.addressText}</div>
           </div>
           <div class="field">
-            <div class="field-label">Patient(s)</div>
-            <div class="field-value">${allPatientNames}</div>
+            <div class="field-label">Customer</div>
+            <div class="field-value">${order.customerName || "N/A"}</div>
           </div>
-          ${delivery.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${delivery.notes}</div></div>` : ""}
+          ${order.notes ? `<div class="field"><div class="field-label">Notes</div><div class="field-value">${order.notes}</div></div>` : ""}
           <div class="phone-box">
             <div class="field-label">PHONE</div>
-            ${allPatientPhones}
+            ${order.customerPhone || "N/A"}
           </div>
         </div>
       `;
@@ -877,128 +548,28 @@ export default function OrderManagement({
       <head>
         <title>Delivery Labels - ${selectedBatch?.name || "Batch"}</title>
         <style>
-          * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
-
-          /* 🔑 CRITICAL: define the PRINT PAGE, not element size */
+          * { box-sizing: border-box; margin: 0; padding: 0; }
           @media print {
-            @page {
-              size: 62mm 50mm;    /* WIDTH = tape, HEIGHT = feed */
-              margin: 0;
-            }
-
-            html, body {
-              width: 62mm;
-              margin: 0;
-              padding: 0;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
+            @page { size: 62mm 50mm; margin: 0; }
+            html, body { width: 62mm; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
-
-          body {
-            font-family: Arial, sans-serif;
-          }
-
-          /* ONE LABEL = ONE PAGE */
-          .label-container {
-            width: 62mm;
-            height: 50mm;
-            padding: 2mm;
-            overflow: hidden;
-
-            page-break-after: always;
-            page-break-inside: avoid;
-          }
-
-          .label-container:last-child {
-            page-break-after: auto;
-          }
-
-          .header-row {
-            border-bottom: 1px solid #000;
-            padding-bottom: 2px;
-            margin-bottom: 2px;
-            overflow: hidden;
-          }
-
-          .pharmacy-name {
-            font-size: 8px;
-            font-weight: bold;
-            float: left;
-          }
-
-          .date {
-            font-size: 7px;
-            color: #666;
-            float: right;
-          }
-
-          .delivery-id {
-            font-size: 10px;
-            font-weight: bold;
-            text-align: center;
-            background: #f0f0f0;
-            padding: 2px 3px;
-            border-radius: 2px;
-            margin-bottom: 2px;
-            clear: both;
-          }
-
-          .barcode-container {
-            text-align: center;
-            margin-bottom: 2mm;
-          }
-
-          /* ⚠️ Physical units prevent width overflow */
-          .barcode-container img {
-            width: 100%;
-            height: 8mm;
-            object-fit: contain;
-          }
-
-          .field {
-            margin-bottom: 2px;
-          }
-
-          .field-label {
-            font-size: 6px;
-            color: #666;
-            text-transform: uppercase;
-          }
-
-          .field-value {
-            font-size: 8px;
-            font-weight: 500;
-            line-height: 1.1;
-          }
-
-          .address {
-            font-size: 8px;
-            line-height: 1.1;
-          }
-
-          .phone-box {
-            font-size: 9px;
-            font-weight: bold;
-            background: #e8f0f8;
-            padding: 2px;
-            border-radius: 2px;
-            text-align: center;
-            border: 1px solid #ccc;
-            margin-top: 2px;
-          }
-
-          .phone-box .field-label {
-            font-size: 6px;
-            display: block;
-          }
+          body { font-family: Arial, sans-serif; }
+          .label-container { width: 62mm; height: 50mm; padding: 2mm; overflow: hidden; page-break-after: always; page-break-inside: avoid; }
+          .label-container:last-child { page-break-after: auto; }
+          .header-row { border-bottom: 1px solid #000; padding-bottom: 2px; margin-bottom: 2px; overflow: hidden; }
+          .pharmacy-name { font-size: 8px; font-weight: bold; float: left; }
+          .date { font-size: 7px; color: #666; float: right; }
+          .delivery-id { font-size: 10px; font-weight: bold; text-align: center; background: #f0f0f0; padding: 2px 3px; border-radius: 2px; margin-bottom: 2px; clear: both; }
+          .barcode-container { text-align: center; margin-bottom: 2mm; }
+          .barcode-container img { width: 100%; height: 8mm; object-fit: contain; }
+          .field { margin-bottom: 2px; }
+          .field-label { font-size: 6px; color: #666; text-transform: uppercase; }
+          .field-value { font-size: 8px; font-weight: 500; line-height: 1.1; }
+          .address { font-size: 8px; line-height: 1.1; }
+          .phone-box { font-size: 9px; font-weight: bold; background: #e8f0f8; padding: 2px; border-radius: 2px; text-align: center; border: 1px solid #ccc; margin-top: 2px; }
+          .phone-box .field-label { font-size: 6px; display: block; }
         </style>
       </head>
-
       <body>
         ${labelsHtml}
       </body>
@@ -1014,6 +585,11 @@ export default function OrderManagement({
         printWindow.print();
       };
     }
+  };
+
+  const getStatusStyle = (status: string) => {
+    const style = STATUS_COLORS[status] || STATUS_COLORS.IMPORTED;
+    return style;
   };
 
   return (
@@ -1055,16 +631,29 @@ export default function OrderManagement({
               Scan RX
             </Button>
           </div>
-          <Button
-            onClick={() => setShowAddManual(true)}
-            className="bg-blue-600 hover:bg-blue-700"
-            disabled={!activeBatchId}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Order
-          </Button>
         </div>
       </div>
+
+      {scanMessage && (
+        <div
+          className={`p-3 rounded-lg text-sm font-medium flex items-center gap-2 ${
+            scanMessage.type === "success"
+              ? "bg-green-500/20 text-green-400 border border-green-500/30"
+              : scanMessage.type === "warning"
+                ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                : "bg-red-500/20 text-red-400 border border-red-500/30"
+          }`}
+        >
+          {scanMessage.type === "success" ? (
+            <CheckCircle className="h-4 w-4" />
+          ) : scanMessage.type === "warning" ? (
+            <AlertTriangle className="h-4 w-4" />
+          ) : (
+            <AlertCircle className="h-4 w-4" />
+          )}
+          {scanMessage.text}
+        </div>
+      )}
 
       {(batches as any[]).length > 0 && (
         <Card className="bg-slate-800/50 border-slate-700">
@@ -1083,7 +672,7 @@ export default function OrderManagement({
                 className="flex-1 bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2"
               >
                 <option value="">
-                  -- Select a batch to view/edit orders --
+                  -- Select a batch to view orders --
                 </option>
                 {(batches as any[])
                   .filter(
@@ -1093,7 +682,7 @@ export default function OrderManagement({
                   )
                   .map((batch: any) => (
                     <option key={batch.id} value={batch.id}>
-                      {batch.name} ({batch.totalDeliveries || 0} deliveries) -{" "}
+                      {batch.name} ({batch.totalDeliveries || 0} orders) -{" "}
                       {new Date(batch.createdAt).toLocaleDateString()}
                     </option>
                   ))}
@@ -1134,7 +723,7 @@ export default function OrderManagement({
                         className="bg-green-600 hover:bg-green-700 text-white"
                       >
                         <Check className="h-4 w-4 mr-1" />
-                        Complete Order
+                        Complete Batch
                       </Button>
                       <Button
                         size="sm"
@@ -1149,7 +738,7 @@ export default function OrderManagement({
                         className="border-orange-500 text-orange-400 hover:bg-orange-500/10"
                       >
                         <Ban className="h-4 w-4 mr-1" />
-                        Cancel Order
+                        Cancel Batch
                       </Button>
                       <Button
                         size="sm"
@@ -1229,6 +818,45 @@ export default function OrderManagement({
             </div>
           </div>
 
+          {uploadResult && (
+            <div className="mt-4 p-4 bg-slate-700/50 rounded-lg border border-slate-600">
+              <h4 className="text-white font-medium mb-2">Upload Results</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div>
+                  <span className="text-slate-400">Total Rows:</span>{" "}
+                  <span className="text-white font-medium">{uploadResult.totalRows}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">New Orders:</span>{" "}
+                  <span className="text-green-400 font-medium">{uploadResult.newOrderCount}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">Updated:</span>{" "}
+                  <span className="text-blue-400 font-medium">{uploadResult.updatedOrderCount}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">Skipped:</span>{" "}
+                  <span className="text-yellow-400 font-medium">{uploadResult.skippedCount}</span>
+                </div>
+              </div>
+              {uploadResult.skippedReasons && uploadResult.skippedReasons.length > 0 && (
+                <div className="mt-2 text-xs text-yellow-400">
+                  {uploadResult.skippedReasons.map((reason, i) => (
+                    <p key={i}>• {reason}</p>
+                  ))}
+                </div>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setUploadResult(null)}
+                className="mt-2 text-slate-400 hover:text-white"
+              >
+                Dismiss
+              </Button>
+            </div>
+          )}
+
           <div className="mt-4 flex justify-center">
             <Button
               variant="outline"
@@ -1263,12 +891,12 @@ export default function OrderManagement({
         </CardContent>
       </Card>
 
-      {deliveries.length > 0 && (
+      {filteredOrders.length > 0 && (
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader className="border-b border-slate-700">
             <div className="flex items-center justify-between">
               <CardTitle className="text-white">
-                Uploaded Orders ({deliveries.length})
+                Delivery Orders ({orders.length})
               </CardTitle>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -1287,31 +915,28 @@ export default function OrderManagement({
                 <thead className="bg-slate-700/50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                      Priority
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                       Status
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                      Routing
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                      Delivery ID
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                      Prescriptions
+                      RX Number
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                       Customer
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                      Address
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                       Phone
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                      Notes
+                      Address
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Fill Date
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Uploads
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Last Seen
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-slate-400 uppercase">
                       Actions
@@ -1319,309 +944,94 @@ export default function OrderManagement({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700">
-                  {filteredDeliveries.map((delivery) => (
-                    <tr
-                      key={delivery.id}
-                      className={`hover:bg-slate-700/30 ${delivery.priority === "urgent" ? "bg-red-500/5" : ""}`}
-                    >
-                      <td className="px-4 py-3">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() =>
-                            setPriorityMutation.mutate({
-                              deliveryId: delivery.id,
-                              priority:
-                                delivery.priority === "urgent"
-                                  ? "normal"
-                                  : "urgent",
-                            })
-                          }
-                          disabled={setPriorityMutation.isPending}
-                          className={`h-8 px-2 ${
-                            delivery.priority === "urgent"
-                              ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
-                              : "bg-slate-600/50 text-slate-400 hover:bg-slate-600"
-                          }`}
-                          title={
-                            delivery.priority === "urgent"
-                              ? "Click to set Normal priority"
-                              : "Click to set Urgent priority"
-                          }
-                        >
-                          {delivery.priority === "urgent" ? (
-                            <span className="flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3" />
-                              Urgent
+                  {filteredOrders.map((order) => {
+                    const statusStyle = getStatusStyle(order.deliveryStatus);
+                    return (
+                      <tr
+                        key={order.id}
+                        className={`hover:bg-slate-700/30 ${order.priority === "urgent" ? "bg-red-500/5" : ""}`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {statusStyle.icon}
+                            <span
+                              className={`text-xs px-2 py-1 rounded ${statusStyle.bg} ${statusStyle.text}`}
+                            >
+                              {order.deliveryStatus}
                             </span>
-                          ) : (
-                            "Normal"
-                          )}
-                        </Button>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {delivery.status === "complete" ? (
-                            <CheckCircle className="h-4 w-4 text-green-400" />
-                          ) : delivery.status === "cancelled" ? (
-                            <Ban className="h-4 w-4 text-red-400" />
-                          ) : delivery.lat && delivery.lng ? (
-                            <CheckCircle className="h-4 w-4 text-blue-400" />
-                          ) : (
-                            <AlertCircle className="h-4 w-4 text-yellow-400" />
-                          )}
-                          <span
-                            className={`text-xs px-2 py-1 rounded ${
-                              delivery.status === "complete"
-                                ? "bg-green-500/20 text-green-400"
-                                : delivery.status === "cancelled"
-                                  ? "bg-red-500/20 text-red-400"
-                                  : delivery.status === "active"
-                                    ? "bg-blue-500/20 text-blue-400"
-                                    : delivery.status === "geocoded"
-                                      ? "bg-emerald-500/20 text-emerald-400"
-                                      : "bg-yellow-500/20 text-yellow-400"
-                            }`}
-                          >
-                            {delivery.status}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        {delivery.routingEligible ? (
-                          <span className="text-xs px-2 py-1 rounded bg-green-500/20 text-green-400">
-                            Eligible
-                          </span>
-                        ) : (
-                          <span className="text-slate-500 text-xs">
-                            Not eligible
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-white font-mono">
-                        <span className="text-blue-400 font-medium">
-                          {delivery.deliveryIdentifier || `D-${delivery.id}`}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-white">
-                        {delivery.prescriptions &&
-                        delivery.prescriptions.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {delivery.prescriptions.map((rx) => (
-                              <span
-                                key={rx.id}
-                                className="inline-flex items-center px-2 py-0.5 bg-slate-700 rounded text-xs font-mono"
-                                title={rx.patientName || undefined}
-                              >
-                                {rx.rxNumber}
-                              </span>
-                            ))}
                           </div>
-                        ) : (
-                          <span className="text-slate-500">
-                            {delivery.rxNumber || "No prescriptions"}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono">
+                          <span className="text-blue-400 font-medium">
+                            {order.rxNumber}
                           </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-white">
-                        {editingDelivery?.id === delivery.id ? (
-                          <Input
-                            value={editingDelivery.customerName || ""}
-                            onChange={(e) =>
-                              setEditingDelivery({
-                                ...editingDelivery,
-                                customerName: e.target.value,
-                              })
-                            }
-                            className="h-8 bg-slate-700 border-slate-600 text-white"
-                          />
-                        ) : (
-                          delivery.customerName || "-"
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-300 max-w-xs truncate">
-                        {editingDelivery?.id === delivery.id ? (
-                          <Input
-                            value={editingDelivery.addressText || ""}
-                            onChange={(e) =>
-                              setEditingDelivery({
-                                ...editingDelivery,
-                                addressText: e.target.value,
-                              })
-                            }
-                            className="h-8 bg-slate-700 border-slate-600 text-white"
-                          />
-                        ) : (
-                          delivery.addressText
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-300">
-                        {editingDelivery?.id === delivery.id ? (
-                          <Input
-                            value={editingDelivery.customerPhone || ""}
-                            onChange={(e) =>
-                              setEditingDelivery({
-                                ...editingDelivery,
-                                customerPhone: e.target.value,
-                              })
-                            }
-                            className="h-8 bg-slate-700 border-slate-600 text-white"
-                          />
-                        ) : (
-                          delivery.customerPhone || "-"
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-400 max-w-xs truncate">
-                        {editingDelivery?.id === delivery.id ? (
-                          <Input
-                            value={editingDelivery.notes || ""}
-                            onChange={(e) =>
-                              setEditingDelivery({
-                                ...editingDelivery,
-                                notes: e.target.value,
-                              })
-                            }
-                            className="h-8 bg-slate-700 border-slate-600 text-white"
-                          />
-                        ) : (
-                          delivery.notes || "-"
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {editingDelivery?.id === delivery.id ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={handleSaveEdit}
-                                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-green-500/10"
-                              >
-                                <Save className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setEditingDelivery(null)}
-                                className="h-8 w-8 p-0 text-slate-400 hover:text-slate-300 hover:bg-slate-700"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </>
-                          ) : delivery.status === "complete" ||
-                            delivery.status === "cancelled" ? (
-                            <span className="text-xs text-slate-500">
-                              {delivery.status === "complete"
-                                ? "Completed"
-                                : "Cancelled"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-white">
+                          {order.customerName || "-"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-300">
+                          {order.customerPhone || "-"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-300 max-w-xs truncate">
+                          {order.addressText}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-400">
+                          {order.fillDate
+                            ? new Date(order.fillDate).toLocaleDateString()
+                            : "-"}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {order.uploadCount > 1 ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 text-xs font-medium">
+                              <Eye className="h-3 w-3" />
+                              Seen {order.uploadCount}x
                             </span>
                           ) : (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  if (confirm("Mark this order as complete?")) {
-                                    setStatusMutation.mutate({
-                                      deliveryId: delivery.id,
-                                      status: "complete",
-                                    });
-                                  }
-                                }}
-                                className="h-8 w-8 p-0 text-green-400 hover:text-green-300 hover:bg-green-500/10"
-                                title="Mark as Complete"
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setEditingDelivery(delivery)}
-                                className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
-                                title="Edit"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              {(delivery.prescriptions?.length || 0) > 1 && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setSplitDelivery(delivery);
-                                    setShowSplitDialog(true);
-                                  }}
-                                  className="h-8 w-8 p-0 text-purple-400 hover:text-purple-300 hover:bg-purple-500/10"
-                                  title="Split Delivery"
-                                >
-                                  <Split className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  setMergeTargetDelivery(delivery);
-                                  setShowMergeDialog(true);
-                                }}
-                                className="h-8 w-8 p-0 text-teal-400 hover:text-teal-300 hover:bg-teal-500/10"
-                                title="Merge with other deliveries"
-                              >
-                                <Merge className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  const batch = (batches as any[]).find(
-                                    (b: any) => b.id === delivery.batchId,
-                                  );
-                                  const pharmacyName =
-                                    batch?.name?.split(" - ")[0] ||
-                                    "RX Delivery Pharmacy";
-                                  printDeliveryLabel(delivery, pharmacyName);
-                                }}
-                                className="h-8 w-8 p-0 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
-                                title="Print Label"
-                              >
-                                <Printer className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  if (confirm("Cancel this order?")) {
-                                    setStatusMutation.mutate({
-                                      deliveryId: delivery.id,
-                                      status: "cancelled",
-                                    });
-                                  }
-                                }}
-                                className="h-8 w-8 p-0 text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
-                                title="Cancel Order"
-                              >
-                                <Ban className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  if (
-                                    confirm("Delete this order permanently?")
-                                  ) {
-                                    deleteDeliveryMutation.mutate(delivery.id);
-                                  }
-                                }}
-                                className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
+                            <span className="text-slate-500 text-xs">1x</span>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-400">
+                          {order.lastSeenAt
+                            ? new Date(order.lastSeenAt).toLocaleString()
+                            : "-"}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {order.deliveryStatus === "IMPORTED" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => markScanMutation.mutate(order.id)}
+                                disabled={markScanMutation.isPending}
+                                className="h-8 px-2 text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                                title="Mark Routing Eligible"
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                <span className="text-xs">Route Ready</span>
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                const batch = (batches as any[]).find(
+                                  (b: any) => b.id === order.batchId,
+                                );
+                                const pharmacyName =
+                                  batch?.name?.split(" - ")[0] ||
+                                  "RX Delivery Pharmacy";
+                                printDeliveryLabel(order, pharmacyName);
+                              }}
+                              className="h-8 w-8 p-0 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+                              title="Print Label"
+                            >
+                              <Printer className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1629,135 +1039,14 @@ export default function OrderManagement({
         </Card>
       )}
 
-      <Dialog open={showAddManual} onOpenChange={setShowAddManual}>
-        <DialogContent className="bg-slate-800 border-slate-700">
-          <DialogHeader>
-            <DialogTitle className="text-white">Add New Order</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label className="text-slate-300">Delivery Address *</Label>
-              <Input
-                value={newDelivery.addressText}
-                onChange={(e) =>
-                  setNewDelivery({
-                    ...newDelivery,
-                    addressText: e.target.value,
-                  })
-                }
-                placeholder="123 Main St, City, State ZIP"
-                className="bg-slate-700 border-slate-600 text-white"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className="text-slate-300">Customer Name</Label>
-                <Input
-                  value={newDelivery.customerName}
-                  onChange={(e) =>
-                    setNewDelivery({
-                      ...newDelivery,
-                      customerName: e.target.value,
-                    })
-                  }
-                  className="bg-slate-700 border-slate-600 text-white"
-                />
-              </div>
-              <div>
-                <Label className="text-slate-300">
-                  RX Number <span className="text-red-400">*</span>
-                </Label>
-                <Input
-                  value={newDelivery.rxNumber}
-                  onChange={(e) =>
-                    setNewDelivery({ ...newDelivery, rxNumber: e.target.value })
-                  }
-                  placeholder="Required"
-                  className="bg-slate-700 border-slate-600 text-white"
-                />
-              </div>
-            </div>
-            <div>
-              <Label className="text-slate-300">Phone Number</Label>
-              <Input
-                value={newDelivery.customerPhone}
-                onChange={(e) =>
-                  setNewDelivery({
-                    ...newDelivery,
-                    customerPhone: e.target.value,
-                  })
-                }
-                className="bg-slate-700 border-slate-600 text-white"
-              />
-            </div>
-            <div>
-              <Label className="text-slate-300">Notes</Label>
-              <Input
-                value={newDelivery.notes}
-                onChange={(e) =>
-                  setNewDelivery({ ...newDelivery, notes: e.target.value })
-                }
-                className="bg-slate-700 border-slate-600 text-white"
-              />
-            </div>
-            <Button
-              onClick={() => addDeliveryMutation.mutate(newDelivery)}
-              className="w-full bg-blue-600 hover:bg-blue-700"
-              disabled={
-                !newDelivery.addressText ||
-                !newDelivery.rxNumber ||
-                addDeliveryMutation.isPending
-              }
-            >
-              {addDeliveryMutation.isPending ? "Adding..." : "Add Order"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog
-        open={!!rxNotFoundDialog}
-        onOpenChange={(open) => !open && setRxNotFoundDialog(null)}
-      >
-        <AlertDialogContent className="bg-slate-800 border-slate-700">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-white">
-              RX NUMBER NOT FOUND
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-slate-400">
-              {rxNotFoundDialog && (
-                <>
-                  No order in this batch matches RX number:{" "}
-                  <span className="font-mono font-semibold text-white">
-                    {rxNotFoundDialog.rxNumber}
-                  </span>
-                  . Add this prescription to the order?
-                </>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="bg-slate-700 border-slate-600 text-white hover:bg-slate-600">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (rxNotFoundDialog) {
-                  setNewDelivery((prev) => ({
-                    ...prev,
-                    rxNumber: rxNotFoundDialog.rxNumber,
-                  }));
-                  setShowAddManual(true);
-                  setRxNotFoundDialog(null);
-                }
-              }}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              Add to order
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {orders.length === 0 && activeBatchId && (
+        <Card className="bg-slate-800/50 border-slate-700">
+          <CardContent className="p-8 text-center">
+            <p className="text-slate-400">No delivery orders in this batch yet.</p>
+            <p className="text-slate-500 text-sm mt-1">Upload a CSV/Excel file to create orders.</p>
+          </CardContent>
+        </Card>
+      )}
 
       <AlertDialog
         open={!!confirmAction}
@@ -1767,17 +1056,13 @@ export default function OrderManagement({
           <AlertDialogHeader>
             <AlertDialogTitle className="text-white">
               {confirmAction?.type === "complete"
-                ? "Complete Order Batch?"
-                : confirmAction?.type === "cancel"
-                  ? "Cancel Order Batch?"
-                  : "Delete Delivery?"}
+                ? "Complete Batch?"
+                : "Cancel Batch?"}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-slate-400">
               {confirmAction?.type === "complete"
-                ? "This will mark the entire order batch as complete. All pending deliveries in this batch will be marked complete."
-                : confirmAction?.type === "cancel"
-                  ? "This will cancel the entire order batch. All pending deliveries in this batch will be cancelled."
-                  : "This will permanently delete this delivery. This action cannot be undone."}
+                ? "This will mark the entire batch as complete."
+                : "This will cancel the entire batch."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1802,11 +1087,6 @@ export default function OrderManagement({
                     batchId: confirmAction.batchId,
                     status: "cancelled",
                   });
-                } else if (
-                  confirmAction?.type === "delete" &&
-                  confirmAction.deliveryId
-                ) {
-                  deleteDeliveryMutation.mutate(confirmAction.deliveryId);
                 }
                 setConfirmAction(null);
               }}
@@ -1818,260 +1098,11 @@ export default function OrderManagement({
             >
               {confirmAction?.type === "complete"
                 ? "Complete Batch"
-                : confirmAction?.type === "cancel"
-                  ? "Cancel Batch"
-                  : "Delete"}
+                : "Cancel Batch"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <Dialog
-        open={showSplitDialog}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowSplitDialog(false);
-            setSplitDelivery(null);
-            setSelectedPrescriptionsForSplit([]);
-          }
-        }}
-      >
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-white flex items-center gap-2">
-              <Split className="h-5 w-5 text-blue-400" />
-              Split Delivery
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-slate-400 text-sm">
-              Select prescriptions to move to a new delivery. At least one
-              prescription must remain in the original delivery.
-            </p>
-
-            {splitDelivery && (
-              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-                <p className="text-white font-medium text-sm mb-1">
-                  {splitDelivery.deliveryIdentifier || `DEL${splitDelivery.id}`}
-                </p>
-                <p className="text-slate-400 text-xs">
-                  {splitDelivery.addressText}
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label className="text-slate-300">
-                Select prescriptions to split:
-              </Label>
-              {splitDelivery?.prescriptions?.map((rx) => (
-                <label
-                  key={rx.id}
-                  className="flex items-center gap-3 p-3 bg-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedPrescriptionsForSplit.includes(rx.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedPrescriptionsForSplit([
-                          ...selectedPrescriptionsForSplit,
-                          rx.id,
-                        ]);
-                      } else {
-                        setSelectedPrescriptionsForSplit(
-                          selectedPrescriptionsForSplit.filter(
-                            (id) => id !== rx.id,
-                          ),
-                        );
-                      }
-                    }}
-                    className="w-4 h-4 rounded border-slate-500"
-                  />
-                  <div className="flex-1">
-                    <p className="text-white font-mono text-sm">
-                      {rx.rxNumber}
-                    </p>
-                    <p className="text-slate-400 text-xs">
-                      {rx.patientName || "No patient name"}
-                    </p>
-                  </div>
-                </label>
-              ))}
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowSplitDialog(false);
-                  setSplitDelivery(null);
-                  setSelectedPrescriptionsForSplit([]);
-                }}
-                className="border-slate-600 text-slate-300"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  if (
-                    splitDelivery &&
-                    selectedPrescriptionsForSplit.length > 0
-                  ) {
-                    splitDeliveryMutation.mutate({
-                      deliveryId: splitDelivery.id,
-                      prescriptionIds: selectedPrescriptionsForSplit,
-                    });
-                  }
-                }}
-                disabled={
-                  selectedPrescriptionsForSplit.length === 0 ||
-                  (splitDelivery?.prescriptions?.length || 0) <=
-                    selectedPrescriptionsForSplit.length ||
-                  splitDeliveryMutation.isPending
-                }
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {splitDeliveryMutation.isPending
-                  ? "Splitting..."
-                  : "Split Delivery"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={showMergeDialog}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowMergeDialog(false);
-            setMergeTargetDelivery(null);
-            setSelectedDeliveriesForMerge([]);
-          }
-        }}
-      >
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-lg max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-white flex items-center gap-2">
-              <Merge className="h-5 w-5 text-green-400" />
-              Merge Deliveries
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-slate-400 text-sm">
-              Select deliveries to merge into the target delivery. Prescriptions
-              from selected deliveries will be combined.
-            </p>
-
-            {mergeTargetDelivery && (
-              <div className="bg-green-900/30 rounded-lg p-3 border border-green-500/30">
-                <p className="text-green-400 text-xs mb-1">Target Delivery</p>
-                <p className="text-white font-medium text-sm">
-                  {mergeTargetDelivery.deliveryIdentifier ||
-                    `DEL${mergeTargetDelivery.id}`}
-                </p>
-                <p className="text-slate-400 text-xs">
-                  {mergeTargetDelivery.addressText}
-                </p>
-                <p className="text-slate-500 text-xs mt-1">
-                  {mergeTargetDelivery.prescriptions?.length || 0}{" "}
-                  prescription(s)
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label className="text-slate-300">
-                Select deliveries to merge:
-              </Label>
-              {deliveries
-                .filter(
-                  (d) =>
-                    d.id !== mergeTargetDelivery?.id &&
-                    d.status !== "complete" &&
-                    d.status !== "cancelled",
-                )
-                .map((delivery) => (
-                  <label
-                    key={delivery.id}
-                    className="flex items-center gap-3 p-3 bg-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-700"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedDeliveriesForMerge.includes(delivery.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedDeliveriesForMerge([
-                            ...selectedDeliveriesForMerge,
-                            delivery.id,
-                          ]);
-                        } else {
-                          setSelectedDeliveriesForMerge(
-                            selectedDeliveriesForMerge.filter(
-                              (id) => id !== delivery.id,
-                            ),
-                          );
-                        }
-                      }}
-                      className="w-4 h-4 rounded border-slate-500"
-                    />
-                    <div className="flex-1">
-                      <p className="text-white font-mono text-sm">
-                        {delivery.deliveryIdentifier || `DEL${delivery.id}`}
-                      </p>
-                      <p className="text-slate-400 text-xs truncate">
-                        {delivery.addressText}
-                      </p>
-                      <p className="text-slate-500 text-xs">
-                        {delivery.prescriptions?.length || 0} prescription(s):{" "}
-                        {delivery.prescriptions
-                          ?.map((p) => p.rxNumber)
-                          .join(", ") || "N/A"}
-                      </p>
-                    </div>
-                  </label>
-                ))}
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowMergeDialog(false);
-                  setMergeTargetDelivery(null);
-                  setSelectedDeliveriesForMerge([]);
-                }}
-                className="border-slate-600 text-slate-300"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  if (
-                    mergeTargetDelivery &&
-                    selectedDeliveriesForMerge.length > 0
-                  ) {
-                    mergeDeliveriesMutation.mutate({
-                      targetDeliveryId: mergeTargetDelivery.id,
-                      sourceDeliveryIds: selectedDeliveriesForMerge,
-                    });
-                  }
-                }}
-                disabled={
-                  selectedDeliveriesForMerge.length === 0 ||
-                  mergeDeliveriesMutation.isPending
-                }
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {mergeDeliveriesMutation.isPending
-                  ? "Merging..."
-                  : "Merge Deliveries"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
