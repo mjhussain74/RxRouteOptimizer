@@ -1322,7 +1322,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }> {
+  async upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number | null, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }> {
     const existing = await this.findDeliveryOrderByRx(data.pharmacyId, data.rxNumber);
     
     if (existing) {
@@ -1343,17 +1343,19 @@ export class DatabaseStorage implements IStorage {
           customerPhone: data.customerPhone || existing.customerPhone,
           notes: data.notes || existing.notes,
           fillDate: data.fillDate || existing.fillDate,
-          batchId: batchId,
+          batchId: batchId || existing.batchId,
         })
         .where(eq(deliveryOrders.id, existing.id))
         .returning();
       
-      await db.insert(deliveryOrderUploads).values({
-        deliveryOrderId: existing.id,
-        batchId,
-        fileName: fileName || null,
-        seenAt: new Date(),
-      });
+      if (batchId) {
+        await db.insert(deliveryOrderUploads).values({
+          deliveryOrderId: existing.id,
+          batchId,
+          fileName: fileName || null,
+          seenAt: new Date(),
+        });
+      }
       
       return { order: updated[0], isNew: false };
     } else {
@@ -1361,18 +1363,20 @@ export class DatabaseStorage implements IStorage {
         .insert(deliveryOrders)
         .values({
           ...data,
-          batchId,
+          batchId: batchId || null,
           lastSeenAt: new Date(),
           uploadCount: 1,
         })
         .returning();
       
-      await db.insert(deliveryOrderUploads).values({
-        deliveryOrderId: created[0].id,
-        batchId,
-        fileName: fileName || null,
-        seenAt: new Date(),
-      });
+      if (batchId) {
+        await db.insert(deliveryOrderUploads).values({
+          deliveryOrderId: created[0].id,
+          batchId,
+          fileName: fileName || null,
+          seenAt: new Date(),
+        });
+      }
       
       return { order: created[0], isNew: true };
     }

@@ -13,6 +13,7 @@ import {
   Download,
   Printer,
   Eye,
+  Plus,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -114,6 +115,12 @@ export default function OrderManagement({
     type: "complete" | "cancel";
     batchId?: number;
   } | null>(null);
+  const [showAddOrderDialog, setShowAddOrderDialog] = useState(false);
+  const [newOrderRx, setNewOrderRx] = useState("");
+  const [newOrderAddress, setNewOrderAddress] = useState("");
+  const [newOrderCustomerName, setNewOrderCustomerName] = useState("");
+  const [newOrderCustomerPhone, setNewOrderCustomerPhone] = useState("");
+  const [newOrderNotes, setNewOrderNotes] = useState("");
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -212,6 +219,51 @@ export default function OrderManagement({
         setScanMessage({ text: data.message || "Scanned successfully - marked ROUTE_ELIGIBLE", type: "success" });
       }
       setTimeout(() => setScanMessage(null), 4000);
+    },
+    onError: (error: Error) => {
+      const rxMatch = error.message.match(/RX: (.+)/);
+      const scannedRx = rxMatch ? rxMatch[1] : "";
+      setNewOrderRx(scannedRx);
+      setShowAddOrderDialog(true);
+      setScanMessage({ text: error.message, type: "error" });
+      setTimeout(() => setScanMessage(null), 6000);
+    },
+  });
+
+  const resetNewOrderForm = () => {
+    setNewOrderRx("");
+    setNewOrderAddress("");
+    setNewOrderCustomerName("");
+    setNewOrderCustomerPhone("");
+    setNewOrderNotes("");
+  };
+
+  const createOrderMutation = useMutation({
+    mutationFn: async (data: { rxNumber: string; addressText: string; customerName: string; customerPhone: string; notes: string }) => {
+      const response = await fetch("/api/delivery-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: "Failed to create order" }));
+        throw new Error(err.error || "Failed to create order");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (activeBatchId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      setShowAddOrderDialog(false);
+      resetNewOrderForm();
+      const msg = data.geocodeWarning
+        ? `Order created for RX ${data.rxNumber} - ${data.geocodeWarning}`
+        : `Order created for RX ${data.rxNumber} - marked as ROUTE_ELIGIBLE`;
+      setScanMessage({ text: msg, type: data.geocodeWarning ? "warning" : "success" });
+      setTimeout(() => setScanMessage(null), 6000);
     },
     onError: (error: Error) => {
       setScanMessage({ text: error.message, type: "error" });
@@ -1046,6 +1098,41 @@ export default function OrderManagement({
             <p className="text-slate-500 text-sm mt-1">Upload a CSV/Excel file to create orders.</p>
           </CardContent>
         </Card>
+      )}
+
+      {showAddOrderDialog && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAddOrderDialog(false)}>
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-1">Add Missing Prescription</h3>
+            <p className="text-slate-400 text-sm mb-4">This RX was not found in the system. Create a new order for it.</p>
+            <div className="space-y-3">
+              <div>
+                <Label className="text-slate-300">RX Number</Label>
+                <Input value={newOrderRx} onChange={e => setNewOrderRx(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Enter RX number" />
+              </div>
+              <div>
+                <Label className="text-slate-300">Address</Label>
+                <Input value={newOrderAddress} onChange={e => setNewOrderAddress(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Full delivery address" />
+              </div>
+              <div>
+                <Label className="text-slate-300">Customer Name</Label>
+                <Input value={newOrderCustomerName} onChange={e => setNewOrderCustomerName(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Customer name" />
+              </div>
+              <div>
+                <Label className="text-slate-300">Phone</Label>
+                <Input value={newOrderCustomerPhone} onChange={e => setNewOrderCustomerPhone(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Phone number" />
+              </div>
+              <div>
+                <Label className="text-slate-300">Notes</Label>
+                <Input value={newOrderNotes} onChange={e => setNewOrderNotes(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Delivery notes (optional)" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4 justify-end">
+              <Button variant="outline" onClick={() => { setShowAddOrderDialog(false); resetNewOrderForm(); }} className="border-slate-600 text-slate-300 hover:bg-slate-700">Cancel</Button>
+              <Button onClick={() => { if (!newOrderRx.trim() || !newOrderAddress.trim()) return; createOrderMutation.mutate({ rxNumber: newOrderRx.trim(), addressText: newOrderAddress.trim(), customerName: newOrderCustomerName.trim(), customerPhone: newOrderCustomerPhone.trim(), notes: newOrderNotes.trim() }); }} disabled={!newOrderRx.trim() || !newOrderAddress.trim() || createOrderMutation.isPending} className="bg-green-600 hover:bg-green-700"><Plus className="h-4 w-4 mr-1" />Create Order</Button>
+            </div>
+          </div>
+        </div>
       )}
 
       <AlertDialog

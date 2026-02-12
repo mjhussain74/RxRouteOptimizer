@@ -28,6 +28,7 @@ interface DeliveryOrder {
   deliveryStatus: string;
   routeId: number | null;
   addressText: string;
+  normalizedAddressHash: string | null;
   lat: number | null;
   lng: number | null;
   customerName: string | null;
@@ -86,15 +87,45 @@ export default function RouteOptimizer({
     },
   });
 
-  const filteredDeliveries = useMemo(() => {
-    if (!searchQuery.trim()) return eligibleOrders;
+  // Group orders by address for visual consolidation
+  interface AddressGroup {
+    address: string;
+    customerName: string | null;
+    orders: DeliveryOrder[];
+    hasUrgent: boolean;
+    totalUploads: number;
+  }
+
+  const addressGroups = useMemo(() => {
+    const groups = new Map<string, AddressGroup>();
+    for (const order of eligibleOrders) {
+      const key = order.normalizedAddressHash || order.addressText?.toLowerCase().trim() || `order-${order.id}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          address: order.addressText,
+          customerName: order.customerName,
+          orders: [],
+          hasUrgent: false,
+          totalUploads: 0,
+        });
+      }
+      const group = groups.get(key)!;
+      group.orders.push(order);
+      if (order.priority === "urgent") group.hasUrgent = true;
+      group.totalUploads += order.uploadCount;
+    }
+    return Array.from(groups.values());
+  }, [eligibleOrders]);
+
+  const filteredGroups = useMemo(() => {
+    if (!searchQuery.trim()) return addressGroups;
     const query = searchQuery.toLowerCase();
-    return eligibleOrders.filter(d => (
-      d.addressText?.toLowerCase().includes(query) ||
-      d.customerName?.toLowerCase().includes(query) ||
-      d.rxNumber?.toLowerCase().includes(query)
+    return addressGroups.filter(g => (
+      g.address?.toLowerCase().includes(query) ||
+      g.customerName?.toLowerCase().includes(query) ||
+      g.orders.some(o => o.rxNumber?.toLowerCase().includes(query))
     ));
-  }, [eligibleOrders, searchQuery]);
+  }, [addressGroups, searchQuery]);
 
   const urgentCount = useMemo(() => {
     return Array.from(selectedDeliveryIds).filter(id => {
@@ -270,8 +301,28 @@ export default function RouteOptimizer({
 
   const selectAllVisible = () => {
     const newSet = new Set(selectedDeliveryIds);
-    filteredDeliveries.forEach(d => newSet.add(d.id));
+    filteredGroups.forEach(g => g.orders.forEach(o => newSet.add(o.id)));
     setSelectedDeliveryIds(newSet);
+  };
+
+  const toggleGroupSelection = (group: AddressGroup) => {
+    const groupIds = group.orders.map(o => o.id);
+    const allSelected = groupIds.every(id => selectedDeliveryIds.has(id));
+    const newSet = new Set(selectedDeliveryIds);
+    if (allSelected) {
+      groupIds.forEach(id => newSet.delete(id));
+    } else {
+      groupIds.forEach(id => newSet.add(id));
+    }
+    setSelectedDeliveryIds(newSet);
+  };
+
+  const isGroupSelected = (group: AddressGroup) => {
+    return group.orders.every(o => selectedDeliveryIds.has(o.id));
+  };
+
+  const isGroupPartiallySelected = (group: AddressGroup) => {
+    return group.orders.some(o => selectedDeliveryIds.has(o.id)) && !isGroupSelected(group);
   };
 
   const isOrderScanned = (order: DeliveryOrder) => {
@@ -576,14 +627,14 @@ export default function RouteOptimizer({
             <CardTitle className="text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-blue-400" />
-                Route-Eligible Orders ({eligibleOrders.length})
+                Route-Eligible Orders ({eligibleOrders.length} RXs, {addressGroups.length} stops)
               </div>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={selectAllVisible}
-                  disabled={filteredDeliveries.length === 0}
+                  disabled={filteredGroups.length === 0}
                   className="border-slate-600 text-slate-300 hover:bg-slate-700"
                 >
                   Select All
@@ -619,7 +670,7 @@ export default function RouteOptimizer({
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
               </div>
-            ) : filteredDeliveries.length === 0 ? (
+            ) : filteredGroups.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 {eligibleOrders.length === 0 
                   ? "No route-eligible orders. Scan barcodes in Orders tab to make them eligible."
@@ -627,27 +678,36 @@ export default function RouteOptimizer({
               </div>
             ) : (
               <div className="max-h-[500px] overflow-y-auto space-y-2">
-                {filteredDeliveries.map((order) => {
-                  const isSelected = selectedDeliveryIds.has(order.id);
+                {filteredGroups.map((group) => {
+                  const selected = isGroupSelected(group);
+                  const partial = isGroupPartiallySelected(group);
+                  const groupKey = group.orders[0]?.normalizedAddressHash || group.address || `group-${group.orders[0]?.id}`;
                   return (
                     <div
-                      key={order.id}
-                      onClick={() => toggleDeliverySelection(order.id)}
+                      key={groupKey}
+                      onClick={() => toggleGroupSelection(group)}
                       className={`flex items-start gap-3 rounded-lg p-3 transition-colors cursor-pointer ${
-                        isSelected
+                        selected
                           ? "bg-blue-500/20 border border-blue-500/50"
-                          : "bg-slate-900/30 hover:bg-slate-900/50 border border-transparent"
-                      } ${order.priority === "urgent" ? "border-l-4 border-l-red-500" : ""}`}
+                          : partial
+                            ? "bg-blue-500/10 border border-blue-500/30"
+                            : "bg-slate-900/30 hover:bg-slate-900/50 border border-transparent"
+                      } ${group.hasUrgent ? "border-l-4 border-l-red-500" : ""}`}
                     >
                       <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleDeliverySelection(order.id)}
+                        checked={selected}
+                        onCheckedChange={() => toggleGroupSelection(group)}
                         className="mt-1"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-white text-sm truncate">{order.addressText}</p>
-                          {order.priority === "urgent" && (
+                          <p className="text-white text-sm truncate">{group.address}</p>
+                          {group.orders.length > 1 && (
+                            <span className="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded font-medium">
+                              {group.orders.length} RXs
+                            </span>
+                          )}
+                          {group.hasUrgent && (
                             <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded flex items-center gap-1">
                               <AlertTriangle className="h-3 w-3" />
                               Urgent
@@ -655,17 +715,16 @@ export default function RouteOptimizer({
                           )}
                         </div>
                         <div className="flex flex-wrap gap-2 mt-1">
-                          {order.customerName && (
-                            <p className="text-slate-500 text-xs">{order.customerName}</p>
+                          {group.customerName && (
+                            <p className="text-slate-500 text-xs">{group.customerName}</p>
                           )}
-                          <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
-                            RX: {order.rxNumber}
-                          </span>
-                          {order.uploadCount > 1 && (
-                            <span className="text-xs text-amber-400 px-1.5 py-0.5 rounded bg-amber-500/10">
-                              Seen {order.uploadCount}x
-                            </span>
-                          )}
+                          <div className="flex flex-wrap gap-1">
+                            {group.orders.map(o => (
+                              <span key={o.id} className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
+                                {o.rxNumber}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>

@@ -1125,6 +1125,74 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/delivery-orders", requireStaff, async (req, res) => {
+    try {
+      const session = req.session as any;
+      const pharmacyId = session?.user?.pharmacyId;
+      
+      if (!pharmacyId) {
+        return res.status(400).json({ error: "No pharmacy associated with your account" });
+      }
+      
+      const { rxNumber, addressText, customerName, customerPhone, notes } = req.body;
+      if (!rxNumber || !addressText) {
+        return res.status(400).json({ error: "RX number and address are required" });
+      }
+      
+      // Check if RX already exists
+      const existing = await storage.findDeliveryOrderByRx(pharmacyId, rxNumber);
+      if (existing) {
+        return res.status(409).json({ error: `RX ${rxNumber} already exists`, order: existing });
+      }
+      
+      // Geocode the address
+      let geocoded: any = null;
+      try {
+        geocoded = await geocodeAddress(addressText);
+      } catch (e) {
+        console.error("Geocoding failed for manual order:", e);
+      }
+      const hasGeocode = geocoded && geocoded.lat && geocoded.lng;
+      
+      // Try to normalize the address
+      let normalizedData: any = null;
+      const parsed = parseAddressComponents(addressText, 'MI');
+      if (parsed) {
+        normalizedData = normalizeAddress(parsed.street, parsed.city, parsed.state, parsed.zip);
+      }
+      
+      // If geocoding succeeded, set ROUTE_ELIGIBLE; otherwise IMPORTED (needs geocoding later)
+      const { order } = await storage.upsertDeliveryOrder({
+        rxNumber,
+        pharmacyId,
+        fillDate: null,
+        deliveryStatus: hasGeocode ? 'ROUTE_ELIGIBLE' : 'IMPORTED',
+        addressText: normalizedData?.fullAddress || addressText,
+        streetAddress: normalizedData?.streetAddress || null,
+        city: normalizedData?.city || null,
+        state: normalizedData?.state || null,
+        zipCode: normalizedData?.zipCode || null,
+        normalizedAddressHash: normalizedData?.normalizedHash || null,
+        lat: geocoded?.lat || null,
+        lng: geocoded?.lng || null,
+        customerName: customerName || null,
+        customerPhone: customerPhone || null,
+        notes: notes || null,
+        priority: "normal",
+        lastSeenAt: new Date(),
+        uploadCount: 1,
+      }, null, 'manual-entry');
+      
+      res.json({
+        ...order,
+        geocodeWarning: !hasGeocode ? "Address could not be geocoded. Order saved but needs address correction before routing." : undefined
+      });
+    } catch (error) {
+      console.error("Error creating delivery order:", error);
+      res.status(500).json({ error: "Failed to create delivery order" });
+    }
+  });
+
   app.get("/api/delivery-orders/by-batch/:batchId", requireStaff, async (req, res) => {
     try {
       const batchId = parseInt(req.params.batchId);
@@ -1590,29 +1658,50 @@ export async function registerRoutes(
           return res.status(400).json({ error: "No geocoded route-eligible orders found" });
         }
         
-        // Create delivery records from delivery_orders for the route
+        // Group orders by normalized address for consolidation
+        const addressGroups = new Map<string, any[]>();
         for (const order of validOrders) {
+          const key = order.normalizedAddressHash || order.addressText.toLowerCase().trim();
+          if (!addressGroups.has(key)) {
+            addressGroups.set(key, []);
+          }
+          addressGroups.get(key)!.push(order);
+        }
+        
+        // Create one delivery per unique address (consolidating multiple RXs)
+        for (const [, groupOrders] of addressGroups) {
+          const firstOrder = groupOrders[0];
+          const allRxNumbers = groupOrders.map(o => o.rxNumber).join(', ');
+          const allNotes = groupOrders
+            .map(o => o.notes)
+            .filter(Boolean)
+            .join('; ');
+          const hasUrgent = groupOrders.some(o => o.priority === 'urgent');
+          
           const deliveryIdentifier = await storage.generateUniqueDeliveryIdentifier();
           const delivery = await storage.createDelivery({
-            batchId: order.batchId,
+            batchId: firstOrder.batchId,
             deliveryIdentifier,
-            addressText: order.addressText,
-            streetAddress: order.streetAddress || null,
-            city: order.city || null,
-            state: order.state || null,
-            zipCode: order.zipCode || null,
-            normalizedAddressHash: order.normalizedAddressHash || null,
-            lat: order.lat,
-            lng: order.lng,
-            customerName: order.customerName,
-            customerPhone: order.customerPhone,
-            rxNumber: order.rxNumber,
-            notes: order.notes,
-            priority: order.priority || "normal",
+            addressText: firstOrder.addressText,
+            streetAddress: firstOrder.streetAddress || null,
+            city: firstOrder.city || null,
+            state: firstOrder.state || null,
+            zipCode: firstOrder.zipCode || null,
+            normalizedAddressHash: firstOrder.normalizedAddressHash || null,
+            lat: firstOrder.lat,
+            lng: firstOrder.lng,
+            customerName: firstOrder.customerName,
+            customerPhone: firstOrder.customerPhone,
+            rxNumber: allRxNumbers,
+            notes: allNotes || null,
+            priority: hasUrgent ? "urgent" : "normal",
             status: "geocoded"
           });
-          geocodedDeliveries.push({ ...delivery, priority: order.priority || "normal" });
-          orderIdsForStatusUpdate.push(order.id);
+          geocodedDeliveries.push({ ...delivery, priority: hasUrgent ? "urgent" : "normal" });
+          
+          for (const order of groupOrders) {
+            orderIdsForStatusUpdate.push(order.id);
+          }
         }
       } else if (deliveryIds && Array.isArray(deliveryIds) && deliveryIds.length > 0) {
         for (const id of deliveryIds) {
