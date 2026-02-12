@@ -6,6 +6,7 @@ import { useAuthStore } from "./lib/authStore";
 import Login from "./components/Login";
 import AdminDashboard from "./components/AdminDashboard";
 import PharmacyDashboard from "./components/PharmacyDashboard";
+import PharmacyAdminDashboard from "./components/PharmacyAdminDashboard";
 import DriverApp from "./components/DriverApp";
 import { Loader2 } from "lucide-react";
 
@@ -61,6 +62,20 @@ function App() {
             setDriverId(id);
             setView("driver");
           }} 
+        />
+      );
+    }
+
+    if (user?.role === 'pharmacy_admin') {
+      return (
+        <PharmacyAdminDashboard 
+          onLogout={handleLogout}
+          pharmacyId={user?.pharmacyId || null}
+          pharmacyName={user?.pharmacyName}
+          onOpenDriverView={(id: number) => {
+            setDriverId(id);
+            setView("driver");
+          }}
         />
       );
     }

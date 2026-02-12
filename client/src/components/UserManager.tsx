@@ -204,11 +204,12 @@ export default function UserManager({ pharmacies }: UserManagerProps) {
                   </SelectTrigger>
                   <SelectContent className="bg-slate-700 border-slate-600">
                     <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="pharmacy_admin">Pharmacy Admin</SelectItem>
                     <SelectItem value="dispatcher">Dispatcher</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {formData.role === "dispatcher" && (
+              {(formData.role === "dispatcher" || formData.role === "pharmacy_admin") && (
                 <div className="space-y-2">
                   <Label className="text-slate-200">Pharmacy</Label>
                   <Select
@@ -248,9 +249,11 @@ export default function UserManager({ pharmacies }: UserManagerProps) {
             <CardContent className="py-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className={`p-2 rounded-lg ${user.role === 'admin' ? 'bg-purple-500/20' : 'bg-blue-500/20'}`}>
+                  <div className={`p-2 rounded-lg ${user.role === 'admin' ? 'bg-purple-500/20' : user.role === 'pharmacy_admin' ? 'bg-green-500/20' : 'bg-blue-500/20'}`}>
                     {user.role === 'admin' ? (
                       <Shield className="h-5 w-5 text-purple-400" />
+                    ) : user.role === 'pharmacy_admin' ? (
+                      <Shield className="h-5 w-5 text-green-400" />
                     ) : (
                       <Users className="h-5 w-5 text-blue-400" />
                     )}
@@ -258,8 +261,8 @@ export default function UserManager({ pharmacies }: UserManagerProps) {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-white font-medium">{user.username}</span>
-                      <Badge className={user.role === 'admin' ? 'bg-purple-500/20 text-purple-300' : 'bg-blue-500/20 text-blue-300'}>
-                        {user.role}
+                      <Badge className={user.role === 'admin' ? 'bg-purple-500/20 text-purple-300' : user.role === 'pharmacy_admin' ? 'bg-green-500/20 text-green-300' : 'bg-blue-500/20 text-blue-300'}>
+                        {user.role === 'pharmacy_admin' ? 'Pharmacy Admin' : user.role}
                       </Badge>
                     </div>
                     {user.pharmacyId && (

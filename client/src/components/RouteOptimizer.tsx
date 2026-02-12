@@ -41,6 +41,7 @@ interface Delivery {
   status: string;
   zoneId: number | null;
   prescriptions?: Prescription[];
+  inActiveRoute?: boolean;
 }
 
 interface RouteOptimizerProps {
@@ -685,6 +686,11 @@ export default function RouteOptimizer({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-white text-sm truncate">{delivery.addressText}</p>
+                          {delivery.inActiveRoute && (
+                            <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">
+                              In Route
+                            </span>
+                          )}
                           {delivery.priority === "urgent" && (
                             <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded flex items-center gap-1">
                               <AlertTriangle className="h-3 w-3" />

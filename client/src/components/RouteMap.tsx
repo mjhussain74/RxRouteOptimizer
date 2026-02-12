@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MapPin, Truck, CheckCircle, Clock, Send, User, Navigation } from "lucide-react";
+import { MapPin, Truck, CheckCircle, Clock, Send, User, Navigation, XCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -95,6 +95,25 @@ export default function RouteMap({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
       queryClient.invalidateQueries({ queryKey: [`/api/routes/${selectedRouteId}`] });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async (routeId: number) => {
+      const response = await fetch(`/api/routes/${routeId}/cancel`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Failed to cancel route");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/routes/${selectedRouteId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/deliveries/active"] });
     },
   });
 
@@ -229,6 +248,22 @@ export default function RouteMap({
                   >
                     <Navigation className="mr-2 h-4 w-4" />
                     Open Driver View
+                  </Button>
+                )}
+
+                {["pending", "optimized", "assigned", "dispatched"].includes(route.status) && (
+                  <Button
+                    onClick={() => {
+                      if (confirm("Are you sure you want to cancel this route? All pending deliveries will be released back to the pool.")) {
+                        cancelMutation.mutate(selectedRouteId!);
+                      }
+                    }}
+                    disabled={cancelMutation.isPending}
+                    variant="destructive"
+                    className="w-full"
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    {cancelMutation.isPending ? "Cancelling..." : "Cancel Route"}
                   </Button>
                 )}
               </CardContent>

@@ -203,6 +203,9 @@ export interface IStorage {
   ): Promise<Prescription | undefined>;
   deletePrescription(id: number): Promise<boolean>;
 
+  getDeliveryIdsInActiveRoutes(deliveryIds: number[]): Promise<number[]>;
+  cancelRoute(routeId: number): Promise<Route | undefined>;
+
   // Delivery matching methods
   findDeliveryByNormalizedAddress(
     batchId: number,
@@ -1130,6 +1133,51 @@ export class DatabaseStorage implements IStorage {
     const year = new Date().getFullYear();
     const sequence = await this.getNextDeliverySequence();
     return `DEL${year}${sequence.toString().padStart(6, "0")}`;
+  }
+
+  async getDeliveryIdsInActiveRoutes(deliveryIds: number[]): Promise<number[]> {
+    if (deliveryIds.length === 0) return [];
+    const result = await db
+      .select({ deliveryId: routeStops.deliveryId })
+      .from(routeStops)
+      .innerJoin(routes, eq(routeStops.routeId, routes.id))
+      .where(
+        and(
+          inArray(routeStops.deliveryId, deliveryIds),
+          drizzleSql`${routes.status} != 'cancelled'`,
+          drizzleSql`${routeStops.status} NOT IN ('cancelled', 'completed')`
+        )
+      );
+    return result
+      .map(r => r.deliveryId)
+      .filter((id): id is number => id !== null);
+  }
+
+  async cancelRoute(routeId: number): Promise<Route | undefined> {
+    const updatedRoute = await db
+      .update(routes)
+      .set({ status: "cancelled" })
+      .where(eq(routes.id, routeId))
+      .returning();
+    if (!updatedRoute[0]) return undefined;
+
+    const stops = await this.getRouteStops(routeId);
+    for (const stop of stops) {
+      if (stop.status !== 'completed' && stop.status !== 'cancelled') {
+        await db
+          .update(routeStops)
+          .set({ status: "cancelled" })
+          .where(eq(routeStops.id, stop.id));
+        if (stop.deliveryId) {
+          await db
+            .update(deliveries)
+            .set({ status: "geocoded" })
+            .where(eq(deliveries.id, stop.deliveryId));
+        }
+      }
+    }
+
+    return updatedRoute[0];
   }
 
   // Split/merge delivery methods

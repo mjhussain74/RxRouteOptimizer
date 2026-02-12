@@ -49,6 +49,16 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+function requireAdminOrPharmacyAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'pharmacy_admin') {
+    return res.status(403).json({ message: "Admin or Pharmacy Admin access required" });
+  }
+  next();
+}
+
 // Require driver role
 function requireDriver(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.user) {
@@ -76,6 +86,25 @@ function getPharmacyContext(session: any): PharmacyContext | null {
     userId: session.user.id,
     username: session.user.username
   };
+}
+
+function requirePharmacyScopeOrPharmacyAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  if (req.session.user.role === 'driver') {
+    return res.status(403).json({ message: "Staff access required" });
+  }
+  if (req.session.user.role === 'admin') {
+    return next();
+  }
+  if (req.session.user.role === 'pharmacy_admin' || req.session.user.role === 'dispatcher') {
+    if (!req.session.user.pharmacyId) {
+      return res.status(403).json({ message: "Your account is not associated with a pharmacy. Please contact admin." });
+    }
+    return next();
+  }
+  return res.status(403).json({ message: "Staff access required" });
 }
 
 // Middleware that requires pharmacy context for non-admin users (blocks drivers)
@@ -694,7 +723,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers", requireAdmin, async (req, res) => {
+  app.get("/api/drivers", requireAdminOrPharmacyAdmin, async (req, res) => {
     try {
       const drivers = await storage.getDrivers();
       res.json(drivers);
@@ -704,7 +733,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/drivers", requireAdmin, async (req, res) => {
+  app.post("/api/drivers", requireAdminOrPharmacyAdmin, async (req, res) => {
     try {
       const driver = await storage.createDriver(req.body);
       res.json(driver);
@@ -1548,6 +1577,15 @@ export async function registerRoutes(
         return res.status(500).json({ error: "Failed to optimize route" });
       }
 
+      const allDeliveryIds = geocodedDeliveries.map(d => d.id);
+      const alreadyInRoutes = await storage.getDeliveryIdsInActiveRoutes(allDeliveryIds);
+      if (alreadyInRoutes.length > 0) {
+        return res.status(400).json({ 
+          error: `The following delivery IDs are already assigned to active routes: ${alreadyInRoutes.join(', ')}`,
+          duplicateDeliveryIds: alreadyInRoutes
+        });
+      }
+
       const route = await storage.createRoute({
         batchId: batchId || null,
         zoneId: zoneId || null,
@@ -1591,6 +1629,35 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Optimization error:", error);
       res.status(500).json({ error: "Failed to optimize route" });
+    }
+  });
+
+  app.post("/api/routes/:id/cancel", requireStaff, async (req, res) => {
+    try {
+      const routeId = parseInt(req.params.id);
+      
+      if (!await checkRouteOwnership(routeId, req.session)) {
+        return res.status(403).json({ error: "Access denied to this route" });
+      }
+      
+      const route = await storage.getRoute(routeId);
+      if (!route) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+      
+      if (route.status === 'cancelled' || route.status === 'completed') {
+        return res.status(400).json({ error: `Route is already ${route.status}` });
+      }
+      
+      const updatedRoute = await storage.cancelRoute(routeId);
+      if (!updatedRoute) {
+        return res.status(500).json({ error: "Failed to cancel route" });
+      }
+      
+      res.json(updatedRoute);
+    } catch (error) {
+      console.error("Cancel route error:", error);
+      res.status(500).json({ error: "Failed to cancel route" });
     }
   });
 
@@ -2084,11 +2151,14 @@ export async function registerRoutes(
         }
       }
       
-      // Attach prescriptions to each delivery
+      const allDeliveryIds = activeDeliveries.map(d => d.id);
+      const idsInActiveRoutes = await storage.getDeliveryIdsInActiveRoutes(allDeliveryIds);
+      const activeRouteSet = new Set(idsInActiveRoutes);
+
       const deliveriesWithPrescriptions = await Promise.all(
         activeDeliveries.map(async (delivery) => {
           const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
-          return { ...delivery, prescriptions };
+          return { ...delivery, prescriptions, inActiveRoute: activeRouteSet.has(delivery.id) };
         })
       );
       

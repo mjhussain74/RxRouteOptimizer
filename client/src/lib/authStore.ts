@@ -5,7 +5,7 @@ import { queryClient } from './queryClient';
 export interface AuthUser {
   id: number;
   username: string;
-  role: 'admin' | 'dispatcher' | 'driver';
+  role: 'admin' | 'dispatcher' | 'driver' | 'pharmacy_admin';
   pharmacyId?: number | null;
   pharmacyName?: string;
   driverId?: number | null;
