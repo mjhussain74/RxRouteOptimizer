@@ -462,10 +462,6 @@ export default function OrderManagement({
             <img src="${barcodeDataUrl}" alt="Barcode: ${labelId}" />
           </div>
           <div class="field">
-            <div class="field-label">RX#</div>
-            <div class="field-value">${order.rxNumber}</div>
-          </div>
-          <div class="field">
             <div class="field-label">Deliver To</div>
             <div class="field-value address">${order.addressText}</div>
           </div>
@@ -587,10 +583,6 @@ export default function OrderManagement({
           <div class="delivery-id">${labelId}</div>
           <div class="barcode-container">
             <img src="${barcodeDataUrl}" alt="Barcode: ${labelId}" />
-          </div>
-          <div class="field">
-            <div class="field-label">RX#</div>
-            <div class="field-value">${order.rxNumber}</div>
           </div>
           <div class="field">
             <div class="field-label">Deliver To</div>
