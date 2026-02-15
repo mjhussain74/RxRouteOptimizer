@@ -1183,8 +1183,15 @@ export async function registerRoutes(
         uploadCount: 1,
       }, null, 'manual-entry');
       
+      // Assign delivery identifier for manually created route-eligible orders
+      let finalOrder = order;
+      if (hasGeocode && !order.deliveryIdentifier) {
+        const deliveryIdentifier = await storage.getOrCreateDeliveryIdentifierForAddress(order);
+        finalOrder = await storage.updateDeliveryOrderDeliveryIdentifier(order.id, deliveryIdentifier) || order;
+      }
+      
       res.json({
-        ...order,
+        ...finalOrder,
         geocodeWarning: !hasGeocode ? "Address could not be geocoded. Order saved but needs address correction before routing." : undefined
       });
     } catch (error) {

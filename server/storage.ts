@@ -221,6 +221,8 @@ export interface IStorage {
   findDeliveryOrderByRx(pharmacyId: number, rxNumber: string): Promise<DeliveryOrder | undefined>;
   upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }>;
   updateDeliveryOrderStatus(id: number, status: string): Promise<DeliveryOrder | undefined>;
+  updateDeliveryOrderDeliveryIdentifier(id: number, deliveryIdentifier: string): Promise<DeliveryOrder | undefined>;
+  getOrCreateDeliveryIdentifierForAddress(order: DeliveryOrder): Promise<string>;
   getDeliveryOrderUploads(orderId: number): Promise<DeliveryOrderUpload[]>;
   getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]>;
   getAllDeliveryOrders(): Promise<DeliveryOrder[]>;
@@ -1386,10 +1388,44 @@ export class DatabaseStorage implements IStorage {
     const updates: any = { deliveryStatus: status };
     if (status === 'ROUTE_ELIGIBLE') {
       updates.scannedAt = new Date();
+      const order = await this.getDeliveryOrder(id);
+      if (order && !order.deliveryIdentifier) {
+        updates.deliveryIdentifier = await this.getOrCreateDeliveryIdentifierForAddress(order);
+      }
     }
     const result = await db
       .update(deliveryOrders)
       .set(updates)
+      .where(eq(deliveryOrders.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getOrCreateDeliveryIdentifierForAddress(order: DeliveryOrder): Promise<string> {
+    if (order.normalizedAddressHash) {
+      const existing = await db
+        .select()
+        .from(deliveryOrders)
+        .where(
+          and(
+            eq(deliveryOrders.pharmacyId, order.pharmacyId),
+            eq(deliveryOrders.normalizedAddressHash, order.normalizedAddressHash),
+            isNotNull(deliveryOrders.deliveryIdentifier),
+            inArray(deliveryOrders.deliveryStatus, ['ROUTE_ELIGIBLE', 'ROUTED', 'DELIVERED'])
+          )
+        )
+        .limit(1);
+      if (existing.length > 0 && existing[0].deliveryIdentifier) {
+        return existing[0].deliveryIdentifier;
+      }
+    }
+    return this.generateUniqueDeliveryIdentifier();
+  }
+
+  async updateDeliveryOrderDeliveryIdentifier(id: number, deliveryIdentifier: string): Promise<DeliveryOrder | undefined> {
+    const result = await db
+      .update(deliveryOrders)
+      .set({ deliveryIdentifier })
       .where(eq(deliveryOrders.id, id))
       .returning();
     return result[0];

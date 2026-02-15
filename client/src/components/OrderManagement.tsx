@@ -38,6 +38,7 @@ interface DeliveryOrder {
   pharmacyId: number;
   batchId: number | null;
   fillDate: string | null;
+  deliveryIdentifier: string | null;
   deliveryStatus: string;
   routeId: number | null;
   addressText: string;
@@ -385,12 +386,17 @@ export default function OrderManagement({
     [uploadMutation],
   );
 
+  const canPrintLabel = (order: DeliveryOrder) => {
+    return order.deliveryIdentifier && (order.deliveryStatus === 'ROUTE_ELIGIBLE' || order.deliveryStatus === 'ROUTED' || order.deliveryStatus === 'DELIVERED');
+  };
+
   const printDeliveryLabel = (
     order: DeliveryOrder,
     pharmacyName: string = "RX Delivery Pharmacy",
   ) => {
+    if (!canPrintLabel(order)) return;
     const today = new Date().toLocaleDateString();
-    const labelId = order.rxNumber || `ORD-${order.id}`;
+    const labelId = order.deliveryIdentifier || order.rxNumber || `ORD-${order.id}`;
 
     const canvas = document.createElement("canvas");
     try {
@@ -454,6 +460,10 @@ export default function OrderManagement({
           <div class="delivery-id">${labelId}</div>
           <div class="barcode-container">
             <img src="${barcodeDataUrl}" alt="Barcode: ${labelId}" />
+          </div>
+          <div class="field">
+            <div class="field-label">RX#</div>
+            <div class="field-value">${order.rxNumber}</div>
           </div>
           <div class="field">
             <div class="field-label">Deliver To</div>
@@ -528,8 +538,10 @@ export default function OrderManagement({
     (o) => o.deliveryStatus === "ROUTE_ELIGIBLE",
   );
 
+  const printableOrders = orders.filter(canPrintLabel);
+
   const printAllLabels = () => {
-    if (eligibleForRouting.length === 0) return;
+    if (printableOrders.length === 0) return;
 
     const selectedBatch = (batches as any[]).find(
       (b: any) => b.id === activeBatchId,
@@ -538,9 +550,9 @@ export default function OrderManagement({
       selectedBatch?.name?.split(" - ")[0] || "RX Delivery Pharmacy";
     const today = new Date().toLocaleDateString();
 
-    const labelsHtml = eligibleForRouting
+    const labelsHtml = printableOrders
       .map((order) => {
-        const labelId = order.rxNumber || `ORD-${order.id}`;
+        const labelId = order.deliveryIdentifier || order.rxNumber || `ORD-${order.id}`;
 
         const canvas = document.createElement("canvas");
         try {
@@ -575,6 +587,10 @@ export default function OrderManagement({
           <div class="delivery-id">${labelId}</div>
           <div class="barcode-container">
             <img src="${barcodeDataUrl}" alt="Barcode: ${labelId}" />
+          </div>
+          <div class="field">
+            <div class="field-label">RX#</div>
+            <div class="field-value">${order.rxNumber}</div>
           </div>
           <div class="field">
             <div class="field-label">Deliver To</div>
@@ -796,11 +812,11 @@ export default function OrderManagement({
                         size="sm"
                         variant="outline"
                         onClick={printAllLabels}
-                        disabled={eligibleForRouting.length === 0}
+                        disabled={printableOrders.length === 0}
                         className="border-blue-500 text-blue-400 hover:bg-blue-500/10"
                       >
                         <Printer className="h-4 w-4 mr-1" />
-                        Print Labels ({eligibleForRouting.length})
+                        Print Labels ({printableOrders.length})
                       </Button>
                     </div>
                   );
@@ -1074,8 +1090,9 @@ export default function OrderManagement({
                                   "RX Delivery Pharmacy";
                                 printDeliveryLabel(order, pharmacyName);
                               }}
-                              className="h-8 w-8 p-0 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
-                              title="Print Label"
+                              disabled={!canPrintLabel(order)}
+                              className={`h-8 w-8 p-0 ${canPrintLabel(order) ? "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10" : "text-slate-600 cursor-not-allowed"}`}
+                              title={canPrintLabel(order) ? "Print Label" : "Scan barcode first to enable label printing"}
                             >
                               <Printer className="h-4 w-4" />
                             </Button>

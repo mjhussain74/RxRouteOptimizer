@@ -466,6 +466,7 @@ export const deliveryOrders = pgTable("delivery_orders", {
   pharmacyId: integer("pharmacy_id").references(() => pharmacies.id).notNull(),
   batchId: integer("batch_id").references(() => deliveryBatches.id),
   fillDate: text("fill_date"),
+  deliveryIdentifier: text("delivery_identifier"),
   deliveryStatus: text("delivery_status").notNull().default("IMPORTED"),
   routeId: integer("route_id").references(() => routes.id),
   addressText: text("address_text").notNull(),
