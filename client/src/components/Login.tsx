@@ -98,7 +98,7 @@ export default function Login() {
             ) : (
               <User className="h-8 w-8 text-blue-400" />
             )}
-            <span className="text-2xl font-bold text-white">RouteOptimizer</span>
+            <span className="text-2xl font-bold text-white">RxRouteOptimizer</span>
           </div>
           <CardTitle className="text-white">
             {needsSetup ? 'Initial Setup' : loginMode === 'driver' ? 'Driver Login' : 'Staff Login'}

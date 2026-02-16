@@ -55,7 +55,7 @@ export default function Dashboard({ onOpenDriverView }: DashboardProps) {
                 <Truck className="h-6 w-6 text-blue-400" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">Route Optimizer</h1>
+                <h1 className="text-xl font-bold text-white">RxRouteOptimizer</h1>
                 <p className="text-xs text-slate-400">Delivery Management System</p>
               </div>
             </div>
