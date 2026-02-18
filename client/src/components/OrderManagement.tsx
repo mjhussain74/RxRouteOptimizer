@@ -86,6 +86,11 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; icon: React.Reac
     text: "text-purple-400",
     icon: <CheckCircle className="h-4 w-4 text-purple-400" />,
   },
+  CANCELLED: {
+    bg: "bg-red-500/20",
+    text: "text-red-400",
+    icon: <Ban className="h-4 w-4 text-red-400" />,
+  },
 };
 
 export default function OrderManagement({
@@ -312,6 +317,28 @@ export default function OrderManagement({
     },
   });
 
+  const cancelOrderMutation = useMutation({
+    mutationFn: async (orderId: number) => {
+      const response = await fetch(`/api/delivery-orders/${orderId}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "CANCELLED" }),
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Failed to cancel order");
+      return response.json();
+    },
+    onSuccess: () => {
+      if (activeBatchId) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
+    },
+  });
+
   const setBatchStatusMutation = useMutation({
     mutationFn: async ({
       batchId,
@@ -336,6 +363,8 @@ export default function OrderManagement({
           queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
         });
       }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
     },
   });
 
@@ -1088,6 +1117,22 @@ export default function OrderManagement({
                             >
                               <Printer className="h-4 w-4" />
                             </Button>
+                            {order.deliveryStatus !== "DELIVERED" && order.deliveryStatus !== "CANCELLED" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  if (confirm(`Cancel order ${order.rxNumber}? This cannot be undone.`)) {
+                                    cancelOrderMutation.mutate(order.id);
+                                  }
+                                }}
+                                disabled={cancelOrderMutation.isPending}
+                                className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                title="Cancel Order"
+                              >
+                                <Ban className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>

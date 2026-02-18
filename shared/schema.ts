@@ -51,7 +51,7 @@ export const driverZones = pgTable("driver_zones", {
     .references(() => drivers.id)
     .notNull(),
   zoneId: integer("zone_id")
-    .references(() => deliveryZones.id)
+    .references(() => deliveryZones.id, { onDelete: "cascade" })
     .notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

@@ -118,14 +118,37 @@ export default function RouteOptimizer({
   }, [eligibleOrders]);
 
   const filteredGroups = useMemo(() => {
-    if (!searchQuery.trim()) return addressGroups;
-    const query = searchQuery.toLowerCase();
-    return addressGroups.filter(g => (
-      g.address?.toLowerCase().includes(query) ||
-      g.customerName?.toLowerCase().includes(query) ||
-      g.orders.some(o => o.rxNumber?.toLowerCase().includes(query))
-    ));
-  }, [addressGroups, searchQuery]);
+    let groups = addressGroups;
+
+    if (selectedZoneId) {
+      const zone = zones.find(z => z.id === selectedZoneId);
+      if (zone) {
+        groups = groups.filter(g => {
+          const order = g.orders[0];
+          if (!order?.lat || !order?.lng) return false;
+          const R = 6371000;
+          const dLat = (order.lat - zone.centerLat) * Math.PI / 180;
+          const dLng = (order.lng - zone.centerLng) * Math.PI / 180;
+          const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(zone.centerLat * Math.PI / 180) * Math.cos(order.lat * Math.PI / 180) *
+            Math.sin(dLng / 2) ** 2;
+          const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return distance <= zone.radiusMeters;
+        });
+      }
+    }
+
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      groups = groups.filter(g => (
+        g.address?.toLowerCase().includes(query) ||
+        g.customerName?.toLowerCase().includes(query) ||
+        g.orders.some(o => o.rxNumber?.toLowerCase().includes(query))
+      ));
+    }
+
+    return groups;
+  }, [addressGroups, searchQuery, selectedZoneId, zones]);
 
   const urgentCount = useMemo(() => {
     return Array.from(selectedDeliveryIds).filter(id => {

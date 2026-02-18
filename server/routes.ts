@@ -903,6 +903,11 @@ export async function registerRoutes(
         }
       }
       
+      // Also cancel associated delivery_orders when batch is cancelled
+      if (status === "cancelled") {
+        await storage.cancelDeliveryOrdersByBatch(batchId);
+      }
+      
       res.json(batch);
     } catch (error) {
       console.error("Error updating batch status:", error);
@@ -1314,7 +1319,7 @@ export async function registerRoutes(
   app.post("/api/delivery-orders/:id/status", requireStaff, async (req, res) => {
     try {
       const { status } = req.body;
-      if (!['IMPORTED', 'ROUTE_ELIGIBLE', 'ROUTED', 'DELIVERED'].includes(status)) {
+      if (!['IMPORTED', 'ROUTE_ELIGIBLE', 'ROUTED', 'DELIVERED', 'CANCELLED'].includes(status)) {
         return res.status(400).json({ error: "Invalid status" });
       }
       const updated = await storage.updateDeliveryOrderStatus(parseInt(req.params.id), status);

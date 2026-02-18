@@ -221,6 +221,7 @@ export interface IStorage {
   findDeliveryOrderByRx(pharmacyId: number, rxNumber: string): Promise<DeliveryOrder | undefined>;
   upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }>;
   updateDeliveryOrderStatus(id: number, status: string): Promise<DeliveryOrder | undefined>;
+  cancelDeliveryOrdersByBatch(batchId: number): Promise<void>;
   updateDeliveryOrderDeliveryIdentifier(id: number, deliveryIdentifier: string): Promise<DeliveryOrder | undefined>;
   getOrCreateDeliveryIdentifierForAddress(order: DeliveryOrder): Promise<string>;
   getDeliveryOrderUploads(orderId: number): Promise<DeliveryOrderUpload[]>;
@@ -454,6 +455,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteDeliveryZone(id: number): Promise<boolean> {
+    await db.delete(driverZones).where(eq(driverZones.zoneId, id));
     const result = await db
       .delete(deliveryZones)
       .where(eq(deliveryZones.id, id))
@@ -1399,6 +1401,16 @@ export class DatabaseStorage implements IStorage {
       .where(eq(deliveryOrders.id, id))
       .returning();
     return result[0];
+  }
+
+  async cancelDeliveryOrdersByBatch(batchId: number): Promise<void> {
+    await db
+      .update(deliveryOrders)
+      .set({ deliveryStatus: 'CANCELLED' })
+      .where(and(
+        eq(deliveryOrders.batchId, batchId),
+        notInArray(deliveryOrders.deliveryStatus, ['DELIVERED', 'CANCELLED'])
+      ));
   }
 
   async getOrCreateDeliveryIdentifierForAddress(order: DeliveryOrder): Promise<string> {
