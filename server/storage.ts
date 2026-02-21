@@ -1287,7 +1287,10 @@ export class DatabaseStorage implements IStorage {
     return db
       .select()
       .from(deliveryOrders)
-      .where(eq(deliveryOrders.pharmacyId, pharmacyId))
+      .where(and(
+        eq(deliveryOrders.pharmacyId, pharmacyId),
+        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED'])
+      ))
       .orderBy(desc(deliveryOrders.lastSeenAt));
   }
 
