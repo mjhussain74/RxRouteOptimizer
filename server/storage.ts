@@ -1306,7 +1306,10 @@ export class DatabaseStorage implements IStorage {
     return db
       .select()
       .from(deliveryOrders)
-      .where(inArray(deliveryOrders.id, orderIds))
+      .where(and(
+        inArray(deliveryOrders.id, orderIds),
+        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED'])
+      ))
       .orderBy(desc(deliveryOrders.lastSeenAt));
   }
 
@@ -1478,6 +1481,7 @@ export class DatabaseStorage implements IStorage {
     return db
       .select()
       .from(deliveryOrders)
+      .where(notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED']))
       .orderBy(desc(deliveryOrders.lastSeenAt));
   }
 
