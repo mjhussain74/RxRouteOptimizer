@@ -516,7 +516,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
           { facingMode: "environment" },
           config,
           (decodedText) => {
-            setScannedBarcode(decodedText);
+            const cleaned = decodedText.replace(/\s*RX\s*$/i, '').trim();
+            setScannedBarcode(cleaned);
             setIsScanning(false);
             html5QrCode
               .stop()
