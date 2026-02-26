@@ -24,15 +24,18 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Start Game"
+args = "Start application"
 
 [[workflows.workflow]]
-name = "Start Game"
+name = "Start application"
 author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run dev"
+args = "bash start.sh"
 waitForPort = 5000
 
 [objectStorage]

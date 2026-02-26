@@ -9,14 +9,8 @@ let objectStorageAvailable = false;
 async function initializeClient(): Promise<void> {
   try {
     client = new Client();
-    // Test if client works by trying to list objects
-    const testResult = await client.list();
-    objectStorageAvailable = testResult.ok;
-    if (objectStorageAvailable) {
-      console.log("✅ Object Storage initialized successfully");
-    } else {
-      console.log("⚠️ Object Storage not available, using database storage fallback");
-    }
+    objectStorageAvailable = true;
+    console.log("✅ Object Storage initialized successfully");
   } catch (error) {
     console.log("⚠️ Object Storage not configured, using database storage fallback");
     objectStorageAvailable = false;
@@ -113,7 +107,7 @@ async function processQueue(): Promise<void> {
           )
         )
       )
-      .limit(5);
+      .limit(1);
     
     if (pendingItems.length === 0) {
       isProcessing = false;

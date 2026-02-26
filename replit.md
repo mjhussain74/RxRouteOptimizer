@@ -201,6 +201,19 @@ address,customer_name,customer_phone,rx_number,notes
   - OrderManagement UI rewritten for delivery_orders with status badges, upload count
   - RouteOptimizer fetches ROUTE_ELIGIBLE orders, passes orderIds to optimize endpoint
   - New API endpoints: /api/delivery-orders, /api/delivery-orders/eligible, /api/delivery-orders/:id/scan, /api/delivery-orders/scan-barcode, /api/delivery-orders/:id/status
+- Server stability improvements (2026-02-26):
+  - Cancelled/delivered orders hidden from all listing endpoints (getAllDeliveryOrders, getDeliveryOrdersByBatch)
+  - Fixed RX suffix stripping in DriverApp barcode scanning
+  - Lazy loading for heavy dashboard components (AdminDashboard, PharmacyDashboard, PharmacyAdminDashboard, DriverApp)
+  - Production build mode: pre-built client served via static files, compiled server via esbuild
+  - start.sh auto-builds if dist/ is missing, runs compiled `node dist/index.cjs`
+  - Cleaned debug handlers: uncaughtException and unhandledRejection handlers retained, process.exit interceptor removed
+
+## Build & Run
+- **Development**: `npm run dev` (uses Vite dev middleware for HMR)
+- **Production**: `npm run build` then `npm run start` (compiled CJS server + static client)
+- **Workflow**: `bash start.sh` (auto-builds if needed, runs production server)
+- Build outputs to `dist/` (server: `dist/index.cjs`, client: `dist/public/`)
 
 ## User Preferences
 - Dark theme UI preferred
