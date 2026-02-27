@@ -4,12 +4,21 @@ import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
 import Papa from "papaparse";
 import { storage } from "./storage";
-import { normalizeAddress, parseAddressComponents } from "../shared/addressUtils";
-import { addToUploadQueue, startBackgroundProcessor, downloadFromStorage, getUploadStatus, isObjectStorageAvailable } from "./uploadQueue";
+import {
+  normalizeAddress,
+  parseAddressComponents,
+} from "../shared/addressUtils";
+import {
+  addToUploadQueue,
+  startBackgroundProcessor,
+  downloadFromStorage,
+  getUploadStatus,
+  isObjectStorageAvailable,
+} from "./uploadQueue";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-declare module 'express-session' {
+declare module "express-session" {
   interface SessionData {
     user: {
       id: number;
@@ -33,7 +42,7 @@ function requireStaff(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.user) {
     return res.status(401).json({ message: "Authentication required" });
   }
-  if (req.session.user.role === 'driver') {
+  if (req.session.user.role === "driver") {
     return res.status(403).json({ message: "Staff access required" });
   }
   next();
@@ -43,18 +52,34 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.user) {
     return res.status(401).json({ message: "Authentication required" });
   }
-  if (req.session.user.role !== 'admin') {
+  if (req.session.user.role !== "admin") {
     return res.status(403).json({ message: "Admin access required" });
   }
   next();
 }
 
-function requireAdminOrPharmacyAdmin(req: Request, res: Response, next: NextFunction) {
+function requireAdminOrPharmacyAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   if (!req.session?.user) {
     return res.status(401).json({ message: "Authentication required" });
   }
-  if (req.session.user.role !== 'admin' && req.session.user.role !== 'pharmacy_admin') {
-    return res.status(403).json({ message: "Admin or Pharmacy Admin access required" });
+  if (
+    req.session.user.role !== "admin" &&
+    req.session.user.role !== "pharmacy_admin"
+  ) {
+    return res
+      .status(403)
+      .json({ message: "Admin or Pharmacy Admin access required" });
+  }
+  next();
+}
+
+function requireAuthOrDriver(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.user) {
+    return res.status(401).json({ message: "Authentication required" });
   }
   next();
 }
@@ -64,7 +89,7 @@ function requireDriver(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.user) {
     return res.status(401).json({ message: "Authentication required" });
   }
-  if (req.session.user.role !== 'driver') {
+  if (req.session.user.role !== "driver") {
     return res.status(403).json({ message: "Driver access required" });
   }
   next();
@@ -81,26 +106,38 @@ interface PharmacyContext {
 function getPharmacyContext(session: any): PharmacyContext | null {
   if (!session?.user) return null;
   return {
-    isAdmin: session.user.role === 'admin',
-    pharmacyId: session.user.pharmacyId ? Number(session.user.pharmacyId) : null,
+    isAdmin: session.user.role === "admin",
+    pharmacyId: session.user.pharmacyId
+      ? Number(session.user.pharmacyId)
+      : null,
     userId: session.user.id,
-    username: session.user.username
+    username: session.user.username,
   };
 }
 
-function requirePharmacyScopeOrPharmacyAdmin(req: Request, res: Response, next: NextFunction) {
+function requirePharmacyScopeOrPharmacyAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   if (!req.session?.user) {
     return res.status(401).json({ message: "Authentication required" });
   }
-  if (req.session.user.role === 'driver') {
+  if (req.session.user.role === "driver") {
     return res.status(403).json({ message: "Staff access required" });
   }
-  if (req.session.user.role === 'admin') {
+  if (req.session.user.role === "admin") {
     return next();
   }
-  if (req.session.user.role === 'pharmacy_admin' || req.session.user.role === 'dispatcher') {
+  if (
+    req.session.user.role === "pharmacy_admin" ||
+    req.session.user.role === "dispatcher"
+  ) {
     if (!req.session.user.pharmacyId) {
-      return res.status(403).json({ message: "Your account is not associated with a pharmacy. Please contact admin." });
+      return res.status(403).json({
+        message:
+          "Your account is not associated with a pharmacy. Please contact admin.",
+      });
     }
     return next();
   }
@@ -113,55 +150,67 @@ function requirePharmacyScope(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ message: "Authentication required" });
   }
   // Drivers cannot access pharmacy-scoped endpoints
-  if (req.session.user.role === 'driver') {
+  if (req.session.user.role === "driver") {
     return res.status(403).json({ message: "Staff access required" });
   }
   // Admins can access everything
-  if (req.session.user.role === 'admin') {
+  if (req.session.user.role === "admin") {
     return next();
   }
   // Dispatchers must have a pharmacy association
   if (!req.session.user.pharmacyId) {
-    return res.status(403).json({ message: "Your account is not associated with a pharmacy. Please contact admin." });
+    return res.status(403).json({
+      message:
+        "Your account is not associated with a pharmacy. Please contact admin.",
+    });
   }
   next();
 }
 
-async function checkBatchOwnership(batchId: number, session: any): Promise<boolean> {
-  if (session?.user?.role === 'admin') return true;
+async function checkBatchOwnership(
+  batchId: number,
+  session: any,
+): Promise<boolean> {
+  if (session?.user?.role === "admin") return true;
   if (!session?.user?.pharmacyId) return false;
   const batch = await storage.getBatch(batchId);
   if (!batch?.pharmacyId) return false;
   return Number(batch.pharmacyId) === Number(session.user.pharmacyId);
 }
 
-async function checkDeliveryOwnership(deliveryId: number, session: any): Promise<boolean> {
-  if (session?.user?.role === 'admin') return true;
+async function checkDeliveryOwnership(
+  deliveryId: number,
+  session: any,
+): Promise<boolean> {
+  if (session?.user?.role === "admin") return true;
   if (!session?.user?.pharmacyId) return false;
   const delivery = await storage.getDelivery(deliveryId);
   if (!delivery) return false;
-  
+
   // If delivery has a batch, check batch ownership
   if (delivery.batchId) {
     return checkBatchOwnership(delivery.batchId, session);
   }
-  
+
   // Deliveries without batches are not accessible to pharmacy users
   // (should not occur in normal flow since all deliveries require a batch)
   return false;
 }
 
-async function checkRouteOwnership(routeId: number, session: any): Promise<boolean> {
-  if (session?.user?.role === 'admin') return true;
-  
+async function checkRouteOwnership(
+  routeId: number,
+  session: any,
+): Promise<boolean> {
+  if (session?.user?.role === "admin") return true;
+
   const route = await storage.getRoute(routeId);
   if (!route) return false;
-  
+
   // Drivers can access routes assigned to them
-  if (session?.user?.role === 'driver') {
+  if (session?.user?.role === "driver") {
     return route.driverId === session.user.driverId;
   }
-  
+
   // Dispatchers need pharmacy ownership via batch
   if (!session?.user?.pharmacyId) return false;
   if (!route.batchId) return false;
@@ -177,51 +226,71 @@ interface GeocodedAddress {
   notes?: string;
 }
 
-async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+async function geocodeAddress(
+  address: string,
+): Promise<{ lat: number; lng: number } | null> {
   try {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
-      console.error('❌ Google Maps API key not configured in environment');
-      console.error('Available env keys:', Object.keys(process.env).filter(k => k.includes('GOOGLE') || k.includes('API')));
+      console.error("❌ Google Maps API key not configured in environment");
+      console.error(
+        "Available env keys:",
+        Object.keys(process.env).filter(
+          (k) => k.includes("GOOGLE") || k.includes("API"),
+        ),
+      );
       return null;
     }
 
     const encodedAddress = encodeURIComponent(address);
     console.log(`🔄 Geocoding address: ${address}`);
-    
+
     const response = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${apiKey}`
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${apiKey}`,
     );
     const data = await response.json();
-    
+
     if (data.error_message) {
-      console.error(`❌ Geocoding API error for "${address}":`, data.error_message);
+      console.error(
+        `❌ Geocoding API error for "${address}":`,
+        data.error_message,
+      );
       return null;
     }
-    
+
     if (data.results && data.results.length > 0) {
       const location = data.results[0].geometry.location;
-      console.log(`✅ Successfully geocoded "${address}" to [${location.lat}, ${location.lng}]`);
+      console.log(
+        `✅ Successfully geocoded "${address}" to [${location.lat}, ${location.lng}]`,
+      );
       return {
         lat: location.lat,
-        lng: location.lng
+        lng: location.lng,
       };
     }
     console.warn(`⚠️ No results found for address: ${address}`);
     return null;
   } catch (error) {
-    console.error('❌ Geocoding error:', error);
+    console.error("❌ Geocoding error:", error);
     return null;
   }
 }
 
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+function calculateDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
   const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -229,7 +298,7 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 function optimizeRouteNearestNeighbor(
   startLat: number,
   startLng: number,
-  deliveries: Array<{ id: number; lat: number; lng: number }>
+  deliveries: Array<{ id: number; lat: number; lng: number }>,
 ): number[] {
   const unvisited = [...deliveries];
   const order: number[] = [];
@@ -245,7 +314,7 @@ function optimizeRouteNearestNeighbor(
         currentLat,
         currentLng,
         unvisited[i].lat,
-        unvisited[i].lng
+        unvisited[i].lng,
       );
       if (distance < nearestDistance) {
         nearestDistance = distance;
@@ -267,17 +336,19 @@ async function optimizeRouteWithGoogle(
   startLng: number,
   deliveries: Array<{ id: number; lat: number; lng: number }>,
   endLat?: number,
-  endLng?: number
+  endLng?: number,
 ): Promise<{ order: number[]; distance: number; duration: number } | null> {
   try {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
-      console.log('Google Routes API key not configured, falling back to nearest-neighbor algorithm');
+      console.log(
+        "Google Routes API key not configured, falling back to nearest-neighbor algorithm",
+      );
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
-    const waypoints = deliveries.map(d => ({
-      location: { latitude: d.lat, longitude: d.lng }
+    const waypoints = deliveries.map((d) => ({
+      location: { latitude: d.lat, longitude: d.lng },
     }));
 
     // Use end address if provided, otherwise return to start
@@ -286,20 +357,27 @@ async function optimizeRouteWithGoogle(
 
     const requestBody = {
       origin: {
-        location: { latitude: startLat, longitude: startLng }
+        location: { latitude: startLat, longitude: startLng },
       },
       destination: {
-        location: { latitude: destLat, longitude: destLng }
+        location: { latitude: destLat, longitude: destLng },
       },
       intermediates: waypoints,
       optimizeWaypointOrder: true,
       travelMode: "DRIVE",
       routingPreference: "TRAFFIC_AWARE_OPTIMAL",
-      computeAlternativeRoutes: false
+      computeAlternativeRoutes: false,
     };
 
-    console.log('Calling Google Routes API with', deliveries.length, 'waypoints');
-    console.log('Request body:', JSON.stringify(requestBody, null, 2).substring(0, 200));
+    console.log(
+      "Calling Google Routes API with",
+      deliveries.length,
+      "waypoints",
+    );
+    console.log(
+      "Request body:",
+      JSON.stringify(requestBody, null, 2).substring(0, 200),
+    );
 
     const response = await fetch(
       `https://routes.googleapis.com/routes/v2:computeRoutes?key=${apiKey}`,
@@ -308,45 +386,59 @@ async function optimizeRouteWithGoogle(
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Client": "gl-node/16.0.0",
-          "X-Goog-FieldMask": "routes.legs,routes.optimizedIntermediateWaypointOrder,routes.duration,routes.distanceMeters"
+          "X-Goog-FieldMask":
+            "routes.legs,routes.optimizedIntermediateWaypointOrder,routes.duration,routes.distanceMeters",
         },
-        body: JSON.stringify(requestBody)
-      }
+        body: JSON.stringify(requestBody),
+      },
     );
 
-    console.log('Google Routes API response status:', response.status);
+    console.log("Google Routes API response status:", response.status);
 
     if (response.status === 403) {
-      console.log('Google Routes API returned 403 Forbidden. Ensure Routes API is enabled in Google Cloud Console.');
+      console.log(
+        "Google Routes API returned 403 Forbidden. Ensure Routes API is enabled in Google Cloud Console.",
+      );
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Google Routes API error:', response.status, 'Response:', errorText.substring(0, 300));
+      console.log(
+        "Google Routes API error:",
+        response.status,
+        "Response:",
+        errorText.substring(0, 300),
+      );
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
     const responseText = await response.text();
     if (!responseText) {
-      console.log('Empty response from Google Routes API, using fallback');
+      console.log("Empty response from Google Routes API, using fallback");
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
-    console.log('Google Routes API response received, parsing...');
+    console.log("Google Routes API response received, parsing...");
     const data = JSON.parse(responseText);
 
     if (!data.routes || data.routes.length === 0) {
-      console.log('No routes from Google API response, using fallback');
+      console.log("No routes from Google API response, using fallback");
       return optimizeRouteFallback(startLat, startLng, deliveries);
     }
 
     const route = data.routes[0];
-    const optimizedWaypointOrder = route.optimizedIntermediateWaypointOrder || [];
-    console.log('Optimized waypoint order from Google:', optimizedWaypointOrder);
-    
-    const order = optimizedWaypointOrder.map((idx: number) => deliveries[idx].id);
-    
+    const optimizedWaypointOrder =
+      route.optimizedIntermediateWaypointOrder || [];
+    console.log(
+      "Optimized waypoint order from Google:",
+      optimizedWaypointOrder,
+    );
+
+    const order = optimizedWaypointOrder.map(
+      (idx: number) => deliveries[idx].id,
+    );
+
     const legs = route.legs || [];
     let totalDistance = 0;
     let totalDuration = 0;
@@ -359,15 +451,19 @@ async function optimizeRouteWithGoogle(
       }
     }
 
-    console.log('Successfully optimized route with Google API:', { order, distance: totalDistance / 1000, duration: Math.round(totalDuration / 60) });
+    console.log("Successfully optimized route with Google API:", {
+      order,
+      distance: totalDistance / 1000,
+      duration: Math.round(totalDuration / 60),
+    });
 
     return {
       order,
       distance: totalDistance / 1000,
-      duration: Math.round(totalDuration / 60)
+      duration: Math.round(totalDuration / 60),
     };
   } catch (error) {
-    console.log('Google Routes API call failed, using fallback:', error);
+    console.log("Google Routes API call failed, using fallback:", error);
     return optimizeRouteFallback(startLat, startLng, deliveries);
   }
 }
@@ -375,14 +471,21 @@ async function optimizeRouteWithGoogle(
 function optimizeRouteFallback(
   startLat: number,
   startLng: number,
-  deliveries: Array<{ id: number; lat: number; lng: number }>
+  deliveries: Array<{ id: number; lat: number; lng: number }>,
 ): { order: number[]; distance: number; duration: number } {
   const order = optimizeRouteNearestNeighbor(startLat, startLng, deliveries);
-  const deliveriesMap = new Map(deliveries.map(d => [d.id, { lat: d.lat, lng: d.lng }]));
-  const distance = calculateTotalDistance(order, deliveriesMap, startLat, startLng);
-  const durationSeconds = Math.round(distance / 30 * 60 * 60);
+  const deliveriesMap = new Map(
+    deliveries.map((d) => [d.id, { lat: d.lat, lng: d.lng }]),
+  );
+  const distance = calculateTotalDistance(
+    order,
+    deliveriesMap,
+    startLat,
+    startLng,
+  );
+  const durationSeconds = Math.round((distance / 30) * 60 * 60);
   const durationMinutes = Math.round(durationSeconds / 60);
-  
+
   return { order, distance, duration: durationMinutes };
 }
 
@@ -390,7 +493,7 @@ function calculateTotalDistance(
   order: number[],
   deliveriesMap: Map<number, { lat: number; lng: number }>,
   startLat: number,
-  startLng: number
+  startLng: number,
 ): number {
   let total = 0;
   let currentLat = startLat;
@@ -399,7 +502,12 @@ function calculateTotalDistance(
   for (const id of order) {
     const delivery = deliveriesMap.get(id);
     if (delivery) {
-      total += calculateDistance(currentLat, currentLng, delivery.lat, delivery.lng);
+      total += calculateDistance(
+        currentLat,
+        currentLng,
+        delivery.lat,
+        delivery.lng,
+      );
       currentLat = delivery.lat;
       currentLng = delivery.lng;
     }
@@ -410,14 +518,14 @@ function calculateTotalDistance(
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
 ): Promise<Server> {
   const io = new SocketIOServer(httpServer, {
     cors: {
       origin: "*",
-      methods: ["GET", "POST"]
+      methods: ["GET", "POST"],
     },
-    path: "/socket.io"
+    path: "/socket.io",
   });
 
   const driverSockets = new Map<number, string>();
@@ -430,15 +538,24 @@ export async function registerRoutes(
       console.log(`Driver ${driverId} registered with socket ${socket.id}`);
     });
 
-    socket.on("driver_location", async (data: { driverId: number; lat: number; lng: number }) => {
-      await storage.recordDriverLocation(data.driverId, data.lat, data.lng);
-      io.emit("location_update", data);
-    });
+    socket.on(
+      "driver_location",
+      async (data: { driverId: number; lat: number; lng: number }) => {
+        await storage.recordDriverLocation(data.driverId, data.lat, data.lng);
+        io.emit("location_update", data);
+      },
+    );
 
-    socket.on("stop_completed", async (data: { stopId: number; routeId: number }) => {
-      await storage.completeRouteStop(data.stopId);
-      io.emit("stop_status_update", { stopId: data.stopId, status: "completed" });
-    });
+    socket.on(
+      "stop_completed",
+      async (data: { stopId: number; routeId: number }) => {
+        await storage.completeRouteStop(data.stopId);
+        io.emit("stop_status_update", {
+          stopId: data.stopId,
+          status: "completed",
+        });
+      },
+    );
 
     socket.on("disconnect", () => {
       for (const [driverId, socketId] of driverSockets.entries()) {
@@ -461,26 +578,26 @@ export async function registerRoutes(
       if (!filename) {
         return res.status(400).json({ error: "Filename required" });
       }
-      
+
       const data = await downloadFromStorage(filename);
       if (!data) {
         return res.status(404).json({ error: "File not found" });
       }
-      
+
       // Determine content type based on extension
-      const ext = filename.split('.').pop()?.toLowerCase();
+      const ext = filename.split(".").pop()?.toLowerCase();
       const contentTypes: Record<string, string> = {
-        'png': 'image/png',
-        'jpg': 'image/jpeg',
-        'jpeg': 'image/jpeg',
-        'gif': 'image/gif',
-        'webp': 'image/webp',
-        'pdf': 'application/pdf'
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        webp: "image/webp",
+        pdf: "application/pdf",
       };
-      const contentType = contentTypes[ext || ''] || 'application/octet-stream';
-      
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'public, max-age=31536000');
+      const contentType = contentTypes[ext || ""] || "application/octet-stream";
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=31536000");
       res.send(data);
     } catch (error) {
       console.error("Storage download error:", error);
@@ -489,30 +606,38 @@ export async function registerRoutes(
   });
 
   // Upload status endpoint
-  app.get("/api/proofs/:proofId/upload-status", requireAuth, async (req, res) => {
-    try {
-      const proofId = parseInt(req.params.proofId);
-      const status = await getUploadStatus(proofId);
-      res.json(status);
-    } catch (error) {
-      console.error("Upload status error:", error);
-      res.status(500).json({ error: "Failed to get upload status" });
-    }
-  });
+  app.get(
+    "/api/proofs/:proofId/upload-status",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const proofId = parseInt(req.params.proofId);
+        const status = await getUploadStatus(proofId);
+        res.json(status);
+      } catch (error) {
+        console.error("Upload status error:", error);
+        res.status(500).json({ error: "Failed to get upload status" });
+      }
+    },
+  );
 
   // Authentication endpoints
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
-      
+
       if (!username || !password) {
-        return res.status(400).json({ message: "Username and password are required" });
+        return res
+          .status(400)
+          .json({ message: "Username and password are required" });
       }
 
       const user = await storage.validateUserPassword(username, password);
-      
+
       if (!user) {
-        return res.status(401).json({ message: "Invalid username or password" });
+        return res
+          .status(401)
+          .json({ message: "Invalid username or password" });
       }
 
       // Store user in session
@@ -520,7 +645,7 @@ export async function registerRoutes(
         id: user.id,
         username: user.username,
         role: user.role,
-        pharmacyId: user.pharmacyId
+        pharmacyId: user.pharmacyId,
       };
 
       // Get pharmacy name if user has pharmacyId
@@ -536,8 +661,8 @@ export async function registerRoutes(
           username: user.username,
           role: user.role,
           pharmacyId: user.pharmacyId,
-          pharmacyName
-        }
+          pharmacyName,
+        },
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -549,33 +674,37 @@ export async function registerRoutes(
   app.post("/api/auth/driver-login", async (req, res) => {
     try {
       const { username, password } = req.body;
-      
+
       if (!username || !password) {
-        return res.status(400).json({ message: "Username and password are required" });
+        return res
+          .status(400)
+          .json({ message: "Username and password are required" });
       }
 
       const driver = await storage.validateDriverPassword(username, password);
-      
+
       if (!driver) {
-        return res.status(401).json({ message: "Invalid username or password" });
+        return res
+          .status(401)
+          .json({ message: "Invalid username or password" });
       }
 
       // Store driver info in session
       req.session.user = {
         id: driver.id,
         username: driver.username!,
-        role: 'driver',
-        driverId: driver.id
+        role: "driver",
+        driverId: driver.id,
       };
 
       res.json({
         user: {
           id: driver.id,
           username: driver.username,
-          role: 'driver',
+          role: "driver",
           driverId: driver.id,
-          name: driver.name
-        }
+          name: driver.name,
+        },
       });
     } catch (error) {
       console.error("Driver login error:", error);
@@ -589,7 +718,7 @@ export async function registerRoutes(
       if (err) {
         return res.status(500).json({ message: "Logout failed" });
       }
-      res.clearCookie('connect.sid');
+      res.clearCookie("connect.sid");
       res.json({ message: "Logged out successfully" });
     });
   });
@@ -605,9 +734,11 @@ export async function registerRoutes(
   app.post("/api/auth/register", requireAdmin, async (req, res) => {
     try {
       const { username, password, role, pharmacyId } = req.body;
-      
+
       if (!username || !password) {
-        return res.status(400).json({ message: "Username and password are required" });
+        return res
+          .status(400)
+          .json({ message: "Username and password are required" });
       }
 
       // Check if username already exists
@@ -620,7 +751,7 @@ export async function registerRoutes(
         username,
         password,
         role: role || "dispatcher",
-        pharmacyId: pharmacyId || null
+        pharmacyId: pharmacyId || null,
       });
 
       res.json({
@@ -628,8 +759,8 @@ export async function registerRoutes(
           id: user.id,
           username: user.username,
           role: user.role,
-          pharmacyId: user.pharmacyId
-        }
+          pharmacyId: user.pharmacyId,
+        },
       });
     } catch (error) {
       console.error("Registration error:", error);
@@ -642,19 +773,23 @@ export async function registerRoutes(
     try {
       const existingUsers = await storage.getUsers();
       if (existingUsers.length > 0) {
-        return res.status(400).json({ message: "Setup already completed. Users exist." });
+        return res
+          .status(400)
+          .json({ message: "Setup already completed. Users exist." });
       }
 
       const { username, password } = req.body;
       if (!username || !password) {
-        return res.status(400).json({ message: "Username and password are required" });
+        return res
+          .status(400)
+          .json({ message: "Username and password are required" });
       }
 
       const user = await storage.createUser({
         username,
         password,
         role: "admin",
-        pharmacyId: null
+        pharmacyId: null,
       });
 
       res.json({
@@ -662,8 +797,8 @@ export async function registerRoutes(
         user: {
           id: user.id,
           username: user.username,
-          role: user.role
-        }
+          role: user.role,
+        },
       });
     } catch (error) {
       console.error("Setup error:", error);
@@ -742,17 +877,20 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers/:id", requireAuth, async (req, res) => {
+  app.get("/api/drivers/:id", requireAuthOrDriver, async (req, res) => {
     try {
       const driverId = parseInt(req.params.id);
-      
-      if (req.session.user?.role === 'driver' && req.session.user.driverId !== driverId) {
+
+      if (
+        req.session.user?.role === "driver" &&
+        req.session.user.driverId !== driverId
+      ) {
         return res.status(403).json({ error: "Access denied" });
       }
-      if (req.session.user?.role === 'dispatcher') {
+      if (req.session.user?.role === "dispatcher") {
         return res.status(403).json({ error: "Staff access required" });
       }
-      
+
       const driver = await storage.getDriver(driverId);
       if (!driver) {
         return res.status(404).json({ error: "Driver not found" });
@@ -763,18 +901,21 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/drivers/:id/routes", requireAuth, async (req, res) => {
+  app.get("/api/drivers/:id/routes", requireAuthOrDriver, async (req, res) => {
     try {
       const driverId = parseInt(req.params.id);
-      
+
       // Drivers can only access their own routes, admins can access all
-      if (req.session.user?.role === 'driver' && req.session.user.driverId !== driverId) {
+      if (
+        req.session.user?.role === "driver" &&
+        req.session.user.driverId !== driverId
+      ) {
         return res.status(403).json({ error: "Access denied" });
       }
-      if (req.session.user?.role === 'dispatcher') {
+      if (req.session.user?.role === "dispatcher") {
         return res.status(403).json({ error: "Admin access required" });
       }
-      
+
       const routes = await storage.getRoutesByDriver(driverId);
       res.json(routes);
     } catch (error) {
@@ -783,68 +924,88 @@ export async function registerRoutes(
   });
 
   // Get driver delivery history with full details
-  app.get("/api/drivers/:id/delivery-history", requireAuth, async (req, res) => {
-    try {
-      const driverId = parseInt(req.params.id);
-      
-      // Drivers can only access their own history
-      if (req.session.user?.role === 'driver' && req.session.user.driverId !== driverId) {
-        return res.status(403).json({ error: "Access denied" });
+  app.get(
+    "/api/drivers/:id/delivery-history",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const driverId = parseInt(req.params.id);
+
+        // Drivers can only access their own history
+        if (
+          req.session.user?.role === "driver" &&
+          req.session.user.driverId !== driverId
+        ) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+        // Admins and dispatchers can access (dispatchers may need reporting access)
+
+        const driverRoutes = await storage.getRoutesByDriver(driverId);
+
+        // Get stops with delivery details for each route
+        const routesWithDetails = await Promise.all(
+          driverRoutes.map(async (route) => {
+            const stops = await storage.getRouteStops(route.id);
+            const stopsWithDeliveries = await Promise.all(
+              stops.map(async (stop) => {
+                if (stop.deliveryId) {
+                  const delivery = await storage.getDelivery(stop.deliveryId);
+                  return { ...stop, delivery };
+                }
+                return stop;
+              }),
+            );
+            return {
+              ...route,
+              stops: stopsWithDeliveries,
+              completedCount: stopsWithDeliveries.filter(
+                (s) => s.status === "completed",
+              ).length,
+              totalCount: stopsWithDeliveries.length,
+            };
+          }),
+        );
+
+        res.json(routesWithDetails);
+      } catch (error) {
+        console.error("Failed to fetch driver delivery history:", error);
+        res.status(500).json({ error: "Failed to fetch delivery history" });
       }
-      // Admins and dispatchers can access (dispatchers may need reporting access)
-      
-      const driverRoutes = await storage.getRoutesByDriver(driverId);
-      
-      // Get stops with delivery details for each route
-      const routesWithDetails = await Promise.all(
-        driverRoutes.map(async (route) => {
-          const stops = await storage.getRouteStops(route.id);
-          const stopsWithDeliveries = await Promise.all(
-            stops.map(async (stop) => {
-              if (stop.deliveryId) {
-                const delivery = await storage.getDelivery(stop.deliveryId);
-                return { ...stop, delivery };
-              }
-              return stop;
-            })
-          );
-          return {
-            ...route,
-            stops: stopsWithDeliveries,
-            completedCount: stopsWithDeliveries.filter(s => s.status === 'completed').length,
-            totalCount: stopsWithDeliveries.length
-          };
-        })
-      );
-      
-      res.json(routesWithDetails);
-    } catch (error) {
-      console.error("Failed to fetch driver delivery history:", error);
-      res.status(500).json({ error: "Failed to fetch delivery history" });
-    }
-  });
+    },
+  );
 
   app.post("/api/drivers/:id/credentials", requireAdmin, async (req, res) => {
     try {
       const driverId = parseInt(req.params.id);
       const { username, password } = req.body;
-      
+
       if (!username || !password) {
-        return res.status(400).json({ error: "Username and password are required" });
+        return res
+          .status(400)
+          .json({ error: "Username and password are required" });
       }
 
       if (password.length < 4) {
-        return res.status(400).json({ error: "Password must be at least 4 characters" });
+        return res
+          .status(400)
+          .json({ error: "Password must be at least 4 characters" });
       }
 
-      const driver = await storage.setDriverCredentials(driverId, username, password);
+      const driver = await storage.setDriverCredentials(
+        driverId,
+        username,
+        password,
+      );
       if (!driver) {
         return res.status(404).json({ error: "Driver not found" });
       }
 
-      res.json({ message: "Driver credentials updated", driver: { id: driver.id, name: driver.name, username: driver.username } });
+      res.json({
+        message: "Driver credentials updated",
+        driver: { id: driver.id, name: driver.name, username: driver.username },
+      });
     } catch (error: any) {
-      if (error.code === '23505') {
+      if (error.code === "23505") {
         return res.status(400).json({ error: "Username already taken" });
       }
       console.error("Error setting driver credentials:", error);
@@ -856,16 +1017,20 @@ export async function registerRoutes(
     try {
       const ctx = getPharmacyContext(req.session);
       if (!ctx) return res.status(401).json({ error: "Not authenticated" });
-      
+
       let batches: any[];
       if (ctx.isAdmin) {
         batches = await storage.getBatches();
-        console.log(`[Batches API] Admin ${ctx.username}, returning all ${batches.length} batches`);
+        console.log(
+          `[Batches API] Admin ${ctx.username}, returning all ${batches.length} batches`,
+        );
       } else {
         batches = await storage.getBatchesByPharmacy(ctx.pharmacyId!);
-        console.log(`[Batches API] User ${ctx.username} (pharmacy ${ctx.pharmacyId}), returning ${batches.length} batches`);
+        console.log(
+          `[Batches API] User ${ctx.username} (pharmacy ${ctx.pharmacyId}), returning ${batches.length} batches`,
+        );
       }
-      
+
       res.json(batches);
     } catch (error) {
       console.error("Error fetching batches:", error);
@@ -876,38 +1041,47 @@ export async function registerRoutes(
   app.patch("/api/batches/:id/status", requireStaff, async (req, res) => {
     try {
       const batchId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkBatchOwnership(batchId, req.session)) {
+      if (!(await checkBatchOwnership(batchId, req.session))) {
         return res.status(403).json({ error: "Access denied to this batch" });
       }
-      
+
       const { status } = req.body;
-      
-      if (!status || !["pending", "ready", "complete", "cancelled"].includes(status)) {
-        return res.status(400).json({ error: "Invalid status. Must be pending, ready, complete, or cancelled" });
+
+      if (
+        !status ||
+        !["pending", "ready", "complete", "cancelled"].includes(status)
+      ) {
+        return res.status(400).json({
+          error:
+            "Invalid status. Must be pending, ready, complete, or cancelled",
+        });
       }
-      
+
       const batch = await storage.updateBatchStatus(batchId, status);
       if (!batch) {
         return res.status(404).json({ error: "Batch not found" });
       }
-      
+
       // Also update all deliveries in the batch to match
       if (status === "complete" || status === "cancelled") {
         const deliveriesInBatch = await storage.getDeliveriesByBatch(batchId);
         for (const delivery of deliveriesInBatch) {
-          if (delivery.status !== "complete" && delivery.status !== "cancelled") {
+          if (
+            delivery.status !== "complete" &&
+            delivery.status !== "cancelled"
+          ) {
             await storage.updateDeliveryStatus(delivery.id, status);
           }
         }
       }
-      
+
       // Also cancel associated delivery_orders when batch is cancelled
       if (status === "cancelled") {
         await storage.cancelDeliveryOrdersByBatch(batchId);
       }
-      
+
       res.json(batch);
     } catch (error) {
       console.error("Error updating batch status:", error);
@@ -915,213 +1089,334 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/batches/upload", requireStaff, upload.single("file"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
-      }
-
-      const csvContent = req.file.buffer.toString("utf-8");
-      const parsed = Papa.parse(csvContent, {
-        header: true,
-        skipEmptyLines: true
-      });
-
-      if (parsed.errors.length > 0) {
-        return res.status(400).json({ error: "Invalid CSV format", details: parsed.errors });
-      }
-
-      // Get pharmacyId from session for ownership
-      const session = req.session as any;
-      const pharmacyId = session?.user?.pharmacyId || null;
-      
-      // Get pharmacy name for batch naming
-      let pharmacyPrefix = "";
-      if (pharmacyId) {
-        const pharmacy = await storage.getPharmacy(pharmacyId);
-        if (pharmacy) {
-          pharmacyPrefix = `${pharmacy.name} - `;
+  app.post(
+    "/api/batches/upload",
+    requireStaff,
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: "No file uploaded" });
         }
-      }
-      
-      const batchName = req.body.name 
-        ? `${pharmacyPrefix}${req.body.name}`
-        : `${pharmacyPrefix}Batch ${new Date().toLocaleDateString()}`;
-      
-      const batch = await storage.createBatch({
-        name: batchName,
-        status: "processing",
-        totalDeliveries: parsed.data.length,
-        pharmacyId
-      });
 
-      let skippedCount = 0;
-      const skippedReasons: string[] = [];
-      let newOrderCount = 0;
-      let updatedOrderCount = 0;
-      const orderResults: any[] = [];
-      
-      if (parsed.data.length > 0) {
-        const firstRow = parsed.data[0] as any;
-        console.log("CSV Column names detected:", Object.keys(firstRow));
-        console.log("First row sample data:", JSON.stringify(firstRow).substring(0, 500));
-      }
-      
-      const cleanExcelValue = (val: any): string => {
-        if (!val) return '';
-        let str = String(val).trim();
-        if (str.startsWith('="') && str.endsWith('"')) {
-          str = str.slice(2, -1);
+        const csvContent = req.file.buffer.toString("utf-8");
+        const parsed = Papa.parse(csvContent, {
+          header: true,
+          skipEmptyLines: true,
+        });
+
+        if (parsed.errors.length > 0) {
+          return res
+            .status(400)
+            .json({ error: "Invalid CSV format", details: parsed.errors });
         }
-        if (str.startsWith('=')) {
-          str = str.slice(1);
-        }
-        return str.trim();
-      };
-      
-      const fileName = req.file.originalname || 'upload.csv';
-      
-      for (const row of parsed.data as any[]) {
-        const streetAddress = cleanExcelValue(row.PATADDRESS || row.pataddress || row.PatAddress || 
-                              row.patientaddress || row.PatientAddress || 
-                              row.street || row.Street || row.STREET || '');
-        const city = cleanExcelValue(row.PATCITY || row.patcity || row.PatCity || 
-                     row.city || row.City || row.CITY || '');
-        const state = cleanExcelValue(row.PATSTATE || row.patstate || row.PatState || 
-                      row.state || row.State || row.STATE || 'MI');
-        const zipCode = cleanExcelValue(row.PATZIP || row.patzip || row.PatZip || 
-                        row.zip || row.Zip || row.ZIP || row.zipcode || row.ZipCode || '');
-        
-        let addressText: string;
-        let normalizedData: { streetAddress: string; city: string; state: string; zipCode: string; normalizedHash: string; fullAddress: string } | null = null;
-        
-        if (streetAddress && city) {
-          normalizedData = normalizeAddress(streetAddress, city, state || 'MI', zipCode);
-          addressText = normalizedData.fullAddress;
-        } else {
-          addressText = row.address || row.Address || row.ADDRESS || '';
-          
-          if (addressText) {
-            const parsed = parseAddressComponents(addressText, 'MI');
-            if (parsed) {
-              normalizedData = normalizeAddress(parsed.street, parsed.city, parsed.state, parsed.zip);
-              addressText = normalizedData.fullAddress;
-            }
+
+        // Get pharmacyId from session for ownership
+        const session = req.session as any;
+        const pharmacyId = session?.user?.pharmacyId || null;
+
+        // Get pharmacy name for batch naming
+        let pharmacyPrefix = "";
+        if (pharmacyId) {
+          const pharmacy = await storage.getPharmacy(pharmacyId);
+          if (pharmacy) {
+            pharmacyPrefix = `${pharmacy.name} - `;
           }
         }
-        
-        if (!addressText || addressText.trim() === '') {
-          skippedCount++;
-          skippedReasons.push("Missing address");
-          continue;
-        }
 
-        const rxNumber = cleanExcelValue(row.RXNO || row.rxno || row.RxNo || row.Rxno ||
-                         row.rx_number || row.Rx_Number || row.RX_NUMBER ||
-                         row.rx_no || row.Rx_No || row.RX_NO ||
-                         row.rxNumber || row.RxNumber || row.RXNUMBER ||
-                         row.RX || row.rx || row.Rx || '');
-        if (!rxNumber) {
-          skippedCount++;
-          skippedReasons.push(`Missing RX number for address: ${addressText.substring(0, 30)}...`);
-          continue;
-        }
+        const batchName = req.body.name
+          ? `${pharmacyPrefix}${req.body.name}`
+          : `${pharmacyPrefix}Batch ${new Date().toLocaleDateString()}`;
 
-        const customerName = cleanExcelValue(row.PATIENTNAME || row.patientname || row.PatientName ||
-                             row.patname || row.PatName || row.PATNAME ||
-                             row.customer_name || row.customerName || row.CustomerName ||
-                             row.name || row.Name || row.NAME || '');
-        const customerPhone = cleanExcelValue(row.PATPHONE || row.patphone || row.PatPhone ||
-                              row.patientphone || row.PatientPhone ||
-                              row.customer_phone || row.customerPhone || row.CustomerPhone ||
-                              row.phone || row.Phone || row.PHONE || '');
-        const notes = cleanExcelValue(row.delivery || row.Delivery || row.DELIVERY ||
-                      row.notes || row.Notes || row.NOTES ||
-                      row.comments || row.Comments || row.DRUGNAME || row.drugname || '');
-        const fillDate = cleanExcelValue(row.FILLDATE || row.filldate || row.FillDate ||
-                         row.fill_date || row.Fill_Date || row.FILL_DATE || '');
-        
-        if (!pharmacyId) {
-          skippedCount++;
-          skippedReasons.push(`No pharmacy associated with your account`);
-          continue;
-        }
-
-        // Geocode the address for new orders
-        let lat: number | null = null;
-        let lng: number | null = null;
-        
-        // Check if this RX already exists for this pharmacy
-        const existingOrder = await storage.findDeliveryOrderByRx(pharmacyId, rxNumber);
-        if (!existingOrder) {
-          const geocoded = await geocodeAddress(addressText);
-          lat = geocoded?.lat || null;
-          lng = geocoded?.lng || null;
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        
-        // Upsert into delivery_orders - no duplicates
-        const { order, isNew } = await storage.upsertDeliveryOrder({
-          rxNumber,
+        const batch = await storage.createBatch({
+          name: batchName,
+          status: "processing",
+          totalDeliveries: parsed.data.length,
           pharmacyId,
-          fillDate: fillDate || null,
-          deliveryStatus: existingOrder ? existingOrder.deliveryStatus : 'IMPORTED',
-          addressText,
-          streetAddress: normalizedData?.streetAddress || null,
-          city: normalizedData?.city || null,
-          state: normalizedData?.state || null,
-          zipCode: normalizedData?.zipCode || null,
-          normalizedAddressHash: normalizedData?.normalizedHash || null,
-          lat,
-          lng,
-          customerName,
-          customerPhone,
-          notes,
-          priority: row.priority || "normal",
-          lastSeenAt: new Date(),
-          uploadCount: 1,
-        }, batch.id, fileName);
-        
-        orderResults.push(order);
-        if (isNew) {
-          newOrderCount++;
-        } else {
-          updatedOrderCount++;
+        });
+
+        let skippedCount = 0;
+        const skippedReasons: string[] = [];
+        let newOrderCount = 0;
+        let updatedOrderCount = 0;
+        const orderResults: any[] = [];
+
+        if (parsed.data.length > 0) {
+          const firstRow = parsed.data[0] as any;
+          console.log("CSV Column names detected:", Object.keys(firstRow));
+          console.log(
+            "First row sample data:",
+            JSON.stringify(firstRow).substring(0, 500),
+          );
         }
+
+        const cleanExcelValue = (val: any): string => {
+          if (!val) return "";
+          let str = String(val).trim();
+          if (str.startsWith('="') && str.endsWith('"')) {
+            str = str.slice(2, -1);
+          }
+          if (str.startsWith("=")) {
+            str = str.slice(1);
+          }
+          return str.trim();
+        };
+
+        const fileName = req.file.originalname || "upload.csv";
+
+        for (const row of parsed.data as any[]) {
+          const streetAddress = cleanExcelValue(
+            row.PATADDRESS ||
+              row.pataddress ||
+              row.PatAddress ||
+              row.patientaddress ||
+              row.PatientAddress ||
+              row.street ||
+              row.Street ||
+              row.STREET ||
+              "",
+          );
+          const city = cleanExcelValue(
+            row.PATCITY ||
+              row.patcity ||
+              row.PatCity ||
+              row.city ||
+              row.City ||
+              row.CITY ||
+              "",
+          );
+          const state = cleanExcelValue(
+            row.PATSTATE ||
+              row.patstate ||
+              row.PatState ||
+              row.state ||
+              row.State ||
+              row.STATE ||
+              "MI",
+          );
+          const zipCode = cleanExcelValue(
+            row.PATZIP ||
+              row.patzip ||
+              row.PatZip ||
+              row.zip ||
+              row.Zip ||
+              row.ZIP ||
+              row.zipcode ||
+              row.ZipCode ||
+              "",
+          );
+
+          let addressText: string;
+          let normalizedData: {
+            streetAddress: string;
+            city: string;
+            state: string;
+            zipCode: string;
+            normalizedHash: string;
+            fullAddress: string;
+          } | null = null;
+
+          if (streetAddress && city) {
+            normalizedData = normalizeAddress(
+              streetAddress,
+              city,
+              state || "MI",
+              zipCode,
+            );
+            addressText = normalizedData.fullAddress;
+          } else {
+            addressText = row.address || row.Address || row.ADDRESS || "";
+
+            if (addressText) {
+              const parsed = parseAddressComponents(addressText, "MI");
+              if (parsed) {
+                normalizedData = normalizeAddress(
+                  parsed.street,
+                  parsed.city,
+                  parsed.state,
+                  parsed.zip,
+                );
+                addressText = normalizedData.fullAddress;
+              }
+            }
+          }
+
+          if (!addressText || addressText.trim() === "") {
+            skippedCount++;
+            skippedReasons.push("Missing address");
+            continue;
+          }
+
+          const rxNumber = cleanExcelValue(
+            row.RXNO ||
+              row.rxno ||
+              row.RxNo ||
+              row.Rxno ||
+              row.rx_number ||
+              row.Rx_Number ||
+              row.RX_NUMBER ||
+              row.rx_no ||
+              row.Rx_No ||
+              row.RX_NO ||
+              row.rxNumber ||
+              row.RxNumber ||
+              row.RXNUMBER ||
+              row.RX ||
+              row.rx ||
+              row.Rx ||
+              "",
+          );
+          if (!rxNumber) {
+            skippedCount++;
+            skippedReasons.push(
+              `Missing RX number for address: ${addressText.substring(0, 30)}...`,
+            );
+            continue;
+          }
+
+          const customerName = cleanExcelValue(
+            row.PATIENTNAME ||
+              row.patientname ||
+              row.PatientName ||
+              row.patname ||
+              row.PatName ||
+              row.PATNAME ||
+              row.customer_name ||
+              row.customerName ||
+              row.CustomerName ||
+              row.name ||
+              row.Name ||
+              row.NAME ||
+              "",
+          );
+          const customerPhone = cleanExcelValue(
+            row.PATPHONE ||
+              row.patphone ||
+              row.PatPhone ||
+              row.patientphone ||
+              row.PatientPhone ||
+              row.customer_phone ||
+              row.customerPhone ||
+              row.CustomerPhone ||
+              row.phone ||
+              row.Phone ||
+              row.PHONE ||
+              "",
+          );
+          const notes = cleanExcelValue(
+            row.delivery ||
+              row.Delivery ||
+              row.DELIVERY ||
+              row.notes ||
+              row.Notes ||
+              row.NOTES ||
+              row.comments ||
+              row.Comments ||
+              row.DRUGNAME ||
+              row.drugname ||
+              "",
+          );
+          const fillDate = cleanExcelValue(
+            row.FILLDATE ||
+              row.filldate ||
+              row.FillDate ||
+              row.fill_date ||
+              row.Fill_Date ||
+              row.FILL_DATE ||
+              "",
+          );
+
+          if (!pharmacyId) {
+            skippedCount++;
+            skippedReasons.push(`No pharmacy associated with your account`);
+            continue;
+          }
+
+          // Geocode the address for new orders
+          let lat: number | null = null;
+          let lng: number | null = null;
+
+          // Check if this RX already exists for this pharmacy
+          const existingOrder = await storage.findDeliveryOrderByRx(
+            pharmacyId,
+            rxNumber,
+          );
+          if (!existingOrder) {
+            const geocoded = await geocodeAddress(addressText);
+            lat = geocoded?.lat || null;
+            lng = geocoded?.lng || null;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+
+          // Upsert into delivery_orders - no duplicates
+          const { order, isNew } = await storage.upsertDeliveryOrder(
+            {
+              rxNumber,
+              pharmacyId,
+              fillDate: fillDate || null,
+              deliveryStatus: existingOrder
+                ? existingOrder.deliveryStatus
+                : "IMPORTED",
+              addressText,
+              streetAddress: normalizedData?.streetAddress || null,
+              city: normalizedData?.city || null,
+              state: normalizedData?.state || null,
+              zipCode: normalizedData?.zipCode || null,
+              normalizedAddressHash: normalizedData?.normalizedHash || null,
+              lat,
+              lng,
+              customerName,
+              customerPhone,
+              notes,
+              priority: row.priority || "normal",
+              lastSeenAt: new Date(),
+              uploadCount: 1,
+            },
+            batch.id,
+            fileName,
+          );
+
+          orderResults.push(order);
+          if (isNew) {
+            newOrderCount++;
+          } else {
+            updatedOrderCount++;
+          }
+        }
+
+        await storage.updateBatchStatus(batch.id, "ready");
+
+        res.json({
+          batch,
+          orders: orderResults,
+          newOrderCount,
+          updatedOrderCount,
+          totalRows: parsed.data.length,
+          skippedCount,
+          skippedReasons: skippedReasons.slice(0, 5),
+        });
+      } catch (error) {
+        console.error("Upload error:", error);
+        res.status(500).json({ error: "Failed to process CSV" });
       }
-
-      await storage.updateBatchStatus(batch.id, "ready");
-
-      res.json({
-        batch,
-        orders: orderResults,
-        newOrderCount,
-        updatedOrderCount,
-        totalRows: parsed.data.length,
-        skippedCount,
-        skippedReasons: skippedReasons.slice(0, 5)
-      });
-    } catch (error) {
-      console.error("Upload error:", error);
-      res.status(500).json({ error: "Failed to process CSV" });
-    }
-  });
+    },
+  );
 
   // Delivery Orders API
   app.get("/api/delivery-orders", requireStaff, async (req, res) => {
     try {
       const session = req.session as any;
       const pharmacyId = session?.user?.pharmacyId;
-      
-      if (session?.user?.role === 'admin') {
+
+      if (session?.user?.role === "admin") {
         const orders = await storage.getAllDeliveryOrders();
         return res.json(orders);
       }
-      
+
       if (!pharmacyId) {
         return res.json([]);
       }
-      
+
       const orders = await storage.getDeliveryOrdersByPharmacy(pharmacyId);
       res.json(orders);
     } catch (error) {
@@ -1134,22 +1429,32 @@ export async function registerRoutes(
     try {
       const session = req.session as any;
       const pharmacyId = session?.user?.pharmacyId;
-      
+
       if (!pharmacyId) {
-        return res.status(400).json({ error: "No pharmacy associated with your account" });
+        return res
+          .status(400)
+          .json({ error: "No pharmacy associated with your account" });
       }
-      
-      const { rxNumber, addressText, customerName, customerPhone, notes } = req.body;
+
+      const { rxNumber, addressText, customerName, customerPhone, notes } =
+        req.body;
       if (!rxNumber || !addressText) {
-        return res.status(400).json({ error: "RX number and address are required" });
+        return res
+          .status(400)
+          .json({ error: "RX number and address are required" });
       }
-      
+
       // Check if RX already exists
-      const existing = await storage.findDeliveryOrderByRx(pharmacyId, rxNumber);
+      const existing = await storage.findDeliveryOrderByRx(
+        pharmacyId,
+        rxNumber,
+      );
       if (existing) {
-        return res.status(409).json({ error: `RX ${rxNumber} already exists`, order: existing });
+        return res
+          .status(409)
+          .json({ error: `RX ${rxNumber} already exists`, order: existing });
       }
-      
+
       // Geocode the address
       let geocoded: any = null;
       try {
@@ -1158,46 +1463,62 @@ export async function registerRoutes(
         console.error("Geocoding failed for manual order:", e);
       }
       const hasGeocode = geocoded && geocoded.lat && geocoded.lng;
-      
+
       // Try to normalize the address
       let normalizedData: any = null;
-      const parsed = parseAddressComponents(addressText, 'MI');
+      const parsed = parseAddressComponents(addressText, "MI");
       if (parsed) {
-        normalizedData = normalizeAddress(parsed.street, parsed.city, parsed.state, parsed.zip);
+        normalizedData = normalizeAddress(
+          parsed.street,
+          parsed.city,
+          parsed.state,
+          parsed.zip,
+        );
       }
-      
+
       // If geocoding succeeded, set ROUTE_ELIGIBLE; otherwise IMPORTED (needs geocoding later)
-      const { order } = await storage.upsertDeliveryOrder({
-        rxNumber,
-        pharmacyId,
-        fillDate: null,
-        deliveryStatus: hasGeocode ? 'ROUTE_ELIGIBLE' : 'IMPORTED',
-        addressText: normalizedData?.fullAddress || addressText,
-        streetAddress: normalizedData?.streetAddress || null,
-        city: normalizedData?.city || null,
-        state: normalizedData?.state || null,
-        zipCode: normalizedData?.zipCode || null,
-        normalizedAddressHash: normalizedData?.normalizedHash || null,
-        lat: geocoded?.lat || null,
-        lng: geocoded?.lng || null,
-        customerName: customerName || null,
-        customerPhone: customerPhone || null,
-        notes: notes || null,
-        priority: "normal",
-        lastSeenAt: new Date(),
-        uploadCount: 1,
-      }, null, 'manual-entry');
-      
+      const { order } = await storage.upsertDeliveryOrder(
+        {
+          rxNumber,
+          pharmacyId,
+          fillDate: null,
+          deliveryStatus: hasGeocode ? "ROUTE_ELIGIBLE" : "IMPORTED",
+          addressText: normalizedData?.fullAddress || addressText,
+          streetAddress: normalizedData?.streetAddress || null,
+          city: normalizedData?.city || null,
+          state: normalizedData?.state || null,
+          zipCode: normalizedData?.zipCode || null,
+          normalizedAddressHash: normalizedData?.normalizedHash || null,
+          lat: geocoded?.lat || null,
+          lng: geocoded?.lng || null,
+          customerName: customerName || null,
+          customerPhone: customerPhone || null,
+          notes: notes || null,
+          priority: "normal",
+          lastSeenAt: new Date(),
+          uploadCount: 1,
+        },
+        null,
+        "manual-entry",
+      );
+
       // Assign delivery identifier for manually created route-eligible orders
       let finalOrder = order;
       if (hasGeocode && !order.deliveryIdentifier) {
-        const deliveryIdentifier = await storage.getOrCreateDeliveryIdentifierForAddress(order);
-        finalOrder = await storage.updateDeliveryOrderDeliveryIdentifier(order.id, deliveryIdentifier) || order;
+        const deliveryIdentifier =
+          await storage.getOrCreateDeliveryIdentifierForAddress(order);
+        finalOrder =
+          (await storage.updateDeliveryOrderDeliveryIdentifier(
+            order.id,
+            deliveryIdentifier,
+          )) || order;
       }
-      
+
       res.json({
         ...finalOrder,
-        geocodeWarning: !hasGeocode ? "Address could not be geocoded. Order saved but needs address correction before routing." : undefined
+        geocodeWarning: !hasGeocode
+          ? "Address could not be geocoded. Order saved but needs address correction before routing."
+          : undefined,
       });
     } catch (error) {
       console.error("Error creating delivery order:", error);
@@ -1205,33 +1526,41 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/delivery-orders/by-batch/:batchId", requireStaff, async (req, res) => {
-    try {
-      const batchId = parseInt(req.params.batchId);
-      if (!await checkBatchOwnership(batchId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this batch" });
+  app.get(
+    "/api/delivery-orders/by-batch/:batchId",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const batchId = parseInt(req.params.batchId);
+        if (!(await checkBatchOwnership(batchId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this batch" });
+        }
+        const orders = await storage.getDeliveryOrdersByBatch(batchId);
+        res.json(orders);
+      } catch (error) {
+        res
+          .status(500)
+          .json({ error: "Failed to fetch delivery orders for batch" });
       }
-      const orders = await storage.getDeliveryOrdersByBatch(batchId);
-      res.json(orders);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch delivery orders for batch" });
-    }
-  });
+    },
+  );
 
   app.get("/api/delivery-orders/eligible", requireStaff, async (req, res) => {
     try {
       const session = req.session as any;
       const pharmacyId = session?.user?.pharmacyId;
-      
-      if (session?.user?.role === 'admin') {
+
+      if (session?.user?.role === "admin") {
         const allOrders = await storage.getAllDeliveryOrders();
-        return res.json(allOrders.filter(o => o.deliveryStatus === 'ROUTE_ELIGIBLE'));
+        return res.json(
+          allOrders.filter((o) => o.deliveryStatus === "ROUTE_ELIGIBLE"),
+        );
       }
-      
+
       if (!pharmacyId) {
         return res.json([]);
       }
-      
+
       const orders = await storage.getRouteEligibleOrders(pharmacyId);
       res.json(orders);
     } catch (error) {
@@ -1251,14 +1580,20 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/delivery-orders/:id/uploads", requireStaff, async (req, res) => {
-    try {
-      const uploads = await storage.getDeliveryOrderUploads(parseInt(req.params.id));
-      res.json(uploads);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch upload history" });
-    }
-  });
+  app.get(
+    "/api/delivery-orders/:id/uploads",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const uploads = await storage.getDeliveryOrderUploads(
+          parseInt(req.params.id),
+        );
+        res.json(uploads);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch upload history" });
+      }
+    },
+  );
 
   app.post("/api/delivery-orders/:id/scan", requireStaff, async (req, res) => {
     try {
@@ -1267,132 +1602,192 @@ export async function registerRoutes(
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
-      
-      if (order.deliveryStatus === 'ROUTED' || order.deliveryStatus === 'DELIVERED') {
-        return res.status(400).json({ error: `Order is already ${order.deliveryStatus}` });
+
+      if (
+        order.deliveryStatus === "ROUTED" ||
+        order.deliveryStatus === "DELIVERED"
+      ) {
+        return res
+          .status(400)
+          .json({ error: `Order is already ${order.deliveryStatus}` });
       }
-      
-      const updated = await storage.updateDeliveryOrderStatus(orderId, 'ROUTE_ELIGIBLE');
+
+      const updated = await storage.updateDeliveryOrderStatus(
+        orderId,
+        "ROUTE_ELIGIBLE",
+      );
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Failed to scan order" });
     }
   });
 
-  app.post("/api/delivery-orders/scan-barcode", requireStaff, async (req, res) => {
-    try {
-      const { barcode } = req.body;
-      if (!barcode) {
-        return res.status(400).json({ error: "Barcode is required" });
-      }
-      
-      const session = req.session as any;
-      const pharmacyId = session?.user?.pharmacyId;
-      
-      // Strip trailing non-numeric characters from barcode
-      const cleanBarcode = barcode.replace(/[^0-9]+$/, '');
-      
-      // Search across all pharmacy orders if admin, or scoped to pharmacy
-      let order;
-      if (pharmacyId) {
-        order = await storage.findDeliveryOrderByRx(pharmacyId, cleanBarcode);
-        if (!order) {
-          order = await storage.findDeliveryOrderByRx(pharmacyId, barcode);
+  app.post(
+    "/api/delivery-orders/scan-barcode",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const { barcode } = req.body;
+        if (!barcode) {
+          return res.status(400).json({ error: "Barcode is required" });
         }
-      }
-      
-      if (!order) {
-        return res.status(404).json({ error: `No order found for RX: ${cleanBarcode}` });
-      }
-      
-      if (order.deliveryStatus === 'ROUTED' || order.deliveryStatus === 'DELIVERED') {
-        return res.json({ order, alreadyProcessed: true, message: `Order is already ${order.deliveryStatus}` });
-      }
-      
-      const updated = await storage.updateDeliveryOrderStatus(order.id, 'ROUTE_ELIGIBLE');
-      res.json({ order: updated, alreadyProcessed: false, message: 'Order marked as route-eligible' });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to process barcode scan" });
-    }
-  });
 
-  app.post("/api/delivery-orders/:id/status", requireStaff, async (req, res) => {
-    try {
-      const { status } = req.body;
-      if (!['IMPORTED', 'ROUTE_ELIGIBLE', 'ROUTED', 'DELIVERED', 'CANCELLED'].includes(status)) {
-        return res.status(400).json({ error: "Invalid status" });
+        const session = req.session as any;
+        const pharmacyId = session?.user?.pharmacyId;
+
+        // Strip trailing non-numeric characters from barcode
+        const cleanBarcode = barcode.replace(/[^0-9]+$/, "");
+
+        // Search across all pharmacy orders if admin, or scoped to pharmacy
+        let order;
+        if (pharmacyId) {
+          order = await storage.findDeliveryOrderByRx(pharmacyId, cleanBarcode);
+          if (!order) {
+            order = await storage.findDeliveryOrderByRx(pharmacyId, barcode);
+          }
+        }
+
+        if (!order) {
+          return res
+            .status(404)
+            .json({ error: `No order found for RX: ${cleanBarcode}` });
+        }
+
+        if (
+          order.deliveryStatus === "ROUTED" ||
+          order.deliveryStatus === "DELIVERED"
+        ) {
+          return res.json({
+            order,
+            alreadyProcessed: true,
+            message: `Order is already ${order.deliveryStatus}`,
+          });
+        }
+
+        const updated = await storage.updateDeliveryOrderStatus(
+          order.id,
+          "ROUTE_ELIGIBLE",
+        );
+        res.json({
+          order: updated,
+          alreadyProcessed: false,
+          message: "Order marked as route-eligible",
+        });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to process barcode scan" });
       }
-      const updated = await storage.updateDeliveryOrderStatus(parseInt(req.params.id), status);
-      if (!updated) {
-        return res.status(404).json({ error: "Order not found" });
+    },
+  );
+
+  app.post(
+    "/api/delivery-orders/:id/status",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const { status } = req.body;
+        if (
+          ![
+            "IMPORTED",
+            "ROUTE_ELIGIBLE",
+            "ROUTED",
+            "DELIVERED",
+            "CANCELLED",
+          ].includes(status)
+        ) {
+          return res.status(400).json({ error: "Invalid status" });
+        }
+        const updated = await storage.updateDeliveryOrderStatus(
+          parseInt(req.params.id),
+          status,
+        );
+        if (!updated) {
+          return res.status(404).json({ error: "Order not found" });
+        }
+        res.json(updated);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to update order status" });
       }
-      res.json(updated);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update order status" });
-    }
-  });
+    },
+  );
 
   app.get("/api/batches/:id", requireStaff, async (req, res) => {
     try {
       const batchId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkBatchOwnership(batchId, req.session)) {
+      if (!(await checkBatchOwnership(batchId, req.session))) {
         return res.status(403).json({ error: "Access denied to this batch" });
       }
-      
+
       const batch = await storage.getBatch(batchId);
       if (!batch) {
         return res.status(404).json({ error: "Batch not found" });
       }
       const deliveries = await storage.getDeliveriesByBatch(batch.id);
       const prescriptions = await storage.getPrescriptionsByBatch(batch.id);
-      
+
       // Attach prescriptions to their respective deliveries
-      const deliveriesWithPrescriptions = deliveries.map(delivery => ({
+      const deliveriesWithPrescriptions = deliveries.map((delivery) => ({
         ...delivery,
-        prescriptions: prescriptions.filter(p => p.deliveryId === delivery.id)
+        prescriptions: prescriptions.filter(
+          (p) => p.deliveryId === delivery.id,
+        ),
       }));
-      
-      res.json({ batch, deliveries: deliveriesWithPrescriptions, prescriptions });
+
+      res.json({
+        batch,
+        deliveries: deliveriesWithPrescriptions,
+        prescriptions,
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch batch" });
     }
   });
-  
+
   // Prescription endpoints
-  app.get("/api/prescriptions/batch/:batchId", requireStaff, async (req, res) => {
-    try {
-      const batchId = parseInt(req.params.batchId);
-      
-      // Check pharmacy ownership
-      if (!await checkBatchOwnership(batchId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this batch" });
+  app.get(
+    "/api/prescriptions/batch/:batchId",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const batchId = parseInt(req.params.batchId);
+
+        // Check pharmacy ownership
+        if (!(await checkBatchOwnership(batchId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this batch" });
+        }
+
+        const prescriptions = await storage.getPrescriptionsByBatch(batchId);
+        res.json(prescriptions);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch prescriptions" });
       }
-      
-      const prescriptions = await storage.getPrescriptionsByBatch(batchId);
-      res.json(prescriptions);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch prescriptions" });
-    }
-  });
-  
-  app.get("/api/prescriptions/delivery/:deliveryId", requireStaff, async (req, res) => {
-    try {
-      const deliveryId = parseInt(req.params.deliveryId);
-      
-      // Check pharmacy ownership
-      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+    },
+  );
+
+  app.get(
+    "/api/prescriptions/delivery/:deliveryId",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const deliveryId = parseInt(req.params.deliveryId);
+
+        // Check pharmacy ownership
+        if (!(await checkDeliveryOwnership(deliveryId, req.session))) {
+          return res
+            .status(403)
+            .json({ error: "Access denied to this delivery" });
+        }
+
+        const prescriptions =
+          await storage.getPrescriptionsByDelivery(deliveryId);
+        res.json(prescriptions);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch prescriptions" });
       }
-      
-      const prescriptions = await storage.getPrescriptionsByDelivery(deliveryId);
-      res.json(prescriptions);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch prescriptions" });
-    }
-  });
-  
+    },
+  );
+
   app.post("/api/prescriptions", requireStaff, async (req, res) => {
     try {
       if (!req.body.rxNumber) {
@@ -1401,12 +1796,14 @@ export async function registerRoutes(
       if (!req.body.deliveryId) {
         return res.status(400).json({ error: "Delivery ID is required" });
       }
-      
+
       // Check delivery ownership
-      if (!await checkDeliveryOwnership(req.body.deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(req.body.deliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
-      
+
       const prescription = await storage.createPrescription(req.body);
       io.emit("prescription_created", prescription);
       res.json(prescription);
@@ -1415,7 +1812,7 @@ export async function registerRoutes(
       res.status(500).json({ error: "Failed to create prescription" });
     }
   });
-  
+
   app.put("/api/prescriptions/:id", requireStaff, async (req, res) => {
     try {
       const prescriptionId = parseInt(req.params.id);
@@ -1423,20 +1820,27 @@ export async function registerRoutes(
       if (!prescription) {
         return res.status(404).json({ error: "Prescription not found" });
       }
-      
+
       // Check delivery ownership
-      if (!await checkDeliveryOwnership(prescription.deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this prescription" });
+      if (
+        !(await checkDeliveryOwnership(prescription.deliveryId, req.session))
+      ) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this prescription" });
       }
-      
-      const updatedPrescription = await storage.updatePrescription(prescriptionId, req.body);
+
+      const updatedPrescription = await storage.updatePrescription(
+        prescriptionId,
+        req.body,
+      );
       io.emit("prescription_updated", updatedPrescription);
       res.json(updatedPrescription);
     } catch (error) {
       res.status(500).json({ error: "Failed to update prescription" });
     }
   });
-  
+
   app.delete("/api/prescriptions/:id", requireStaff, async (req, res) => {
     try {
       const prescriptionId = parseInt(req.params.id);
@@ -1444,12 +1848,16 @@ export async function registerRoutes(
       if (!prescription) {
         return res.status(404).json({ error: "Prescription not found" });
       }
-      
+
       // Check delivery ownership
-      if (!await checkDeliveryOwnership(prescription.deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this prescription" });
+      if (
+        !(await checkDeliveryOwnership(prescription.deliveryId, req.session))
+      ) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this prescription" });
       }
-      
+
       const success = await storage.deletePrescription(prescriptionId);
       if (!success) {
         return res.status(404).json({ error: "Prescription not found" });
@@ -1484,16 +1892,20 @@ export async function registerRoutes(
     try {
       const ctx = getPharmacyContext(req.session);
       if (!ctx) return res.status(401).json({ error: "Not authenticated" });
-      
+
       let routes: any[];
       if (ctx.isAdmin) {
         routes = await storage.getRoutes();
-        console.log(`[Routes API] Admin ${ctx.username}, returning all ${routes.length} routes`);
+        console.log(
+          `[Routes API] Admin ${ctx.username}, returning all ${routes.length} routes`,
+        );
       } else {
         routes = await storage.getRoutesByPharmacy(ctx.pharmacyId!);
-        console.log(`[Routes API] User ${ctx.username} (pharmacy ${ctx.pharmacyId}), returning ${routes.length} routes`);
+        console.log(
+          `[Routes API] User ${ctx.username} (pharmacy ${ctx.pharmacyId}), returning ${routes.length} routes`,
+        );
       }
-      
+
       res.json(routes);
     } catch (error) {
       console.error("Error fetching routes:", error);
@@ -1501,21 +1913,21 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/routes/:id", requireAuth, async (req, res) => {
+  app.get("/api/routes/:id", requireAuthOrDriver, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
+      if (!(await checkRouteOwnership(routeId, req.session))) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
-      
+
       const route = await storage.getRoute(routeId);
       if (!route) {
         return res.status(404).json({ error: "Route not found" });
       }
       const stops = await storage.getRouteStops(route.id);
-      
+
       // Attach prescriptions to each delivery - fetch delivery directly by ID
       const stopsWithDeliveries = await Promise.all(
         stops.map(async (stop) => {
@@ -1524,14 +1936,16 @@ export async function registerRoutes(
           }
           const delivery = await storage.getDelivery(stop.deliveryId);
           if (delivery) {
-            const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
+            const prescriptions = await storage.getPrescriptionsByDelivery(
+              delivery.id,
+            );
             return {
               ...stop,
-              delivery: { ...delivery, prescriptions }
+              delivery: { ...delivery, prescriptions },
             };
           }
           return { ...stop, delivery: null };
-        })
+        }),
       );
 
       res.json({ route, stops: stopsWithDeliveries });
@@ -1544,27 +1958,33 @@ export async function registerRoutes(
   app.get("/api/routes/:id/report", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
+      if (!(await checkRouteOwnership(routeId, req.session))) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
-      
+
       const route = await storage.getRoute(routeId);
       if (!route) {
         return res.status(404).json({ error: "Route not found" });
       }
-      
-      const driver = route.driverId ? await storage.getDriver(route.driverId) : null;
+
+      const driver = route.driverId
+        ? await storage.getDriver(route.driverId)
+        : null;
       const stops = await storage.getRouteStops(route.id);
-      
+
       // Build detailed stops with delivery proofs
       const detailedStops = await Promise.all(
         stops.map(async (stop) => {
-          const delivery = stop.deliveryId ? await storage.getDelivery(stop.deliveryId) : null;
-          const prescriptions = delivery ? await storage.getPrescriptionsByDelivery(delivery.id) : [];
+          const delivery = stop.deliveryId
+            ? await storage.getDelivery(stop.deliveryId)
+            : null;
+          const prescriptions = delivery
+            ? await storage.getPrescriptionsByDelivery(delivery.id)
+            : [];
           const proof = await storage.getDeliveryProof(stop.id);
-          
+
           return {
             id: stop.id,
             sequence: stop.sequence,
@@ -1573,45 +1993,61 @@ export async function registerRoutes(
             packageScanned: stop.packageScanned,
             eta: stop.eta,
             actualArrival: stop.actualArrival,
-            delivery: delivery ? {
-              id: delivery.id,
-              deliveryIdentifier: delivery.deliveryIdentifier,
-              addressText: delivery.addressText,
-              streetAddress: delivery.streetAddress,
-              city: delivery.city,
-              state: delivery.state,
-              zipCode: delivery.zipCode,
-              customerName: delivery.customerName,
-              customerPhone: delivery.customerPhone,
-              status: delivery.status,
-            } : null,
-            prescriptions: prescriptions.map(p => ({
+            delivery: delivery
+              ? {
+                  id: delivery.id,
+                  deliveryIdentifier: delivery.deliveryIdentifier,
+                  addressText: delivery.addressText,
+                  streetAddress: delivery.streetAddress,
+                  city: delivery.city,
+                  state: delivery.state,
+                  zipCode: delivery.zipCode,
+                  customerName: delivery.customerName,
+                  customerPhone: delivery.customerPhone,
+                  status: delivery.status,
+                }
+              : null,
+            prescriptions: prescriptions.map((p) => ({
               id: p.id,
               rxNumber: p.rxNumber,
               patientName: p.patientName,
               verified: stop.packageScanned || false,
             })),
-            proof: proof ? {
-              hasSignature: !!(proof.signature || proof.signatureUrl),
-              hasPhoto: !!(proof.picture || proof.pictureUrl),
-              signatureData: proof.signature || proof.signatureUrl,
-              photoData: proof.picture || proof.pictureUrl,
-              notes: proof.notes,
-              timestamp: proof.createdAt,
-              barcode: proof.barcode,
-            } : null,
+            proof: proof
+              ? {
+                  hasSignature: !!(proof.signature || proof.signatureUrl),
+                  hasPhoto: !!(proof.picture || proof.pictureUrl),
+                  signatureData: proof.signature || proof.signatureUrl,
+                  photoData: proof.picture || proof.pictureUrl,
+                  notes: proof.notes,
+                  timestamp: proof.createdAt,
+                  barcode: proof.barcode,
+                }
+              : null,
           };
-        })
+        }),
       );
-      
+
       // Calculate summary stats
-      const completedStops = detailedStops.filter(s => s.status === 'complete' || s.status === 'completed');
-      const pendingStops = detailedStops.filter(s => s.status === 'pending');
-      const cancelledStops = detailedStops.filter(s => s.status === 'cancelled');
-      const stopsWithProof = detailedStops.filter(s => s.proof?.hasSignature || s.proof?.hasPhoto);
-      const totalPrescriptions = detailedStops.reduce((acc, s) => acc + s.prescriptions.length, 0);
-      const verifiedPrescriptions = detailedStops.reduce((acc, s) => acc + s.prescriptions.filter(p => p.verified).length, 0);
-      
+      const completedStops = detailedStops.filter(
+        (s) => s.status === "complete" || s.status === "completed",
+      );
+      const pendingStops = detailedStops.filter((s) => s.status === "pending");
+      const cancelledStops = detailedStops.filter(
+        (s) => s.status === "cancelled",
+      );
+      const stopsWithProof = detailedStops.filter(
+        (s) => s.proof?.hasSignature || s.proof?.hasPhoto,
+      );
+      const totalPrescriptions = detailedStops.reduce(
+        (acc, s) => acc + s.prescriptions.length,
+        0,
+      );
+      const verifiedPrescriptions = detailedStops.reduce(
+        (acc, s) => acc + s.prescriptions.filter((p) => p.verified).length,
+        0,
+      );
+
       res.json({
         route: {
           id: route.id,
@@ -1624,11 +2060,13 @@ export async function registerRoutes(
           dispatchedAt: route.dispatchedAt,
           completedAt: route.completedAt,
         },
-        driver: driver ? {
-          id: driver.id,
-          name: driver.name,
-          phone: driver.phone,
-        } : null,
+        driver: driver
+          ? {
+              id: driver.id,
+              name: driver.name,
+              phone: driver.phone,
+            }
+          : null,
         summary: {
           totalStops: detailedStops.length,
           completedStops: completedStops.length,
@@ -1648,7 +2086,19 @@ export async function registerRoutes(
 
   app.post("/api/routes/optimize", requireStaff, async (req, res) => {
     try {
-      const { batchId, deliveryIds, orderIds, zoneId, startLat, startLng, startAddress, endLat, endLng, endAddress, routeName } = req.body;
+      const {
+        batchId,
+        deliveryIds,
+        orderIds,
+        zoneId,
+        startLat,
+        startLng,
+        startAddress,
+        endLat,
+        endLng,
+        endAddress,
+        routeName,
+      } = req.body;
 
       if (startLat === undefined || startLng === undefined) {
         return res.status(400).json({ error: "Missing required fields" });
@@ -1658,39 +2108,46 @@ export async function registerRoutes(
 
       let geocodedDeliveries: any[] = [];
       let orderIdsForStatusUpdate: number[] = [];
-      
+
       if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
         // New delivery_orders approach: create deliveries from ROUTE_ELIGIBLE orders
         const orders = await Promise.all(
-          orderIds.map(id => storage.getDeliveryOrder(id))
+          orderIds.map((id) => storage.getDeliveryOrder(id)),
         );
-        const validOrders = orders.filter(o => o && o.lat && o.lng && o.deliveryStatus === 'ROUTE_ELIGIBLE') as any[];
-        
+        const validOrders = orders.filter(
+          (o) => o && o.lat && o.lng && o.deliveryStatus === "ROUTE_ELIGIBLE",
+        ) as any[];
+
         if (validOrders.length === 0) {
-          return res.status(400).json({ error: "No geocoded route-eligible orders found" });
+          return res
+            .status(400)
+            .json({ error: "No geocoded route-eligible orders found" });
         }
-        
+
         // Group orders by normalized address for consolidation
         const addressGroups = new Map<string, any[]>();
         for (const order of validOrders) {
-          const key = order.normalizedAddressHash || order.addressText.toLowerCase().trim();
+          const key =
+            order.normalizedAddressHash ||
+            order.addressText.toLowerCase().trim();
           if (!addressGroups.has(key)) {
             addressGroups.set(key, []);
           }
           addressGroups.get(key)!.push(order);
         }
-        
+
         // Create one delivery per unique address (consolidating multiple RXs)
         for (const [, groupOrders] of addressGroups) {
           const firstOrder = groupOrders[0];
-          const allRxNumbers = groupOrders.map(o => o.rxNumber).join(', ');
+          const allRxNumbers = groupOrders.map((o) => o.rxNumber).join(", ");
           const allNotes = groupOrders
-            .map(o => o.notes)
+            .map((o) => o.notes)
             .filter(Boolean)
-            .join('; ');
-          const hasUrgent = groupOrders.some(o => o.priority === 'urgent');
-          
-          const deliveryIdentifier = await storage.generateUniqueDeliveryIdentifier();
+            .join("; ");
+          const hasUrgent = groupOrders.some((o) => o.priority === "urgent");
+
+          const deliveryIdentifier =
+            await storage.generateUniqueDeliveryIdentifier();
           const delivery = await storage.createDelivery({
             batchId: firstOrder.batchId,
             deliveryIdentifier,
@@ -1707,38 +2164,51 @@ export async function registerRoutes(
             rxNumber: allRxNumbers,
             notes: allNotes || null,
             priority: hasUrgent ? "urgent" : "normal",
-            status: "geocoded"
+            status: "geocoded",
           });
-          geocodedDeliveries.push({ ...delivery, priority: hasUrgent ? "urgent" : "normal" });
-          
+          geocodedDeliveries.push({
+            ...delivery,
+            priority: hasUrgent ? "urgent" : "normal",
+          });
+
           for (const order of groupOrders) {
             orderIdsForStatusUpdate.push(order.id);
           }
         }
-      } else if (deliveryIds && Array.isArray(deliveryIds) && deliveryIds.length > 0) {
+      } else if (
+        deliveryIds &&
+        Array.isArray(deliveryIds) &&
+        deliveryIds.length > 0
+      ) {
         for (const id of deliveryIds) {
-          if (!await checkDeliveryOwnership(id, req.session)) {
-            return res.status(403).json({ error: "Access denied to one or more deliveries" });
+          if (!(await checkDeliveryOwnership(id, req.session))) {
+            return res
+              .status(403)
+              .json({ error: "Access denied to one or more deliveries" });
           }
         }
-        
+
         const allDeliveries = await Promise.all(
-          deliveryIds.map(id => storage.getDelivery(id))
+          deliveryIds.map((id) => storage.getDelivery(id)),
         );
-        geocodedDeliveries = allDeliveries.filter(d => d && d.lat && d.lng) as any[];
+        geocodedDeliveries = allDeliveries.filter(
+          (d) => d && d.lat && d.lng,
+        ) as any[];
       } else if (batchId) {
-        if (!await checkBatchOwnership(batchId, req.session)) {
+        if (!(await checkBatchOwnership(batchId, req.session))) {
           return res.status(403).json({ error: "Access denied to this batch" });
         }
-        
+
         const batch = await storage.getBatch(batchId);
         if (!batch) {
           return res.status(404).json({ error: "Batch not found" });
         }
         const deliveries = await storage.getDeliveriesByBatch(batchId);
-        geocodedDeliveries = deliveries.filter(d => d.lat && d.lng);
+        geocodedDeliveries = deliveries.filter((d) => d.lat && d.lng);
       } else {
-        return res.status(400).json({ error: "Either batchId, deliveryIds, or orderIds is required" });
+        return res.status(400).json({
+          error: "Either batchId, deliveryIds, or orderIds is required",
+        });
       }
 
       if (geocodedDeliveries.length === 0) {
@@ -1746,8 +2216,12 @@ export async function registerRoutes(
       }
 
       // Separate urgent and normal priority deliveries
-      const urgentDeliveries = geocodedDeliveries.filter(d => d.priority === "urgent");
-      const normalDeliveries = geocodedDeliveries.filter(d => d.priority !== "urgent");
+      const urgentDeliveries = geocodedDeliveries.filter(
+        (d) => d.priority === "urgent",
+      );
+      const normalDeliveries = geocodedDeliveries.filter(
+        (d) => d.priority !== "urgent",
+      );
 
       let optimizedOrder: number[] = [];
       let totalDistance = 0;
@@ -1760,15 +2234,18 @@ export async function registerRoutes(
         const urgentResult = await optimizeRouteWithGoogle(
           currentLat,
           currentLng,
-          urgentDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+          urgentDeliveries.map((d) => ({ id: d.id, lat: d.lat!, lng: d.lng! })),
         );
         if (urgentResult && urgentResult.order.length > 0) {
           optimizedOrder = [...urgentResult.order];
           totalDistance += urgentResult.distance;
           estimatedDuration += urgentResult.duration;
           // Get the last urgent delivery's location for continuing to normal deliveries
-          const lastUrgentId = urgentResult.order[urgentResult.order.length - 1];
-          const lastUrgent = urgentDeliveries.find(d => d.id === lastUrgentId);
+          const lastUrgentId =
+            urgentResult.order[urgentResult.order.length - 1];
+          const lastUrgent = urgentDeliveries.find(
+            (d) => d.id === lastUrgentId,
+          );
           if (lastUrgent) {
             currentLat = lastUrgent.lat!;
             currentLng = lastUrgent.lng!;
@@ -1778,13 +2255,20 @@ export async function registerRoutes(
           const fallbackResult = optimizeRouteFallback(
             currentLat,
             currentLng,
-            urgentDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+            urgentDeliveries.map((d) => ({
+              id: d.id,
+              lat: d.lat!,
+              lng: d.lng!,
+            })),
           );
           optimizedOrder = [...fallbackResult.order];
           totalDistance += fallbackResult.distance;
           estimatedDuration += fallbackResult.duration;
-          const lastUrgentId = fallbackResult.order[fallbackResult.order.length - 1];
-          const lastUrgent = urgentDeliveries.find(d => d.id === lastUrgentId);
+          const lastUrgentId =
+            fallbackResult.order[fallbackResult.order.length - 1];
+          const lastUrgent = urgentDeliveries.find(
+            (d) => d.id === lastUrgentId,
+          );
           if (lastUrgent) {
             currentLat = lastUrgent.lat!;
             currentLng = lastUrgent.lng!;
@@ -1798,9 +2282,9 @@ export async function registerRoutes(
         const normalResult = await optimizeRouteWithGoogle(
           currentLat,
           currentLng,
-          normalDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! })),
+          normalDeliveries.map((d) => ({ id: d.id, lat: d.lat!, lng: d.lng! })),
           hasEndAddress ? endLat : undefined,
-          hasEndAddress ? endLng : undefined
+          hasEndAddress ? endLng : undefined,
         );
         if (normalResult && normalResult.order.length > 0) {
           optimizedOrder = [...optimizedOrder, ...normalResult.order];
@@ -1811,7 +2295,11 @@ export async function registerRoutes(
           const fallbackResult = optimizeRouteFallback(
             currentLat,
             currentLng,
-            normalDeliveries.map(d => ({ id: d.id, lat: d.lat!, lng: d.lng! }))
+            normalDeliveries.map((d) => ({
+              id: d.id,
+              lat: d.lat!,
+              lng: d.lng!,
+            })),
           );
           optimizedOrder = [...optimizedOrder, ...fallbackResult.order];
           totalDistance += fallbackResult.distance;
@@ -1820,11 +2308,18 @@ export async function registerRoutes(
       } else if (urgentDeliveries.length > 0 && hasEndAddress) {
         // If only urgent deliveries and we have an end address, add distance to end
         const lastDeliveryId = optimizedOrder[optimizedOrder.length - 1];
-        const lastDelivery = urgentDeliveries.find(d => d.id === lastDeliveryId);
+        const lastDelivery = urgentDeliveries.find(
+          (d) => d.id === lastDeliveryId,
+        );
         if (lastDelivery) {
           const distToEnd = Math.sqrt(
             Math.pow((endLat! - lastDelivery.lat!) * 111, 2) +
-            Math.pow((endLng! - lastDelivery.lng!) * 111 * Math.cos(lastDelivery.lat! * Math.PI / 180), 2)
+              Math.pow(
+                (endLng! - lastDelivery.lng!) *
+                  111 *
+                  Math.cos((lastDelivery.lat! * Math.PI) / 180),
+                2,
+              ),
           );
           totalDistance += distToEnd;
           estimatedDuration += Math.round(distToEnd * 2); // ~2 min per km
@@ -1835,12 +2330,13 @@ export async function registerRoutes(
         return res.status(500).json({ error: "Failed to optimize route" });
       }
 
-      const allDeliveryIds = geocodedDeliveries.map(d => d.id);
-      const alreadyInRoutes = await storage.getDeliveryIdsInActiveRoutes(allDeliveryIds);
+      const allDeliveryIds = geocodedDeliveries.map((d) => d.id);
+      const alreadyInRoutes =
+        await storage.getDeliveryIdsInActiveRoutes(allDeliveryIds);
       if (alreadyInRoutes.length > 0) {
-        return res.status(400).json({ 
-          error: `The following delivery IDs are already assigned to active routes: ${alreadyInRoutes.join(', ')}`,
-          duplicateDeliveryIds: alreadyInRoutes
+        return res.status(400).json({
+          error: `The following delivery IDs are already assigned to active routes: ${alreadyInRoutes.join(", ")}`,
+          duplicateDeliveryIds: alreadyInRoutes,
         });
       }
 
@@ -1854,41 +2350,43 @@ export async function registerRoutes(
         startAddress: startAddress || "Starting Point",
         estimatedDuration,
         estimatedDistance: totalDistance,
-        optimizedOrder
+        optimizedOrder,
       });
 
       for (let i = 0; i < optimizedOrder.length; i++) {
-        const delivery = geocodedDeliveries.find(d => d.id === optimizedOrder[i]);
+        const delivery = geocodedDeliveries.find(
+          (d) => d.id === optimizedOrder[i],
+        );
         await storage.createRouteStop({
           routeId: route.id,
           deliveryId: optimizedOrder[i],
           sequence: i + 1,
           status: "pending",
-          priority: delivery?.priority || "normal"
+          priority: delivery?.priority || "normal",
         });
         // Mark delivery as active when added to a route
         if (delivery) {
-          await storage.updateDeliveryStatus(delivery.id, 'active');
+          await storage.updateDeliveryStatus(delivery.id, "active");
         }
       }
 
       // Mark delivery_orders as ROUTED and link to route
       for (const orderId of orderIdsForStatusUpdate) {
-        await storage.updateDeliveryOrderStatus(orderId, 'ROUTED');
+        await storage.updateDeliveryOrderStatus(orderId, "ROUTED");
         await storage.updateDeliveryOrderRoute(orderId, route.id);
       }
 
       const stops = await storage.getRouteStops(route.id);
-      const stopsWithDeliveries = stops.map(stop => ({
+      const stopsWithDeliveries = stops.map((stop) => ({
         ...stop,
-        delivery: geocodedDeliveries.find(d => d.id === stop.deliveryId)
+        delivery: geocodedDeliveries.find((d) => d.id === stop.deliveryId),
       }));
 
-      res.json({ 
-        route, 
+      res.json({
+        route,
         stops: stopsWithDeliveries,
         totalDistance,
-        estimatedDuration
+        estimatedDuration,
       });
     } catch (error) {
       console.error("Optimization error:", error);
@@ -1899,25 +2397,27 @@ export async function registerRoutes(
   app.post("/api/routes/:id/cancel", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
-      
-      if (!await checkRouteOwnership(routeId, req.session)) {
+
+      if (!(await checkRouteOwnership(routeId, req.session))) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
-      
+
       const route = await storage.getRoute(routeId);
       if (!route) {
         return res.status(404).json({ error: "Route not found" });
       }
-      
-      if (route.status === 'cancelled' || route.status === 'completed') {
-        return res.status(400).json({ error: `Route is already ${route.status}` });
+
+      if (route.status === "cancelled" || route.status === "completed") {
+        return res
+          .status(400)
+          .json({ error: `Route is already ${route.status}` });
       }
-      
+
       const updatedRoute = await storage.cancelRoute(routeId);
       if (!updatedRoute) {
         return res.status(500).json({ error: "Failed to cancel route" });
       }
-      
+
       res.json(updatedRoute);
     } catch (error) {
       console.error("Cancel route error:", error);
@@ -1931,7 +2431,7 @@ export async function registerRoutes(
       const routeId = parseInt(req.params.id);
 
       // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
+      if (!(await checkRouteOwnership(routeId, req.session))) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
 
@@ -1949,12 +2449,12 @@ export async function registerRoutes(
   app.post("/api/routes/:id/dispatch", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
+      if (!(await checkRouteOwnership(routeId, req.session))) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
-      
+
       const route = await storage.getRoute(routeId);
 
       if (!route) {
@@ -1962,40 +2462,48 @@ export async function registerRoutes(
       }
 
       if (!route.driverId) {
-        return res.status(400).json({ error: "Route must be assigned to a driver first" });
+        return res
+          .status(400)
+          .json({ error: "Route must be assigned to a driver first" });
       }
 
       const updatedRoute = await storage.dispatchRoute(routeId);
       const stops = await storage.getRouteStops(routeId);
-      const batch = route.batchId ? await storage.getBatch(route.batchId) : null;
-      const deliveries = batch ? await storage.getDeliveriesByBatch(batch.id) : [];
+      const batch = route.batchId
+        ? await storage.getBatch(route.batchId)
+        : null;
+      const deliveries = batch
+        ? await storage.getDeliveriesByBatch(batch.id)
+        : [];
 
       // Attach prescriptions to each delivery
       const stopsWithDeliveries = await Promise.all(
         stops.map(async (stop) => {
-          const delivery = deliveries.find(d => d.id === stop.deliveryId);
+          const delivery = deliveries.find((d) => d.id === stop.deliveryId);
           if (delivery) {
-            const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
+            const prescriptions = await storage.getPrescriptionsByDelivery(
+              delivery.id,
+            );
             return {
               ...stop,
-              delivery: { ...delivery, prescriptions }
+              delivery: { ...delivery, prescriptions },
             };
           }
           return { ...stop, delivery: null };
-        })
+        }),
       );
 
       const driverSocketId = driverSockets.get(route.driverId);
       if (driverSocketId) {
         io.to(driverSocketId).emit("route_dispatched", {
           route: updatedRoute,
-          stops: stopsWithDeliveries
+          stops: stopsWithDeliveries,
         });
       }
 
       io.emit("route_dispatched", {
         route: updatedRoute,
-        stops: stopsWithDeliveries
+        stops: stopsWithDeliveries,
       });
 
       res.json({ route: updatedRoute, stops: stopsWithDeliveries });
@@ -2004,89 +2512,111 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:routeId/stops/:stopId/complete", requireAuth, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      const stopId = parseInt(req.params.stopId);
-      
-      // Check route ownership (allows drivers to complete stops on their routes)
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
+  app.post(
+    "/api/routes/:routeId/stops/:stopId/complete",
+    requireAuthOrDriver,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+        const stopId = parseInt(req.params.stopId);
+
+        // Check route ownership (allows drivers to complete stops on their routes)
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
+
+        const stop = await storage.completeRouteStop(stopId);
+
+        if (!stop) {
+          return res.status(404).json({ error: "Stop not found" });
+        }
+
+        io.emit("stop_status_update", { stopId, status: "completed" });
+
+        // Check if all stops are completed - if so, mark route as complete
+        const allStops = await storage.getRouteStops(routeId);
+        const allCompleted = allStops.every((s) => s.status === "completed");
+        if (allCompleted) {
+          await storage.updateRoute(routeId, {
+            status: "complete",
+            completedAt: new Date(),
+          });
+          io.emit("route_completed", { routeId });
+          console.log(
+            `✅ All stops completed - Route ${routeId} marked as complete`,
+          );
+        }
+
+        res.json(stop);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to complete stop" });
       }
-      
-      const stop = await storage.completeRouteStop(stopId);
+    },
+  );
 
-      if (!stop) {
-        return res.status(404).json({ error: "Stop not found" });
+  app.post(
+    "/api/routes/:routeId/stops/:stopId/complete-local",
+    requireAuthOrDriver,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+        const stopId = parseInt(req.params.stopId);
+        const { localProofId, notes, barcode } = req.body;
+
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
+
+        console.log(
+          `📦 Local-first completion for stop ${stopId}, localProofId: ${localProofId}`,
+        );
+
+        const stop = await storage.getRouteStop(stopId);
+        if (!stop) {
+          return res.status(404).json({ error: "Stop not found" });
+        }
+
+        const proof = await storage.createDeliveryProof({
+          stopId,
+          deliveryId: stop.deliveryId,
+          signature: null,
+          picture: null,
+          notes: notes || null,
+          barcode: barcode || null,
+          localProofId: localProofId || null,
+          uploadStatus: "pending",
+        });
+
+        const completedStop = await storage.completeRouteStop(stopId);
+
+        io.emit("stop_status_update", { stopId, status: "completed" });
+
+        const allStops = await storage.getRouteStops(routeId);
+        const allCompleted = allStops.every((s) => s.status === "completed");
+        if (allCompleted) {
+          await storage.updateRoute(routeId, {
+            status: "complete",
+            completedAt: new Date(),
+          });
+          io.emit("route_completed", { routeId });
+          console.log(
+            `✅ All stops completed - Route ${routeId} marked as complete`,
+          );
+        }
+
+        res.json({
+          stop: completedStop,
+          proof,
+          message: "Delivery marked complete. Proof will upload in background.",
+        });
+      } catch (error: any) {
+        console.error("Complete-local error:", error);
+        res
+          .status(500)
+          .json({ error: error?.message || "Failed to complete stop" });
       }
-
-      io.emit("stop_status_update", { stopId, status: "completed" });
-
-      // Check if all stops are completed - if so, mark route as complete
-      const allStops = await storage.getRouteStops(routeId);
-      const allCompleted = allStops.every(s => s.status === "completed");
-      if (allCompleted) {
-        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
-        io.emit("route_completed", { routeId });
-        console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
-      }
-
-      res.json(stop);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to complete stop" });
-    }
-  });
-
-  app.post("/api/routes/:routeId/stops/:stopId/complete-local", requireAuth, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      const stopId = parseInt(req.params.stopId);
-      const { localProofId, notes, barcode } = req.body;
-
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
-      }
-
-      console.log(`📦 Local-first completion for stop ${stopId}, localProofId: ${localProofId}`);
-
-      const stop = await storage.getRouteStop(stopId);
-      if (!stop) {
-        return res.status(404).json({ error: "Stop not found" });
-      }
-
-      const proof = await storage.createDeliveryProof({
-        stopId,
-        deliveryId: stop.deliveryId,
-        signature: null,
-        picture: null,
-        notes: notes || null,
-        barcode: barcode || null,
-        localProofId: localProofId || null,
-        uploadStatus: 'pending',
-      });
-
-      const completedStop = await storage.completeRouteStop(stopId);
-
-      io.emit("stop_status_update", { stopId, status: "completed" });
-
-      const allStops = await storage.getRouteStops(routeId);
-      const allCompleted = allStops.every(s => s.status === "completed");
-      if (allCompleted) {
-        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
-        io.emit("route_completed", { routeId });
-        console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
-      }
-
-      res.json({ 
-        stop: completedStop, 
-        proof,
-        message: "Delivery marked complete. Proof will upload in background." 
-      });
-    } catch (error: any) {
-      console.error("Complete-local error:", error);
-      res.status(500).json({ error: error?.message || "Failed to complete stop" });
-    }
-  });
+    },
+  );
 
   app.post("/api/drivers/:id/location", requireDriver, async (req, res) => {
     try {
@@ -2095,7 +2625,9 @@ export async function registerRoutes(
 
       // Drivers can only update their own location
       if (req.session.user?.driverId !== driverId) {
-        return res.status(403).json({ error: "Access denied - can only update your own location" });
+        return res
+          .status(403)
+          .json({ error: "Access denied - can only update your own location" });
       }
 
       const location = await storage.recordDriverLocation(driverId, lat, lng);
@@ -2107,150 +2639,196 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/routes/:routeId/stops/:stopId/proof", requireAuth, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      const stopId = parseInt(req.params.stopId);
-      const { signature, picture, notes, barcode, localProofId } = req.body;
+  app.post(
+    "/api/routes/:routeId/stops/:stopId/proof",
+    requireAuthOrDriver,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+        const stopId = parseInt(req.params.stopId);
+        const { signature, picture, notes, barcode, localProofId } = req.body;
 
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
-      }
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
 
-      if (!signature && !picture && !notes && !barcode) {
-        return res.status(400).json({ error: "Signature, picture, notes, or barcode required" });
-      }
+        if (!signature && !picture && !notes && !barcode) {
+          return res
+            .status(400)
+            .json({ error: "Signature, picture, notes, or barcode required" });
+        }
 
-      const hasUploads = !!(signature || picture);
-      const useObjectStorage = isObjectStorageAvailable();
-      
-      console.log(`📝 Processing proof for stop ${stopId}, localProofId: ${localProofId || 'none'}, hasUploads: ${hasUploads}`);
-      
-      let proof;
-      const existingProof = localProofId ? await storage.getProofByLocalId(localProofId) : null;
-      
-      if (existingProof) {
-        console.log(`📝 Updating existing proof ${existingProof.id} with uploaded images`);
-        proof = await storage.updateDeliveryProof(existingProof.id, {
-          signature: useObjectStorage ? null : (signature || existingProof.signature),
-          picture: useObjectStorage ? null : (picture || existingProof.picture),
-          notes: notes || existingProof.notes,
-          barcode: barcode || existingProof.barcode,
-          uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed"
-        });
-      } else {
+        const hasUploads = !!(signature || picture);
+        const useObjectStorage = isObjectStorageAvailable();
+
+        console.log(
+          `📝 Processing proof for stop ${stopId}, localProofId: ${localProofId || "none"}, hasUploads: ${hasUploads}`,
+        );
+
+        let proof;
+        const existingProof = localProofId
+          ? await storage.getProofByLocalId(localProofId)
+          : null;
+
+        if (existingProof) {
+          console.log(
+            `📝 Updating existing proof ${existingProof.id} with uploaded images`,
+          );
+          proof = await storage.updateDeliveryProof(existingProof.id, {
+            signature: useObjectStorage
+              ? null
+              : signature || existingProof.signature,
+            picture: useObjectStorage ? null : picture || existingProof.picture,
+            notes: notes || existingProof.notes,
+            barcode: barcode || existingProof.barcode,
+            uploadStatus:
+              useObjectStorage && hasUploads ? "pending" : "completed",
+          });
+        } else {
+          const stop = await storage.getRouteStop(stopId);
+          proof = await storage.createDeliveryProof({
+            stopId,
+            deliveryId: stop?.deliveryId || null,
+            signature: useObjectStorage ? null : signature || null,
+            picture: useObjectStorage ? null : picture || null,
+            notes: notes || null,
+            barcode: barcode || null,
+            localProofId: localProofId || null,
+            uploadStatus:
+              useObjectStorage && hasUploads ? "pending" : "completed",
+          });
+        }
+
+        if (!proof) {
+          return res
+            .status(500)
+            .json({ error: "Failed to create or update proof" });
+        }
+
+        if (useObjectStorage) {
+          if (signature) {
+            addToUploadQueue(proof.id, "signature", signature).catch((err) => {
+              console.error("Failed to queue signature upload:", err);
+            });
+          }
+          if (picture) {
+            addToUploadQueue(proof.id, "picture", picture).catch((err) => {
+              console.error("Failed to queue picture upload:", err);
+            });
+          }
+        }
+
         const stop = await storage.getRouteStop(stopId);
-        proof = await storage.createDeliveryProof({
+        let completedStop = stop;
+
+        if (stop?.status !== "completed") {
+          console.log(
+            `✅ Proof submitted for stop ${stopId}, marking as completed`,
+          );
+          completedStop = await storage.completeRouteStop(stopId);
+          io.emit("stop_status_update", { stopId, status: "completed" });
+        }
+
+        const uploadsPendingForEmit = useObjectStorage && hasUploads;
+        io.emit("proof_submitted", {
           stopId,
-          deliveryId: stop?.deliveryId || null,
-          signature: useObjectStorage ? null : (signature || null),
-          picture: useObjectStorage ? null : (picture || null),
-          notes: notes || null,
-          barcode: barcode || null,
-          localProofId: localProofId || null,
-          uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed"
+          proof: { ...proof, uploadsPending: uploadsPendingForEmit },
         });
-      }
 
-      if (!proof) {
-        return res.status(500).json({ error: "Failed to create or update proof" });
-      }
-
-      if (useObjectStorage) {
-        if (signature) {
-          addToUploadQueue(proof.id, "signature", signature).catch(err => {
-            console.error("Failed to queue signature upload:", err);
+        const allStops = await storage.getRouteStops(routeId);
+        const allCompleted = allStops.every((s) => s.status === "completed");
+        if (allCompleted) {
+          await storage.updateRoute(routeId, {
+            status: "complete",
+            completedAt: new Date(),
           });
+          io.emit("route_completed", { routeId });
+          console.log(
+            `✅ All stops completed - Route ${routeId} marked as complete`,
+          );
         }
-        if (picture) {
-          addToUploadQueue(proof.id, "picture", picture).catch(err => {
-            console.error("Failed to queue picture upload:", err);
-          });
-        }
-      }
 
-      const stop = await storage.getRouteStop(stopId);
-      let completedStop = stop;
-      
-      if (stop?.status !== "completed") {
-        console.log(`✅ Proof submitted for stop ${stopId}, marking as completed`);
-        completedStop = await storage.completeRouteStop(stopId);
-        io.emit("stop_status_update", { stopId, status: "completed" });
+        const uploadsPending = useObjectStorage && hasUploads;
+        res.json({
+          proof: { ...proof, uploadsPending },
+          stop: completedStop,
+          message: uploadsPending
+            ? "Proof saved. Images uploading in background."
+            : "Proof saved.",
+        });
+      } catch (error: any) {
+        console.error("Proof submission error:", error);
+        const errorMessage = error?.message || "Failed to submit proof";
+        res.status(500).json({ error: errorMessage });
       }
-      
-      const uploadsPendingForEmit = useObjectStorage && hasUploads;
-      io.emit("proof_submitted", { stopId, proof: { ...proof, uploadsPending: uploadsPendingForEmit } });
-      
-      const allStops = await storage.getRouteStops(routeId);
-      const allCompleted = allStops.every(s => s.status === "completed");
-      if (allCompleted) {
-        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
-        io.emit("route_completed", { routeId });
-        console.log(`✅ All stops completed - Route ${routeId} marked as complete`);
-      }
-      
-      const uploadsPending = useObjectStorage && hasUploads;
-      res.json({ 
-        proof: { ...proof, uploadsPending }, 
-        stop: completedStop,
-        message: uploadsPending ? "Proof saved. Images uploading in background." : "Proof saved."
-      });
-    } catch (error: any) {
-      console.error("Proof submission error:", error);
-      const errorMessage = error?.message || "Failed to submit proof";
-      res.status(500).json({ error: errorMessage });
-    }
-  });
+    },
+  );
 
   // Cancel a delivery stop (can't deliver)
-  app.post("/api/routes/:routeId/stops/:stopId/cancel", requireAuth, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      const stopId = parseInt(req.params.stopId);
-      const { reason } = req.body;
+  app.post(
+    "/api/routes/:routeId/stops/:stopId/cancel",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+        const stopId = parseInt(req.params.stopId);
+        const { reason } = req.body;
 
-      // Check route ownership (allows drivers to cancel stops on their routes)
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
+        // Check route ownership (allows drivers to cancel stops on their routes)
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
+
+        if (!reason) {
+          return res
+            .status(400)
+            .json({ error: "Cancellation reason is required" });
+        }
+
+        // Update the stop status to cancelled with the reason as notes
+        const cancelledStop = await storage.updateRouteStop(stopId, {
+          status: "cancelled",
+          notes: `CANCELLED: ${reason}`,
+        });
+
+        if (!cancelledStop) {
+          return res.status(404).json({ error: "Stop not found" });
+        }
+
+        // Also update the delivery status to cancelled
+        if (cancelledStop.deliveryId) {
+          await storage.updateDeliveryStatus(
+            cancelledStop.deliveryId,
+            "cancelled",
+          );
+        }
+
+        io.emit("stop_status_update", { stopId, status: "cancelled" });
+        console.log(`❌ Stop ${stopId} cancelled: ${reason}`);
+
+        // Check if all stops are completed or cancelled - if so, mark route as complete
+        const allStops = await storage.getRouteStops(routeId);
+        const allDone = allStops.every(
+          (s) => s.status === "completed" || s.status === "cancelled",
+        );
+        if (allDone) {
+          await storage.updateRoute(routeId, {
+            status: "complete",
+            completedAt: new Date(),
+          });
+          io.emit("route_completed", { routeId });
+          console.log(
+            `✅ All stops done - Route ${routeId} marked as complete`,
+          );
+        }
+
+        res.json({ stop: cancelledStop });
+      } catch (error) {
+        console.error("Cancel delivery error:", error);
+        res.status(500).json({ error: "Failed to cancel delivery" });
       }
-
-      if (!reason) {
-        return res.status(400).json({ error: "Cancellation reason is required" });
-      }
-
-      // Update the stop status to cancelled with the reason as notes
-      const cancelledStop = await storage.updateRouteStop(stopId, { 
-        status: "cancelled",
-        notes: `CANCELLED: ${reason}`
-      });
-
-      if (!cancelledStop) {
-        return res.status(404).json({ error: "Stop not found" });
-      }
-
-      // Also update the delivery status to cancelled
-      if (cancelledStop.deliveryId) {
-        await storage.updateDeliveryStatus(cancelledStop.deliveryId, "cancelled");
-      }
-
-      io.emit("stop_status_update", { stopId, status: "cancelled" });
-      console.log(`❌ Stop ${stopId} cancelled: ${reason}`);
-
-      // Check if all stops are completed or cancelled - if so, mark route as complete
-      const allStops = await storage.getRouteStops(routeId);
-      const allDone = allStops.every(s => s.status === "completed" || s.status === "cancelled");
-      if (allDone) {
-        await storage.updateRoute(routeId, { status: "complete", completedAt: new Date() });
-        io.emit("route_completed", { routeId });
-        console.log(`✅ All stops done - Route ${routeId} marked as complete`);
-      }
-
-      res.json({ stop: cancelledStop });
-    } catch (error) {
-      console.error("Cancel delivery error:", error);
-      res.status(500).json({ error: "Failed to cancel delivery" });
-    }
-  });
+    },
+  );
 
   // Pharmacy endpoints (admin only for management)
   app.get("/api/pharmacies", requireAdmin, async (req, res) => {
@@ -2275,12 +2853,17 @@ export async function registerRoutes(
     try {
       const pharmacyId = parseInt(req.params.id);
       const session = req.session as any;
-      
+
       // Non-admin users can only access their own pharmacy
-      if (session?.user?.role !== 'admin' && session?.user?.pharmacyId !== pharmacyId) {
-        return res.status(403).json({ error: "Access denied to this pharmacy" });
+      if (
+        session?.user?.role !== "admin" &&
+        session?.user?.pharmacyId !== pharmacyId
+      ) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this pharmacy" });
       }
-      
+
       const pharmacy = await storage.getPharmacy(pharmacyId);
       if (!pharmacy) {
         return res.status(404).json({ error: "Pharmacy not found" });
@@ -2293,7 +2876,10 @@ export async function registerRoutes(
 
   app.put("/api/pharmacies/:id", requireAdmin, async (req, res) => {
     try {
-      const pharmacy = await storage.updatePharmacy(parseInt(req.params.id), req.body);
+      const pharmacy = await storage.updatePharmacy(
+        parseInt(req.params.id),
+        req.body,
+      );
       if (!pharmacy) {
         return res.status(404).json({ error: "Pharmacy not found" });
       }
@@ -2324,7 +2910,10 @@ export async function registerRoutes(
 
   app.put("/api/zones/:id", requireAdmin, async (req, res) => {
     try {
-      const zone = await storage.updateDeliveryZone(parseInt(req.params.id), req.body);
+      const zone = await storage.updateDeliveryZone(
+        parseInt(req.params.id),
+        req.body,
+      );
       if (!zone) {
         return res.status(404).json({ error: "Zone not found" });
       }
@@ -2347,85 +2936,116 @@ export async function registerRoutes(
   });
 
   // Driver zone assignment (admin only)
-  app.get("/api/drivers/:id/zones", requireAdminOrPharmacyAdmin, async (req, res) => {
-    try {
-      const zones = await storage.getDriverZones(parseInt(req.params.id));
-      res.json(zones);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch driver zones" });
-    }
-  });
-
-  app.post("/api/drivers/:id/zones", requireAdminOrPharmacyAdmin, async (req, res) => {
-    try {
-      const { zoneId } = req.body;
-      const driverZone = await storage.assignDriverToZone(parseInt(req.params.id), zoneId);
-      res.json(driverZone);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to assign driver to zone" });
-    }
-  });
-
-  app.delete("/api/drivers/:driverId/zones/:zoneId", requireAdminOrPharmacyAdmin, async (req, res) => {
-    try {
-      const success = await storage.removeDriverFromZone(
-        parseInt(req.params.driverId),
-        parseInt(req.params.zoneId)
-      );
-      if (!success) {
-        return res.status(404).json({ error: "Assignment not found" });
+  app.get(
+    "/api/drivers/:id/zones",
+    requireAdminOrPharmacyAdmin,
+    async (req, res) => {
+      try {
+        const zones = await storage.getDriverZones(parseInt(req.params.id));
+        res.json(zones);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch driver zones" });
       }
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to remove driver from zone" });
-    }
-  });
+    },
+  );
+
+  app.post(
+    "/api/drivers/:id/zones",
+    requireAdminOrPharmacyAdmin,
+    async (req, res) => {
+      try {
+        const { zoneId } = req.body;
+        const driverZone = await storage.assignDriverToZone(
+          parseInt(req.params.id),
+          zoneId,
+        );
+        res.json(driverZone);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to assign driver to zone" });
+      }
+    },
+  );
+
+  app.delete(
+    "/api/drivers/:driverId/zones/:zoneId",
+    requireAdminOrPharmacyAdmin,
+    async (req, res) => {
+      try {
+        const success = await storage.removeDriverFromZone(
+          parseInt(req.params.driverId),
+          parseInt(req.params.zoneId),
+        );
+        if (!success) {
+          return res.status(404).json({ error: "Assignment not found" });
+        }
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to remove driver from zone" });
+      }
+    },
+  );
 
   // Get all active deliveries (excluding complete/cancelled) - MUST be before :id routes
   app.get("/api/deliveries/active", requirePharmacyScope, async (req, res) => {
     try {
       const ctx = getPharmacyContext(req.session);
       if (!ctx) return res.status(401).json({ error: "Not authenticated" });
-      
-      const zoneId = req.query.zoneId ? parseInt(req.query.zoneId as string) : null;
+
+      const zoneId = req.query.zoneId
+        ? parseInt(req.query.zoneId as string)
+        : null;
       let activeDeliveries: any[];
-      
+
       if (ctx.isAdmin) {
-        activeDeliveries = zoneId 
+        activeDeliveries = zoneId
           ? await storage.getActiveDeliveriesByZone(zoneId)
           : await storage.getActiveDeliveries();
-        console.log(`[Active Deliveries API] Admin ${ctx.username}, returning all ${activeDeliveries.length} deliveries`);
+        console.log(
+          `[Active Deliveries API] Admin ${ctx.username}, returning all ${activeDeliveries.length} deliveries`,
+        );
       } else {
-        activeDeliveries = await storage.getActiveDeliveriesByPharmacy(ctx.pharmacyId!);
-        console.log(`[Active Deliveries API] User ${ctx.username} (pharmacy ${ctx.pharmacyId}), returning ${activeDeliveries.length} deliveries`);
-        
+        activeDeliveries = await storage.getActiveDeliveriesByPharmacy(
+          ctx.pharmacyId!,
+        );
+        console.log(
+          `[Active Deliveries API] User ${ctx.username} (pharmacy ${ctx.pharmacyId}), returning ${activeDeliveries.length} deliveries`,
+        );
+
         // If zone filtering is also requested, apply it
         if (zoneId) {
           const zone = await storage.getDeliveryZone(zoneId);
           if (zone) {
-            activeDeliveries = activeDeliveries.filter(d => {
+            activeDeliveries = activeDeliveries.filter((d) => {
               if (!d.lat || !d.lng) return false;
-              const distance = Math.sqrt(
-                Math.pow(Number(d.lat) - Number(zone.centerLat), 2) +
-                Math.pow(Number(d.lng) - Number(zone.centerLng), 2)
-              ) * 111000;
+              const distance =
+                Math.sqrt(
+                  Math.pow(Number(d.lat) - Number(zone.centerLat), 2) +
+                    Math.pow(Number(d.lng) - Number(zone.centerLng), 2),
+                ) * 111000;
               return distance <= zone.radiusMeters;
             });
           }
         }
       }
-      
-      const allDeliveryIds = activeDeliveries.map(d => d.id);
-      const idsInActiveRoutes = await storage.getDeliveryIdsInActiveRoutes(allDeliveryIds);
+
+      const allDeliveryIds = activeDeliveries.map((d) => d.id);
+      const idsInActiveRoutes =
+        await storage.getDeliveryIdsInActiveRoutes(allDeliveryIds);
       const activeRouteSet = new Set(idsInActiveRoutes);
 
       const deliveriesWithPrescriptions = await Promise.all(
         activeDeliveries.map(async (delivery) => {
-          const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
-          return { ...delivery, prescriptions, inActiveRoute: activeRouteSet.has(delivery.id) };
-        })
+          const prescriptions = await storage.getPrescriptionsByDelivery(
+            delivery.id,
+          );
+          return {
+            ...delivery,
+            prescriptions,
+            inActiveRoute: activeRouteSet.has(delivery.id),
+          };
+        }),
       );
-      
+
       res.json(deliveriesWithPrescriptions);
     } catch (error) {
       console.error("Get active deliveries error:", error);
@@ -2437,12 +3057,14 @@ export async function registerRoutes(
   app.get("/api/deliveries/:id", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(deliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
-      
+
       const delivery = await storage.getDelivery(deliveryId);
       if (!delivery) {
         return res.status(404).json({ error: "Delivery not found" });
@@ -2461,49 +3083,53 @@ export async function registerRoutes(
       if (!req.body.addressText) {
         return res.status(400).json({ error: "Address is required" });
       }
-      
+
       // Generate delivery identifier
       const batchId = req.body.batchId;
-      
+
       // Check batch ownership if batchId is provided
-      if (batchId && !await checkBatchOwnership(batchId, req.session)) {
+      if (batchId && !(await checkBatchOwnership(batchId, req.session))) {
         return res.status(403).json({ error: "Access denied to this batch" });
       }
-      
+
       let deliveryIdentifier = null;
       if (batchId) {
         deliveryIdentifier = await storage.generateUniqueDeliveryIdentifier();
       }
-      
+
       // Create the delivery (rxNumber is stored on prescription, not delivery)
       const { rxNumber, ...deliveryData } = req.body;
-      
+
       // Geocode the address if lat/lng not provided
       let lat = deliveryData.lat;
       let lng = deliveryData.lng;
       let status = deliveryData.status || "pending";
-      
+
       if ((!lat || !lng) && deliveryData.addressText) {
         const geocoded = await geocodeAddress(deliveryData.addressText);
         if (geocoded) {
           lat = geocoded.lat;
           lng = geocoded.lng;
           status = "geocoded";
-          console.log(`✅ Geocoded manually added delivery: ${deliveryData.addressText}`);
+          console.log(
+            `✅ Geocoded manually added delivery: ${deliveryData.addressText}`,
+          );
         } else {
-          console.log(`⚠️ Failed to geocode manually added delivery: ${deliveryData.addressText}`);
+          console.log(
+            `⚠️ Failed to geocode manually added delivery: ${deliveryData.addressText}`,
+          );
         }
       }
-      
+
       const delivery = await storage.createDelivery({
         ...deliveryData,
         lat,
         lng,
         status,
         deliveryIdentifier,
-        rxNumber: null // No longer storing RX on delivery directly
+        rxNumber: null, // No longer storing RX on delivery directly
       });
-      
+
       // Create associated prescription
       if (rxNumber) {
         await storage.createPrescription({
@@ -2513,13 +3139,15 @@ export async function registerRoutes(
           patientName: req.body.customerName || null,
           patientPhone: req.body.customerPhone || null,
           notes: req.body.notes || null,
-          entryMethod: "manual"
+          entryMethod: "manual",
         });
       }
-      
+
       // Fetch the delivery with prescriptions
-      const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
-      
+      const prescriptions = await storage.getPrescriptionsByDelivery(
+        delivery.id,
+      );
+
       io.emit("delivery_created", { ...delivery, prescriptions });
       res.json({ ...delivery, prescriptions });
     } catch (error) {
@@ -2531,32 +3159,57 @@ export async function registerRoutes(
   app.put("/api/deliveries/:id", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(deliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
-      
+
       // Extract only valid delivery fields (filter out prescriptions and other non-delivery fields)
       const validFields = [
-        'deliveryIdentifier', 'batchId', 'pharmacyId', 'zoneId', 'addressText',
-        'streetAddress', 'city', 'state', 'zipCode', 'normalizedAddressHash',
-        'lat', 'lng', 'customerName', 'customerPhone', 'rxNumber', 'notes',
-        'priority', 'status', 'prescriptionCount', 'ocrImageUrl', 'ocrConfidence',
-        'ocrVerified', 'scannedBarcode', 'routingEligible'
+        "deliveryIdentifier",
+        "batchId",
+        "pharmacyId",
+        "zoneId",
+        "addressText",
+        "streetAddress",
+        "city",
+        "state",
+        "zipCode",
+        "normalizedAddressHash",
+        "lat",
+        "lng",
+        "customerName",
+        "customerPhone",
+        "rxNumber",
+        "notes",
+        "priority",
+        "status",
+        "prescriptionCount",
+        "ocrImageUrl",
+        "ocrConfidence",
+        "ocrVerified",
+        "scannedBarcode",
+        "routingEligible",
       ];
-      
+
       const updateData: Record<string, any> = {};
       for (const field of validFields) {
         if (req.body[field] !== undefined) {
           updateData[field] = req.body[field];
         }
       }
-      
+
       // If marking as routing eligible, check if geocoding is needed
       if (updateData.routingEligible === true) {
         const existingDelivery = await storage.getDelivery(deliveryId);
-        if (existingDelivery && (existingDelivery.lat === null || existingDelivery.lng === null) && existingDelivery.addressText) {
+        if (
+          existingDelivery &&
+          (existingDelivery.lat === null || existingDelivery.lng === null) &&
+          existingDelivery.addressText
+        ) {
           // Geocode the address
           const geocoded = await geocodeAddress(existingDelivery.addressText);
           if (geocoded) {
@@ -2566,13 +3219,17 @@ export async function registerRoutes(
             if (existingDelivery.status === "pending") {
               updateData.status = "geocoded";
             }
-            console.log(`✅ Geocoded delivery ${deliveryId} when marking routing eligible`);
+            console.log(
+              `✅ Geocoded delivery ${deliveryId} when marking routing eligible`,
+            );
           } else {
-            console.log(`⚠️ Failed to geocode delivery ${deliveryId}: ${existingDelivery.addressText}`);
+            console.log(
+              `⚠️ Failed to geocode delivery ${deliveryId}: ${existingDelivery.addressText}`,
+            );
           }
         }
       }
-      
+
       const delivery = await storage.updateDelivery(deliveryId, updateData);
       if (!delivery) {
         return res.status(404).json({ error: "Delivery not found" });
@@ -2587,12 +3244,14 @@ export async function registerRoutes(
   app.delete("/api/deliveries/:id", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(deliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
-      
+
       const success = await storage.deleteDelivery(deliveryId);
       if (!success) {
         return res.status(404).json({ error: "Delivery not found" });
@@ -2608,33 +3267,54 @@ export async function registerRoutes(
   app.post("/api/deliveries/:id/split", requireStaff, async (req, res) => {
     try {
       const sourceDeliveryId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkDeliveryOwnership(sourceDeliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(sourceDeliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
-      
+
       const { prescriptionIds } = req.body;
-      
-      if (!prescriptionIds || !Array.isArray(prescriptionIds) || prescriptionIds.length === 0) {
-        return res.status(400).json({ error: "prescriptionIds array is required" });
+
+      if (
+        !prescriptionIds ||
+        !Array.isArray(prescriptionIds) ||
+        prescriptionIds.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({ error: "prescriptionIds array is required" });
       }
-      
+
       // Verify source delivery exists and has enough prescriptions
-      const sourcePrescriptions = await storage.getPrescriptionsByDelivery(sourceDeliveryId);
+      const sourcePrescriptions =
+        await storage.getPrescriptionsByDelivery(sourceDeliveryId);
       if (sourcePrescriptions.length <= prescriptionIds.length) {
-        return res.status(400).json({ error: "Cannot split all prescriptions - at least one must remain in the original delivery" });
+        return res.status(400).json({
+          error:
+            "Cannot split all prescriptions - at least one must remain in the original delivery",
+        });
       }
-      
-      const newDelivery = await storage.splitDelivery(sourceDeliveryId, prescriptionIds);
+
+      const newDelivery = await storage.splitDelivery(
+        sourceDeliveryId,
+        prescriptionIds,
+      );
       if (!newDelivery) {
         return res.status(404).json({ error: "Delivery not found" });
       }
-      
+
       // Fetch prescriptions for the new delivery
-      const newPrescriptions = await storage.getPrescriptionsByDelivery(newDelivery.id);
-      
-      io.emit("delivery_split", { sourceDeliveryId, newDelivery, newPrescriptions });
+      const newPrescriptions = await storage.getPrescriptionsByDelivery(
+        newDelivery.id,
+      );
+
+      io.emit("delivery_split", {
+        sourceDeliveryId,
+        newDelivery,
+        newPrescriptions,
+      });
       res.json({ delivery: newDelivery, prescriptions: newPrescriptions });
     } catch (error) {
       console.error("Split delivery error:", error);
@@ -2646,32 +3326,50 @@ export async function registerRoutes(
   app.post("/api/deliveries/:id/merge", requireStaff, async (req, res) => {
     try {
       const targetDeliveryId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkDeliveryOwnership(targetDeliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(targetDeliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
-      
+
       const { sourceDeliveryIds } = req.body;
-      
-      if (!sourceDeliveryIds || !Array.isArray(sourceDeliveryIds) || sourceDeliveryIds.length === 0) {
-        return res.status(400).json({ error: "sourceDeliveryIds array is required" });
+
+      if (
+        !sourceDeliveryIds ||
+        !Array.isArray(sourceDeliveryIds) ||
+        sourceDeliveryIds.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({ error: "sourceDeliveryIds array is required" });
       }
-      
+
       // Make sure target is not in source list
       if (sourceDeliveryIds.includes(targetDeliveryId)) {
-        return res.status(400).json({ error: "Target delivery cannot be in source list" });
+        return res
+          .status(400)
+          .json({ error: "Target delivery cannot be in source list" });
       }
-      
-      const mergedDelivery = await storage.mergeDeliveries(targetDeliveryId, sourceDeliveryIds);
+
+      const mergedDelivery = await storage.mergeDeliveries(
+        targetDeliveryId,
+        sourceDeliveryIds,
+      );
       if (!mergedDelivery) {
         return res.status(404).json({ error: "Target delivery not found" });
       }
-      
+
       // Fetch all prescriptions for the merged delivery
-      const prescriptions = await storage.getPrescriptionsByDelivery(targetDeliveryId);
-      
-      io.emit("deliveries_merged", { targetDeliveryId, sourceDeliveryIds, prescriptions });
+      const prescriptions =
+        await storage.getPrescriptionsByDelivery(targetDeliveryId);
+
+      io.emit("deliveries_merged", {
+        targetDeliveryId,
+        sourceDeliveryIds,
+        prescriptions,
+      });
       res.json({ delivery: mergedDelivery, prescriptions });
     } catch (error) {
       console.error("Merge deliveries error:", error);
@@ -2684,36 +3382,54 @@ export async function registerRoutes(
     try {
       const prescriptionId = parseInt(req.params.id);
       const { targetDeliveryId } = req.body;
-      
+
       if (!targetDeliveryId) {
         return res.status(400).json({ error: "targetDeliveryId is required" });
       }
-      
+
       // Verify source delivery still has prescriptions after move
       const prescription = await storage.getPrescription(prescriptionId);
       if (!prescription) {
         return res.status(404).json({ error: "Prescription not found" });
       }
-      
+
       // Check pharmacy ownership for both source and target deliveries
-      if (!await checkDeliveryOwnership(prescription.deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to source delivery" });
+      if (
+        !(await checkDeliveryOwnership(prescription.deliveryId, req.session))
+      ) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to source delivery" });
       }
-      if (!await checkDeliveryOwnership(targetDeliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to target delivery" });
+      if (!(await checkDeliveryOwnership(targetDeliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to target delivery" });
       }
-      
-      const sourcePrescriptions = await storage.getPrescriptionsByDelivery(prescription.deliveryId);
+
+      const sourcePrescriptions = await storage.getPrescriptionsByDelivery(
+        prescription.deliveryId,
+      );
       if (sourcePrescriptions.length <= 1) {
-        return res.status(400).json({ error: "Cannot move the last prescription from a delivery. Delete the delivery instead." });
+        return res.status(400).json({
+          error:
+            "Cannot move the last prescription from a delivery. Delete the delivery instead.",
+        });
       }
-      
-      const movedPrescription = await storage.movePrescriptionToDelivery(prescriptionId, targetDeliveryId);
+
+      const movedPrescription = await storage.movePrescriptionToDelivery(
+        prescriptionId,
+        targetDeliveryId,
+      );
       if (!movedPrescription) {
         return res.status(404).json({ error: "Failed to move prescription" });
       }
-      
-      io.emit("prescription_moved", { prescriptionId, targetDeliveryId, sourceDeliveryId: prescription.deliveryId });
+
+      io.emit("prescription_moved", {
+        prescriptionId,
+        targetDeliveryId,
+        sourceDeliveryId: prescription.deliveryId,
+      });
       res.json(movedPrescription);
     } catch (error) {
       console.error("Move prescription error:", error);
@@ -2725,24 +3441,37 @@ export async function registerRoutes(
   app.patch("/api/deliveries/:id/status", requireStaff, async (req, res) => {
     try {
       const deliveryId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(deliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
-      
+
       const { status } = req.body;
-      const validStatuses = ['pending', 'geocoded', 'active', 'complete', 'cancelled'];
-      
+      const validStatuses = [
+        "pending",
+        "geocoded",
+        "active",
+        "complete",
+        "cancelled",
+      ];
+
       if (!validStatuses.includes(status)) {
-        return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+        return res.status(400).json({
+          error: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+        });
       }
-      
-      const delivery = await storage.updateDeliveryStatus(parseInt(req.params.id), status);
+
+      const delivery = await storage.updateDeliveryStatus(
+        parseInt(req.params.id),
+        status,
+      );
       if (!delivery) {
         return res.status(404).json({ error: "Delivery not found" });
       }
-      
+
       io.emit("delivery_status_updated", delivery);
       res.json(delivery);
     } catch (error) {
@@ -2751,48 +3480,64 @@ export async function registerRoutes(
   });
 
   // Remove a stop from a route (staff only)
-  app.delete("/api/routes/:routeId/stops/:stopId", requireStaff, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      const stopId = parseInt(req.params.stopId);
+  app.delete(
+    "/api/routes/:routeId/stops/:stopId",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+        const stopId = parseInt(req.params.stopId);
 
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
+
+        const route = await storage.getRoute(routeId);
+        if (
+          !route ||
+          route.status === "completed" ||
+          route.status === "cancelled"
+        ) {
+          return res
+            .status(400)
+            .json({ error: "Cannot modify a completed or cancelled route" });
+        }
+
+        const stop = await storage.getRouteStop(stopId);
+        if (!stop || stop.routeId !== routeId) {
+          return res
+            .status(404)
+            .json({ error: "Stop not found in this route" });
+        }
+
+        if (stop.status === "completed") {
+          return res
+            .status(400)
+            .json({ error: "Cannot remove a completed stop" });
+        }
+
+        const deleted = await storage.deleteRouteStop(stopId);
+        if (!deleted) {
+          return res.status(500).json({ error: "Failed to remove stop" });
+        }
+
+        await storage.resequenceRouteStops(routeId);
+
+        const remainingStops = await storage.getRouteStops(routeId);
+        if (
+          remainingStops.filter((s) => s.status !== "cancelled").length === 0
+        ) {
+          await storage.cancelRoute(routeId);
+        }
+
+        io.emit("route_modified", { routeId });
+        res.json({ success: true, routeId, removedStopId: stopId });
+      } catch (error) {
+        console.error("Remove stop error:", error);
+        res.status(500).json({ error: "Failed to remove stop from route" });
       }
-
-      const route = await storage.getRoute(routeId);
-      if (!route || route.status === 'completed' || route.status === 'cancelled') {
-        return res.status(400).json({ error: "Cannot modify a completed or cancelled route" });
-      }
-
-      const stop = await storage.getRouteStop(stopId);
-      if (!stop || stop.routeId !== routeId) {
-        return res.status(404).json({ error: "Stop not found in this route" });
-      }
-
-      if (stop.status === 'completed') {
-        return res.status(400).json({ error: "Cannot remove a completed stop" });
-      }
-
-      const deleted = await storage.deleteRouteStop(stopId);
-      if (!deleted) {
-        return res.status(500).json({ error: "Failed to remove stop" });
-      }
-
-      await storage.resequenceRouteStops(routeId);
-
-      const remainingStops = await storage.getRouteStops(routeId);
-      if (remainingStops.filter(s => s.status !== 'cancelled').length === 0) {
-        await storage.cancelRoute(routeId);
-      }
-
-      io.emit("route_modified", { routeId });
-      res.json({ success: true, routeId, removedStopId: stopId });
-    } catch (error) {
-      console.error("Remove stop error:", error);
-      res.status(500).json({ error: "Failed to remove stop from route" });
-    }
-  });
+    },
+  );
 
   // Add a delivery as a new stop to an existing route (staff only)
   app.post("/api/routes/:routeId/stops", requireStaff, async (req, res) => {
@@ -2804,45 +3549,64 @@ export async function registerRoutes(
         return res.status(400).json({ error: "deliveryId is required" });
       }
 
-      if (!await checkRouteOwnership(routeId, req.session)) {
+      if (!(await checkRouteOwnership(routeId, req.session))) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
 
-      if (!await checkDeliveryOwnership(deliveryId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this delivery" });
+      if (!(await checkDeliveryOwnership(deliveryId, req.session))) {
+        return res
+          .status(403)
+          .json({ error: "Access denied to this delivery" });
       }
 
       const route = await storage.getRoute(routeId);
-      if (!route || route.status === 'completed' || route.status === 'cancelled') {
-        return res.status(400).json({ error: "Cannot modify a completed or cancelled route" });
+      if (
+        !route ||
+        route.status === "completed" ||
+        route.status === "cancelled"
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Cannot modify a completed or cancelled route" });
       }
 
-      const alreadyInRoute = await storage.getDeliveryIdsInActiveRoutes([deliveryId]);
+      const alreadyInRoute = await storage.getDeliveryIdsInActiveRoutes([
+        deliveryId,
+      ]);
       if (alreadyInRoute.length > 0) {
-        return res.status(400).json({ error: "This delivery is already in an active route" });
+        return res
+          .status(400)
+          .json({ error: "This delivery is already in an active route" });
       }
 
       const delivery = await storage.getDelivery(deliveryId);
       if (!delivery || !delivery.lat || !delivery.lng) {
-        return res.status(400).json({ error: "Delivery not found or not geocoded" });
+        return res
+          .status(400)
+          .json({ error: "Delivery not found or not geocoded" });
       }
 
-      if (delivery.status === 'complete' || delivery.status === 'cancelled') {
-        return res.status(400).json({ error: "Cannot add a completed or cancelled delivery to a route" });
+      if (delivery.status === "complete" || delivery.status === "cancelled") {
+        return res.status(400).json({
+          error: "Cannot add a completed or cancelled delivery to a route",
+        });
       }
 
       const existingStops = await storage.getRouteStops(routeId);
-      const maxSequence = existingStops.reduce((max, s) => Math.max(max, s.sequence || 0), 0);
+      const maxSequence = existingStops.reduce(
+        (max, s) => Math.max(max, s.sequence || 0),
+        0,
+      );
 
       const newStop = await storage.createRouteStop({
         routeId,
         deliveryId,
         sequence: maxSequence + 1,
         status: "pending",
-        priority: delivery.priority || "normal"
+        priority: delivery.priority || "normal",
       });
 
-      await storage.updateDeliveryStatus(deliveryId, 'active');
+      await storage.updateDeliveryStatus(deliveryId, "active");
 
       io.emit("route_modified", { routeId });
       res.json(newStop);
@@ -2853,66 +3617,79 @@ export async function registerRoutes(
   });
 
   // Route stop priority update (staff only - dispatchers need pharmacy ownership)
-  app.put("/api/routes/:routeId/stops/:stopId", requireStaff, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      
-      // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
+  app.put(
+    "/api/routes/:routeId/stops/:stopId",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+
+        // Check pharmacy ownership
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
+
+        const stop = await storage.updateRouteStop(
+          parseInt(req.params.stopId),
+          req.body,
+        );
+        if (!stop) {
+          return res.status(404).json({ error: "Stop not found" });
+        }
+        io.emit("stop_updated", stop);
+        res.json(stop);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to update stop" });
       }
-      
-      const stop = await storage.updateRouteStop(parseInt(req.params.stopId), req.body);
-      if (!stop) {
-        return res.status(404).json({ error: "Stop not found" });
-      }
-      io.emit("stop_updated", stop);
-      res.json(stop);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update stop" });
-    }
-  });
+    },
+  );
 
   // Package scanning for route activation (staff only)
-  app.post("/api/routes/:routeId/stops/:stopId/scan", requireStaff, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      
-      // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
+  app.post(
+    "/api/routes/:routeId/stops/:stopId/scan",
+    requireAuthOrDriver,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+
+        // Check pharmacy ownership
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
+
+        const stop = await storage.markPackageScanned(
+          parseInt(req.params.stopId),
+        );
+        if (!stop) {
+          return res.status(404).json({ error: "Stop not found" });
+        }
+        io.emit("package_scanned", { stopId: stop.id, routeId });
+        res.json(stop);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to mark package as scanned" });
       }
-      
-      const stop = await storage.markPackageScanned(parseInt(req.params.stopId));
-      if (!stop) {
-        return res.status(404).json({ error: "Stop not found" });
-      }
-      io.emit("package_scanned", { stopId: stop.id, routeId });
-      res.json(stop);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to mark package as scanned" });
-    }
-  });
+    },
+  );
 
   // Route activation (staff only - dispatch function)
   app.post("/api/routes/:id/activate", requireStaff, async (req, res) => {
     try {
       const routeId = parseInt(req.params.id);
-      
+
       // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
+      if (!(await checkRouteOwnership(routeId, req.session))) {
         return res.status(403).json({ error: "Access denied to this route" });
       }
-      
+
       const stops = await storage.getRouteStops(routeId);
-      
+
       // Check if all packages are scanned
-      const allScanned = stops.every(s => s.packageScanned);
+      const allScanned = stops.every((s) => s.packageScanned);
       if (!allScanned) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "All packages must be scanned before activating route",
-          scannedCount: stops.filter(s => s.packageScanned).length,
-          totalCount: stops.length
+          scannedCount: stops.filter((s) => s.packageScanned).length,
+          totalCount: stops.length,
         });
       }
 
@@ -2929,40 +3706,48 @@ export async function registerRoutes(
   });
 
   // Set stop as urgent priority (staff only)
-  app.post("/api/routes/:routeId/stops/:stopId/urgent", requireStaff, async (req, res) => {
-    try {
-      const routeId = parseInt(req.params.routeId);
-      const stopId = parseInt(req.params.stopId);
-      
-      // Check pharmacy ownership
-      if (!await checkRouteOwnership(routeId, req.session)) {
-        return res.status(403).json({ error: "Access denied to this route" });
+  app.post(
+    "/api/routes/:routeId/stops/:stopId/urgent",
+    requireAuthOrDriver,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+        const stopId = parseInt(req.params.stopId);
+
+        // Check pharmacy ownership
+        if (!(await checkRouteOwnership(routeId, req.session))) {
+          return res.status(403).json({ error: "Access denied to this route" });
+        }
+
+        // Mark this stop as urgent
+        const stop = await storage.updateRouteStop(stopId, {
+          priority: "urgent",
+        });
+        if (!stop) {
+          return res.status(404).json({ error: "Stop not found" });
+        }
+
+        // Reorder stops to put urgent ones first
+        const allStops = await storage.getRouteStops(routeId);
+        const pendingStops = allStops.filter((s) => s.status !== "completed");
+        const urgentStops = pendingStops.filter((s) => s.priority === "urgent");
+        const normalStops = pendingStops.filter((s) => s.priority !== "urgent");
+
+        // Reorder: urgent first, then normal
+        const reorderedStops = [...urgentStops, ...normalStops];
+        for (let i = 0; i < reorderedStops.length; i++) {
+          await storage.updateRouteStop(reorderedStops[i].id, {
+            sequence: i + 1,
+          });
+        }
+
+        io.emit("route_updated", { routeId });
+        res.json({ success: true, stop });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to set urgent priority" });
       }
-      
-      // Mark this stop as urgent
-      const stop = await storage.updateRouteStop(stopId, { priority: "urgent" });
-      if (!stop) {
-        return res.status(404).json({ error: "Stop not found" });
-      }
-      
-      // Reorder stops to put urgent ones first
-      const allStops = await storage.getRouteStops(routeId);
-      const pendingStops = allStops.filter(s => s.status !== "completed");
-      const urgentStops = pendingStops.filter(s => s.priority === "urgent");
-      const normalStops = pendingStops.filter(s => s.priority !== "urgent");
-      
-      // Reorder: urgent first, then normal
-      const reorderedStops = [...urgentStops, ...normalStops];
-      for (let i = 0; i < reorderedStops.length; i++) {
-        await storage.updateRouteStop(reorderedStops[i].id, { sequence: i + 1 });
-      }
-      
-      io.emit("route_updated", { routeId });
-      res.json({ success: true, stop });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to set urgent priority" });
-    }
-  });
+    },
+  );
 
   // OCR logging (staff only)
   app.post("/api/ocr/log", requireStaff, async (req, res) => {
@@ -2988,11 +3773,15 @@ export async function registerRoutes(
     try {
       const ctx = getPharmacyContext(req.session);
       if (!ctx) return res.status(401).json({ error: "Not authenticated" });
-      
-      const pharmacyId = req.query.pharmacyId ? parseInt(req.query.pharmacyId as string) : null;
-      const batchId = req.query.batchId ? parseInt(req.query.batchId as string) : null;
+
+      const pharmacyId = req.query.pharmacyId
+        ? parseInt(req.query.pharmacyId as string)
+        : null;
+      const batchId = req.query.batchId
+        ? parseInt(req.query.batchId as string)
+        : null;
       const status = req.query.status as string | undefined;
-      
+
       // Get deliveries with pharmacy filtering
       let allDeliveries: any[];
       if (ctx.isAdmin) {
@@ -3005,65 +3794,75 @@ export async function registerRoutes(
       } else {
         allDeliveries = await storage.getDeliveriesByPharmacy(ctx.pharmacyId!);
       }
-      
+
       // Filter by batch if specified
       if (batchId) {
-        allDeliveries = allDeliveries.filter(d => d.batchId === batchId);
+        allDeliveries = allDeliveries.filter((d) => d.batchId === batchId);
       }
-      
+
       // Filter by status if specified
       if (status) {
         if (status === "open") {
           // Open orders = not complete and not cancelled
-          allDeliveries = allDeliveries.filter(d => d.status !== "complete" && d.status !== "cancelled");
+          allDeliveries = allDeliveries.filter(
+            (d) => d.status !== "complete" && d.status !== "cancelled",
+          );
         } else {
-          allDeliveries = allDeliveries.filter(d => d.status === status);
+          allDeliveries = allDeliveries.filter((d) => d.status === status);
         }
       }
-      
+
       // Enrich each delivery with prescriptions and proof data
       const ordersWithDetails = await Promise.all(
         allDeliveries.map(async (delivery) => {
-          const prescriptions = await storage.getPrescriptionsByDelivery(delivery.id);
-          
+          const prescriptions = await storage.getPrescriptionsByDelivery(
+            delivery.id,
+          );
+
           // Find route stop for this delivery to get proof
           const routeStop = await storage.getRouteStopByDeliveryId(delivery.id);
           let proof = null;
           let routeInfo = null;
-          
+
           if (routeStop) {
             proof = await storage.getDeliveryProof(routeStop.id);
             const route = await storage.getRoute(routeStop.routeId!);
             if (route) {
-              const driver = route.driverId ? await storage.getDriver(route.driverId) : null;
+              const driver = route.driverId
+                ? await storage.getDriver(route.driverId)
+                : null;
               routeInfo = {
                 routeId: route.id,
                 routeName: route.name,
                 routeStatus: route.status,
                 driverName: driver?.name || null,
-                completedAt: routeStop.actualArrival
+                completedAt: routeStop.actualArrival,
               };
             }
           }
-          
+
           return {
             ...delivery,
             prescriptions,
-            proof: proof ? {
-              hasSignature: !!(proof.signature || proof.signatureUrl),
-              hasPhoto: !!(proof.picture || proof.pictureUrl),
-              signatureData: proof.signature || proof.signatureUrl,
-              photoData: proof.picture || proof.pictureUrl,
-              notes: proof.notes,
-              barcode: proof.barcode,
-              timestamp: proof.createdAt
-            } : null,
-            route: routeInfo
+            proof: proof
+              ? {
+                  hasSignature: !!(proof.signature || proof.signatureUrl),
+                  hasPhoto: !!(proof.picture || proof.pictureUrl),
+                  signatureData: proof.signature || proof.signatureUrl,
+                  photoData: proof.picture || proof.pictureUrl,
+                  notes: proof.notes,
+                  barcode: proof.barcode,
+                  timestamp: proof.createdAt,
+                }
+              : null,
+            route: routeInfo,
           };
-        })
+        }),
       );
-      
-      console.log(`[Orders Report API] User ${ctx.username}, returning ${ordersWithDetails.length} orders`);
+
+      console.log(
+        `[Orders Report API] User ${ctx.username}, returning ${ordersWithDetails.length} orders`,
+      );
       res.json(ordersWithDetails);
     } catch (error) {
       console.error("Orders report error:", error);
