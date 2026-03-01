@@ -77,13 +77,6 @@ function requireAdminOrPharmacyAdmin(
   next();
 }
 
-function requireAuthOrDriver(req: Request, res: Response, next: NextFunction) {
-  if (!req.session?.user) {
-    return res.status(401).json({ message: "Authentication required" });
-  }
-  next();
-}
-
 // Require driver role
 function requireDriver(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.user) {
@@ -93,6 +86,12 @@ function requireDriver(req: Request, res: Response, next: NextFunction) {
     return res.status(403).json({ message: "Driver access required" });
   }
   next();
+}
+
+// Allow either a staff session OR a driver session (for endpoints drivers need to call)
+function requireAuthOrDriver(req: Request, res: Response, next: NextFunction) {
+  if (req.session?.user) return next();
+  return res.status(401).json({ message: "Authentication required" });
 }
 
 // Helper to get pharmacy context from session
@@ -134,10 +133,12 @@ function requirePharmacyScopeOrPharmacyAdmin(
     req.session.user.role === "dispatcher"
   ) {
     if (!req.session.user.pharmacyId) {
-      return res.status(403).json({
-        message:
-          "Your account is not associated with a pharmacy. Please contact admin.",
-      });
+      return res
+        .status(403)
+        .json({
+          message:
+            "Your account is not associated with a pharmacy. Please contact admin.",
+        });
     }
     return next();
   }
@@ -159,10 +160,12 @@ function requirePharmacyScope(req: Request, res: Response, next: NextFunction) {
   }
   // Dispatchers must have a pharmacy association
   if (!req.session.user.pharmacyId) {
-    return res.status(403).json({
-      message:
-        "Your account is not associated with a pharmacy. Please contact admin.",
-    });
+    return res
+      .status(403)
+      .json({
+        message:
+          "Your account is not associated with a pharmacy. Please contact admin.",
+      });
   }
   next();
 }
@@ -926,7 +929,7 @@ export async function registerRoutes(
   // Get driver delivery history with full details
   app.get(
     "/api/drivers/:id/delivery-history",
-    requireAuth,
+    requireAuthOrDriver,
     async (req, res) => {
       try {
         const driverId = parseInt(req.params.id);
@@ -1053,10 +1056,12 @@ export async function registerRoutes(
         !status ||
         !["pending", "ready", "complete", "cancelled"].includes(status)
       ) {
-        return res.status(400).json({
-          error:
-            "Invalid status. Must be pending, ready, complete, or cancelled",
-        });
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid status. Must be pending, ready, complete, or cancelled",
+          });
       }
 
       const batch = await storage.updateBatchStatus(batchId, status);
@@ -2206,9 +2211,11 @@ export async function registerRoutes(
         const deliveries = await storage.getDeliveriesByBatch(batchId);
         geocodedDeliveries = deliveries.filter((d) => d.lat && d.lng);
       } else {
-        return res.status(400).json({
-          error: "Either batchId, deliveryIds, or orderIds is required",
-        });
+        return res
+          .status(400)
+          .json({
+            error: "Either batchId, deliveryIds, or orderIds is required",
+          });
       }
 
       if (geocodedDeliveries.length === 0) {
@@ -3291,10 +3298,12 @@ export async function registerRoutes(
       const sourcePrescriptions =
         await storage.getPrescriptionsByDelivery(sourceDeliveryId);
       if (sourcePrescriptions.length <= prescriptionIds.length) {
-        return res.status(400).json({
-          error:
-            "Cannot split all prescriptions - at least one must remain in the original delivery",
-        });
+        return res
+          .status(400)
+          .json({
+            error:
+              "Cannot split all prescriptions - at least one must remain in the original delivery",
+          });
       }
 
       const newDelivery = await storage.splitDelivery(
@@ -3411,10 +3420,12 @@ export async function registerRoutes(
         prescription.deliveryId,
       );
       if (sourcePrescriptions.length <= 1) {
-        return res.status(400).json({
-          error:
-            "Cannot move the last prescription from a delivery. Delete the delivery instead.",
-        });
+        return res
+          .status(400)
+          .json({
+            error:
+              "Cannot move the last prescription from a delivery. Delete the delivery instead.",
+          });
       }
 
       const movedPrescription = await storage.movePrescriptionToDelivery(
@@ -3459,9 +3470,11 @@ export async function registerRoutes(
       ];
 
       if (!validStatuses.includes(status)) {
-        return res.status(400).json({
-          error: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
-        });
+        return res
+          .status(400)
+          .json({
+            error: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+          });
       }
 
       const delivery = await storage.updateDeliveryStatus(
@@ -3587,9 +3600,11 @@ export async function registerRoutes(
       }
 
       if (delivery.status === "complete" || delivery.status === "cancelled") {
-        return res.status(400).json({
-          error: "Cannot add a completed or cancelled delivery to a route",
-        });
+        return res
+          .status(400)
+          .json({
+            error: "Cannot add a completed or cancelled delivery to a route",
+          });
       }
 
       const existingStops = await storage.getRouteStops(routeId);
@@ -3644,7 +3659,7 @@ export async function registerRoutes(
     },
   );
 
-  // Package scanning for route activation (staff only)
+  // Package scanning for route activation (drivers and staff)
   app.post(
     "/api/routes/:routeId/stops/:stopId/scan",
     requireAuthOrDriver,
@@ -3705,7 +3720,7 @@ export async function registerRoutes(
     }
   });
 
-  // Set stop as urgent priority (staff only)
+  // Set stop as urgent priority (drivers and staff)
   app.post(
     "/api/routes/:routeId/stops/:stopId/urgent",
     requireAuthOrDriver,
