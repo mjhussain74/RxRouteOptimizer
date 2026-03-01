@@ -1185,442 +1185,6 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
             )}
           </div>
 
-          {showDeliveryReport && activeRoute && (
-            <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
-              <Card className="bg-slate-800 border-slate-700 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle className="text-white flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5" />
-                    Delivery Report
-                  </CardTitle>
-                  <button
-                    onClick={() => setShowDeliveryReport(false)}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="p-3 bg-slate-700/50 rounded">
-                    <p className="text-slate-400 text-xs">Route</p>
-                    <p className="text-white font-semibold">
-                      {activeRoute.name}
-                    </p>
-                    <p className="text-slate-400 text-xs mt-1">
-                      Started:{" "}
-                      {activeRoute.createdAt
-                        ? new Date(activeRoute.createdAt).toLocaleString()
-                        : "N/A"}
-                    </p>
-                    {route?.endAddress && (
-                      <p className="text-blue-400 text-xs mt-1">
-                        End: {route.endAddress}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Summary stats */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="p-3 bg-slate-700/50 rounded text-center">
-                      <p className="text-2xl font-bold text-white">
-                        {(routeData as any)?.stops?.length || 0}
-                      </p>
-                      <p className="text-slate-400 text-xs">Total</p>
-                    </div>
-                    <div className="p-3 bg-green-500/10 rounded border border-green-500/30 text-center">
-                      <p className="text-2xl font-bold text-green-400">
-                        {completedStops.length}
-                      </p>
-                      <p className="text-green-400 text-xs">Delivered</p>
-                    </div>
-                    <div className="p-3 bg-yellow-500/10 rounded border border-yellow-500/30 text-center">
-                      <p className="text-2xl font-bold text-yellow-400">
-                        {pendingStops.length}
-                      </p>
-                      <p className="text-yellow-400 text-xs">Pending</p>
-                    </div>
-                  </div>
-                  {cancelledStops.length > 0 && (
-                    <div className="p-3 bg-red-500/10 rounded border border-red-500/20 text-center">
-                      <p className="text-xl font-bold text-red-400">
-                        {cancelledStops.length} couldn't be delivered
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Delivered stops — read-only, no action buttons */}
-                  <div className="border-t border-slate-600 pt-4">
-                    <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-400" />
-                      Delivered ({completedStops.length})
-                    </h3>
-                    <div className="space-y-3 max-h-64 overflow-y-auto">
-                      {completedStops.map((stop: any, idx: number) => (
-                        <div
-                          key={stop.id}
-                          className="p-3 bg-slate-700/30 rounded border border-slate-600"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded">
-                                  #{idx + 1}
-                                </span>
-                                <span className="text-xs font-mono text-blue-400">
-                                  {stop.delivery?.deliveryIdentifier ||
-                                    `DEL${stop.delivery?.id}`}
-                                </span>
-                              </div>
-                              <p className="text-white text-sm font-medium">
-                                {stop.delivery?.customerName || "Customer"}
-                              </p>
-                              <p className="text-slate-400 text-xs mt-1">
-                                {stop.delivery?.addressText}
-                              </p>
-                              {stop.delivery?.prescriptions &&
-                                stop.delivery.prescriptions.length > 0 && (
-                                  <div className="mt-2 flex flex-wrap gap-1">
-                                    {stop.delivery.prescriptions.map(
-                                      (rx: any, rxIdx: number) => (
-                                        <span
-                                          key={rxIdx}
-                                          className="bg-slate-600/50 text-slate-300 text-xs px-2 py-0.5 rounded"
-                                        >
-                                          Rx: {rx.rxNumber}
-                                        </span>
-                                      ),
-                                    )}
-                                  </div>
-                                )}
-                              {stop.completedAt && (
-                                <p className="text-slate-500 text-xs mt-2">
-                                  Delivered:{" "}
-                                  {new Date(stop.completedAt).toLocaleString()}
-                                </p>
-                              )}
-                            </div>
-                            <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0" />
-                          </div>
-                        </div>
-                      ))}
-                      {completedStops.length === 0 && (
-                        <p className="text-slate-500 text-center py-4">
-                          No delivered stops yet
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Cancelled stops — visible but read-only, no navigate/complete buttons */}
-                  {cancelledStops.length > 0 && (
-                    <div className="border-t border-slate-600 pt-4">
-                      <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                        <X className="h-4 w-4 text-red-400" />
-                        Not Delivered ({cancelledStops.length})
-                      </h3>
-                      <div className="space-y-3 max-h-64 overflow-y-auto">
-                        {cancelledStops.map((stop: any) => (
-                          <div
-                            key={stop.id}
-                            className="p-3 bg-red-500/5 rounded border border-red-500/20 opacity-75"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-0.5 rounded">
-                                    CANCELLED
-                                  </span>
-                                  <span className="text-xs font-mono text-slate-400">
-                                    {stop.delivery?.deliveryIdentifier ||
-                                      `DEL${stop.delivery?.id}`}
-                                  </span>
-                                </div>
-                                <p className="text-slate-300 text-sm font-medium">
-                                  {stop.delivery?.customerName || "Customer"}
-                                </p>
-                                <p className="text-slate-400 text-xs mt-1">
-                                  {stop.delivery?.addressText}
-                                </p>
-                                {stop.delivery?.prescriptions &&
-                                  stop.delivery.prescriptions.length > 0 && (
-                                    <div className="mt-2 flex flex-wrap gap-1">
-                                      {stop.delivery.prescriptions.map(
-                                        (rx: any, rxIdx: number) => (
-                                          <span
-                                            key={rxIdx}
-                                            className="bg-slate-600/50 text-slate-400 text-xs px-2 py-0.5 rounded"
-                                          >
-                                            Rx: {rx.rxNumber}
-                                          </span>
-                                        ),
-                                      )}
-                                    </div>
-                                  )}
-                                {stop.notes && (
-                                  <p className="text-red-400/70 text-xs mt-2 italic">
-                                    {stop.notes.replace(/^CANCELLED:\s*/i, "")}
-                                  </p>
-                                )}
-                              </div>
-                              <X className="h-5 w-5 text-red-400 flex-shrink-0" />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Pending stops — read-only list, no action buttons */}
-                  {pendingStops.length > 0 && (
-                    <div className="border-t border-slate-600 pt-4">
-                      <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-yellow-400" />
-                        Remaining ({pendingStops.length})
-                      </h3>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {pendingStops.map((stop: any, idx: number) => (
-                          <div
-                            key={stop.id}
-                            className="p-2 bg-slate-700/20 rounded border border-slate-700 flex items-center gap-2"
-                          >
-                            <span
-                              className={`text-xs font-bold px-2 py-0.5 rounded ${
-                                stop.priority === "urgent"
-                                  ? "bg-red-500/20 text-red-400"
-                                  : "bg-yellow-500/20 text-yellow-400"
-                              }`}
-                            >
-                              {stop.priority === "urgent"
-                                ? "URGENT"
-                                : `#${completedStops.length + cancelledStops.length + idx + 1}`}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-white text-sm truncate">
-                                {stop.delivery?.customerName || "Customer"}
-                              </p>
-                              <p className="text-slate-500 text-xs truncate">
-                                {stop.delivery?.addressText}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={() => setShowDeliveryReport(false)}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
-                  >
-                    Close
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          {showDeliveryHistory && (
-            <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
-              <Card className="bg-slate-800 border-slate-700 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle className="text-white flex items-center gap-2">
-                    <History className="h-5 w-5" />
-                    Delivery History
-                  </CardTitle>
-                  <button
-                    onClick={() => setShowDeliveryHistory(false)}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {historyLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
-                    </div>
-                  ) : historyError ? (
-                    <div className="text-center py-8">
-                      <p className="text-red-400 text-sm mb-3">
-                        Failed to load history
-                      </p>
-                      <p className="text-slate-500 text-xs mb-4">
-                        {(historyError as Error).message}
-                      </p>
-                      <button
-                        onClick={() => refetchHistory()}
-                        className="text-blue-400 text-sm underline"
-                      >
-                        Try again
-                      </button>
-                    </div>
-                  ) : (deliveryHistory as any[]).length === 0 ? (
-                    <div className="text-center py-8">
-                      <History className="h-12 w-12 mx-auto text-slate-500 mb-3" />
-                      <p className="text-slate-400">No delivery history yet</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-2 gap-3 mb-4">
-                        <div className="p-3 bg-slate-700/50 rounded text-center">
-                          <p className="text-2xl font-bold text-white">
-                            {(deliveryHistory as any[]).length}
-                          </p>
-                          <p className="text-slate-400 text-xs">Total Routes</p>
-                        </div>
-                        <div className="p-3 bg-green-500/10 rounded border border-green-500/30 text-center">
-                          <p className="text-2xl font-bold text-green-400">
-                            {(deliveryHistory as any[]).reduce(
-                              (acc, r) => acc + (r.completedCount || 0),
-                              0,
-                            )}
-                          </p>
-                          <p className="text-green-400 text-xs">
-                            Total Deliveries
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        {(deliveryHistory as any[]).map((route: any) => (
-                          <div
-                            key={route.id}
-                            className="border border-slate-600 rounded-lg overflow-hidden"
-                          >
-                            <div className="bg-slate-700/50 p-3 flex items-center justify-between">
-                              <div>
-                                <p className="text-white font-semibold">
-                                  {route.name}
-                                </p>
-                                <p className="text-slate-400 text-xs">
-                                  {route.createdAt
-                                    ? new Date(
-                                        route.createdAt,
-                                      ).toLocaleDateString()
-                                    : "N/A"}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`text-xs px-2 py-1 rounded ${
-                                    route.status === "completed"
-                                      ? "bg-green-500/20 text-green-400"
-                                      : route.status === "cancelled"
-                                        ? "bg-red-500/20 text-red-400"
-                                        : route.status === "active" ||
-                                            route.status === "dispatched"
-                                          ? "bg-blue-500/20 text-blue-400"
-                                          : "bg-slate-500/20 text-slate-400"
-                                  }`}
-                                >
-                                  {route.status}
-                                </span>
-                                <span className="text-sm text-white">
-                                  {route.completedCount || 0}/
-                                  {route.totalCount || 0}
-                                </span>
-                              </div>
-                            </div>
-
-                            {route.stops && route.stops.length > 0 && (
-                              <div className="p-3 space-y-2 max-h-64 overflow-y-auto bg-slate-800/50">
-                                {/* Delivered stops — read-only */}
-                                {route.stops
-                                  .filter((s: any) => s.status === "completed")
-                                  .map((stop: any) => (
-                                    <div
-                                      key={stop.id}
-                                      className="flex items-start gap-2 p-2 bg-slate-700/30 rounded"
-                                    >
-                                      <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                                      <div className="flex-1 min-w-0">
-                                        <span className="text-xs font-mono text-blue-400">
-                                          {stop.delivery?.deliveryIdentifier ||
-                                            `DEL${stop.delivery?.id}`}
-                                        </span>
-                                        <p className="text-white text-sm">
-                                          {stop.delivery?.customerName ||
-                                            "Customer"}
-                                        </p>
-                                        <p className="text-slate-400 text-xs truncate">
-                                          {stop.delivery?.addressText}
-                                        </p>
-                                        {stop.completedAt && (
-                                          <p className="text-slate-500 text-xs mt-1">
-                                            {new Date(
-                                              stop.completedAt,
-                                            ).toLocaleString()}
-                                          </p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                {/* Cancelled stops — visible but clearly marked, no action buttons */}
-                                {route.stops
-                                  .filter((s: any) => s.status === "cancelled")
-                                  .map((stop: any) => (
-                                    <div
-                                      key={stop.id}
-                                      className="flex items-start gap-2 p-2 bg-red-500/5 rounded border border-red-500/15"
-                                    >
-                                      <X className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1 mb-0.5">
-                                          <span className="text-xs font-mono text-slate-400">
-                                            {stop.delivery
-                                              ?.deliveryIdentifier ||
-                                              `DEL${stop.delivery?.id}`}
-                                          </span>
-                                          <span className="text-xs text-red-400 font-medium">
-                                            · Not delivered
-                                          </span>
-                                        </div>
-                                        <p className="text-slate-300 text-sm">
-                                          {stop.delivery?.customerName ||
-                                            "Customer"}
-                                        </p>
-                                        <p className="text-slate-500 text-xs truncate">
-                                          {stop.delivery?.addressText}
-                                        </p>
-                                        {stop.notes && (
-                                          <p className="text-red-400/60 text-xs mt-0.5 italic">
-                                            {stop.notes.replace(
-                                              /^CANCELLED:\s*/i,
-                                              "",
-                                            )}
-                                          </p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                {route.stops.filter(
-                                  (s: any) =>
-                                    s.status === "completed" ||
-                                    s.status === "cancelled",
-                                ).length === 0 && (
-                                  <p className="text-slate-500 text-xs text-center py-2">
-                                    No stops recorded
-                                  </p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-
-                  <Button
-                    onClick={() => setShowDeliveryHistory(false)}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
-                  >
-                    Close
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
           {showProofModal && currentStop && (
             <div
               className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4"
@@ -1967,6 +1531,445 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               </Card>
             </div>
           )}
+        </div>
+      )}
+
+      {showDeliveryReport && (
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
+          <Card className="bg-slate-800 border-slate-700 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-white flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                Delivery Report
+              </CardTitle>
+              <button
+                onClick={() => setShowDeliveryReport(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {activeRoute ? (
+                <>
+                  <div className="p-3 bg-slate-700/50 rounded">
+                    <p className="text-slate-400 text-xs">Route</p>
+                    <p className="text-white font-semibold">
+                      {activeRoute.name}
+                    </p>
+                    <p className="text-slate-400 text-xs mt-1">
+                      Started:{" "}
+                      {activeRoute.createdAt
+                        ? new Date(activeRoute.createdAt).toLocaleString()
+                        : "N/A"}
+                    </p>
+                    {route?.endAddress && (
+                      <p className="text-blue-400 text-xs mt-1">
+                        End: {route.endAddress}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="p-3 bg-slate-700/50 rounded text-center">
+                      <p className="text-2xl font-bold text-white">
+                        {(routeData as any)?.stops?.length || 0}
+                      </p>
+                      <p className="text-slate-400 text-xs">Total</p>
+                    </div>
+                    <div className="p-3 bg-green-500/10 rounded border border-green-500/30 text-center">
+                      <p className="text-2xl font-bold text-green-400">
+                        {completedStops.length}
+                      </p>
+                      <p className="text-green-400 text-xs">Delivered</p>
+                    </div>
+                    <div className="p-3 bg-yellow-500/10 rounded border border-yellow-500/30 text-center">
+                      <p className="text-2xl font-bold text-yellow-400">
+                        {pendingStops.length}
+                      </p>
+                      <p className="text-yellow-400 text-xs">Pending</p>
+                    </div>
+                  </div>
+                  {cancelledStops.length > 0 && (
+                    <div className="p-3 bg-red-500/10 rounded border border-red-500/20 text-center">
+                      <p className="text-xl font-bold text-red-400">
+                        {cancelledStops.length} couldn't be delivered
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="border-t border-slate-600 pt-4">
+                    <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-400" />
+                      Delivered ({completedStops.length})
+                    </h3>
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {completedStops.map((stop: any, idx: number) => (
+                        <div
+                          key={stop.id}
+                          className="p-3 bg-slate-700/30 rounded border border-slate-600"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded">
+                                  #{idx + 1}
+                                </span>
+                                <span className="text-xs font-mono text-blue-400">
+                                  {stop.delivery?.deliveryIdentifier ||
+                                    `DEL${stop.delivery?.id}`}
+                                </span>
+                              </div>
+                              <p className="text-white text-sm font-medium">
+                                {stop.delivery?.customerName || "Customer"}
+                              </p>
+                              <p className="text-slate-400 text-xs mt-1">
+                                {stop.delivery?.addressText}
+                              </p>
+                              {stop.delivery?.prescriptions &&
+                                stop.delivery.prescriptions.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {stop.delivery.prescriptions.map(
+                                      (rx: any, rxIdx: number) => (
+                                        <span
+                                          key={rxIdx}
+                                          className="bg-slate-600/50 text-slate-300 text-xs px-2 py-0.5 rounded"
+                                        >
+                                          Rx: {rx.rxNumber}
+                                        </span>
+                                      ),
+                                    )}
+                                  </div>
+                                )}
+                              {stop.completedAt && (
+                                <p className="text-slate-500 text-xs mt-2">
+                                  Delivered:{" "}
+                                  {new Date(stop.completedAt).toLocaleString()}
+                                </p>
+                              )}
+                            </div>
+                            <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0" />
+                          </div>
+                        </div>
+                      ))}
+                      {completedStops.length === 0 && (
+                        <p className="text-slate-500 text-center py-4">
+                          No delivered stops yet
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {cancelledStops.length > 0 && (
+                    <div className="border-t border-slate-600 pt-4">
+                      <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                        <X className="h-4 w-4 text-red-400" />
+                        Not Delivered ({cancelledStops.length})
+                      </h3>
+                      <div className="space-y-3 max-h-64 overflow-y-auto">
+                        {cancelledStops.map((stop: any) => (
+                          <div
+                            key={stop.id}
+                            className="p-3 bg-red-500/5 rounded border border-red-500/20 opacity-75"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-0.5 rounded">
+                                    CANCELLED
+                                  </span>
+                                  <span className="text-xs font-mono text-slate-400">
+                                    {stop.delivery?.deliveryIdentifier ||
+                                      `DEL${stop.delivery?.id}`}
+                                  </span>
+                                </div>
+                                <p className="text-slate-300 text-sm font-medium">
+                                  {stop.delivery?.customerName || "Customer"}
+                                </p>
+                                <p className="text-slate-400 text-xs mt-1">
+                                  {stop.delivery?.addressText}
+                                </p>
+                                {stop.delivery?.prescriptions &&
+                                  stop.delivery.prescriptions.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                      {stop.delivery.prescriptions.map(
+                                        (rx: any, rxIdx: number) => (
+                                          <span
+                                            key={rxIdx}
+                                            className="bg-slate-600/50 text-slate-400 text-xs px-2 py-0.5 rounded"
+                                          >
+                                            Rx: {rx.rxNumber}
+                                          </span>
+                                        ),
+                                      )}
+                                    </div>
+                                  )}
+                                {stop.notes && (
+                                  <p className="text-red-400/70 text-xs mt-2 italic">
+                                    {stop.notes.replace(/^CANCELLED:\s*/i, "")}
+                                  </p>
+                                )}
+                              </div>
+                              <X className="h-5 w-5 text-red-400 flex-shrink-0" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {pendingStops.length > 0 && (
+                    <div className="border-t border-slate-600 pt-4">
+                      <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-yellow-400" />
+                        Remaining ({pendingStops.length})
+                      </h3>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {pendingStops.map((stop: any, idx: number) => (
+                          <div
+                            key={stop.id}
+                            className="p-2 bg-slate-700/20 rounded border border-slate-700 flex items-center gap-2"
+                          >
+                            <span
+                              className={`text-xs font-bold px-2 py-0.5 rounded ${
+                                stop.priority === "urgent"
+                                  ? "bg-red-500/20 text-red-400"
+                                  : "bg-yellow-500/20 text-yellow-400"
+                              }`}
+                            >
+                              {stop.priority === "urgent"
+                                ? "URGENT"
+                                : `#${completedStops.length + cancelledStops.length + idx + 1}`}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-sm truncate">
+                                {stop.delivery?.customerName || "Customer"}
+                              </p>
+                              <p className="text-slate-500 text-xs truncate">
+                                {stop.delivery?.addressText}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-slate-400">No active route to report on.</p>
+                  <p className="text-slate-500 text-sm mt-2">Check your delivery history for past routes.</p>
+                </div>
+              )}
+
+              <Button
+                onClick={() => setShowDeliveryReport(false)}
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                Close
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {showDeliveryHistory && (
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
+          <Card className="bg-slate-800 border-slate-700 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-white flex items-center gap-2">
+                <History className="h-5 w-5" />
+                Delivery History
+              </CardTitle>
+              <button
+                onClick={() => setShowDeliveryHistory(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+                </div>
+              ) : historyError ? (
+                <div className="text-center py-8">
+                  <p className="text-red-400 text-sm mb-3">
+                    Failed to load history
+                  </p>
+                  <p className="text-slate-500 text-xs mb-4">
+                    {(historyError as Error).message}
+                  </p>
+                  <button
+                    onClick={() => refetchHistory()}
+                    className="text-blue-400 text-sm underline"
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : (deliveryHistory as any[]).length === 0 ? (
+                <div className="text-center py-8">
+                  <History className="h-12 w-12 mx-auto text-slate-500 mb-3" />
+                  <p className="text-slate-400">No delivery history yet</p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="p-3 bg-slate-700/50 rounded text-center">
+                      <p className="text-2xl font-bold text-white">
+                        {(deliveryHistory as any[]).length}
+                      </p>
+                      <p className="text-slate-400 text-xs">Total Routes</p>
+                    </div>
+                    <div className="p-3 bg-green-500/10 rounded border border-green-500/30 text-center">
+                      <p className="text-2xl font-bold text-green-400">
+                        {(deliveryHistory as any[]).reduce(
+                          (acc, r) => acc + (r.completedCount || 0),
+                          0,
+                        )}
+                      </p>
+                      <p className="text-green-400 text-xs">
+                        Total Deliveries
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {(deliveryHistory as any[]).map((route: any) => (
+                      <div
+                        key={route.id}
+                        className="border border-slate-600 rounded-lg overflow-hidden"
+                      >
+                        <div className="bg-slate-700/50 p-3 flex items-center justify-between">
+                          <div>
+                            <p className="text-white font-semibold">
+                              {route.name}
+                            </p>
+                            <p className="text-slate-400 text-xs">
+                              {route.createdAt
+                                ? new Date(
+                                    route.createdAt,
+                                  ).toLocaleDateString()
+                                : "N/A"}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-xs px-2 py-1 rounded ${
+                                route.status === "completed"
+                                  ? "bg-green-500/20 text-green-400"
+                                  : route.status === "cancelled"
+                                    ? "bg-red-500/20 text-red-400"
+                                    : route.status === "active" ||
+                                        route.status === "dispatched"
+                                      ? "bg-blue-500/20 text-blue-400"
+                                      : "bg-slate-500/20 text-slate-400"
+                              }`}
+                            >
+                              {route.status}
+                            </span>
+                            <span className="text-sm text-white">
+                              {route.completedCount || 0}/
+                              {route.totalCount || 0}
+                            </span>
+                          </div>
+                        </div>
+
+                        {route.stops && route.stops.length > 0 && (
+                          <div className="p-3 space-y-2 max-h-64 overflow-y-auto bg-slate-800/50">
+                            {route.stops
+                              .filter((s: any) => s.status === "completed")
+                              .map((stop: any) => (
+                                <div
+                                  key={stop.id}
+                                  className="flex items-start gap-2 p-2 bg-slate-700/30 rounded"
+                                >
+                                  <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <span className="text-xs font-mono text-blue-400">
+                                      {stop.delivery?.deliveryIdentifier ||
+                                        `DEL${stop.delivery?.id}`}
+                                    </span>
+                                    <p className="text-white text-sm">
+                                      {stop.delivery?.customerName ||
+                                        "Customer"}
+                                    </p>
+                                    <p className="text-slate-400 text-xs truncate">
+                                      {stop.delivery?.addressText}
+                                    </p>
+                                    {stop.completedAt && (
+                                      <p className="text-slate-500 text-xs mt-1">
+                                        {new Date(
+                                          stop.completedAt,
+                                        ).toLocaleString()}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            {route.stops
+                              .filter((s: any) => s.status === "cancelled")
+                              .map((stop: any) => (
+                                <div
+                                  key={stop.id}
+                                  className="flex items-start gap-2 p-2 bg-red-500/5 rounded border border-red-500/15"
+                                >
+                                  <X className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                      <span className="text-xs font-mono text-slate-400">
+                                        {stop.delivery
+                                          ?.deliveryIdentifier ||
+                                          `DEL${stop.delivery?.id}`}
+                                      </span>
+                                      <span className="text-xs text-red-400 font-medium">
+                                        · Not delivered
+                                      </span>
+                                    </div>
+                                    <p className="text-slate-300 text-sm">
+                                      {stop.delivery?.customerName ||
+                                        "Customer"}
+                                    </p>
+                                    <p className="text-slate-500 text-xs truncate">
+                                      {stop.delivery?.addressText}
+                                    </p>
+                                    {stop.notes && (
+                                      <p className="text-red-400/60 text-xs mt-0.5 italic">
+                                        {stop.notes.replace(
+                                          /^CANCELLED:\s*/i,
+                                          "",
+                                        )}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            {route.stops.filter(
+                              (s: any) =>
+                                s.status === "completed" ||
+                                s.status === "cancelled",
+                            ).length === 0 && (
+                              <p className="text-slate-500 text-xs text-center py-2">
+                                No stops recorded
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <Button
+                onClick={() => setShowDeliveryHistory(false)}
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                Close
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>
