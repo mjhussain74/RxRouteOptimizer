@@ -110,6 +110,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [isScanning, setIsScanning] = useState(false);
   const [showDeliveryReport, setShowDeliveryReport] = useState(false);
   const [showDeliveryHistory, setShowDeliveryHistory] = useState(false);
+  const [expandedHistoryRoute, setExpandedHistoryRoute] = useState<number | null>(null);
   const [showRouteActivation, setShowRouteActivation] = useState(false);
   const [activationScanningStopId, setActivationScanningStopId] = useState<
     number | null
@@ -1782,7 +1783,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 Delivery History
               </CardTitle>
               <button
-                onClick={() => setShowDeliveryHistory(false)}
+                onClick={() => { setShowDeliveryHistory(false); setExpandedHistoryRoute(null); }}
                 className="text-slate-400 hover:text-white"
               >
                 <X className="h-5 w-5" />
@@ -1835,26 +1836,30 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     </div>
                   </div>
 
-                  <div className="space-y-4">
+                  <div className="space-y-2">
                     {(deliveryHistory as any[]).map((route: any) => (
                       <div
                         key={route.id}
                         className="border border-slate-600 rounded-lg overflow-hidden"
                       >
-                        <div className="bg-slate-700/50 p-3 flex items-center justify-between">
-                          <div>
-                            <p className="text-white font-semibold">
-                              {route.name}
-                            </p>
-                            <p className="text-slate-400 text-xs">
-                              {route.createdAt
-                                ? new Date(
-                                    route.createdAt,
-                                  ).toLocaleDateString()
-                                : "N/A"}
-                            </p>
+                        <button
+                          onClick={() => setExpandedHistoryRoute(expandedHistoryRoute === route.id ? null : route.id)}
+                          className="w-full bg-slate-700/50 p-3 flex items-center justify-between hover:bg-slate-700/70 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <ChevronRight className={`h-4 w-4 text-slate-400 flex-shrink-0 transition-transform ${expandedHistoryRoute === route.id ? "rotate-90" : ""}`} />
+                            <div className="text-left min-w-0">
+                              <p className="text-white font-semibold text-sm truncate">
+                                {route.name}
+                              </p>
+                              <p className="text-slate-400 text-xs">
+                                {route.createdAt
+                                  ? new Date(route.createdAt).toLocaleDateString()
+                                  : "N/A"}
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-shrink-0">
                             <span
                               className={`text-xs px-2 py-1 rounded ${
                                 route.status === "completed"
@@ -1874,10 +1879,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                               {route.totalCount || 0}
                             </span>
                           </div>
-                        </div>
+                        </button>
 
-                        {route.stops && route.stops.length > 0 && (
-                          <div className="p-3 space-y-2 max-h-64 overflow-y-auto bg-slate-800/50">
+                        {expandedHistoryRoute === route.id && route.stops && route.stops.length > 0 && (
+                          <div className="p-3 space-y-2 max-h-64 overflow-y-auto bg-slate-800/50 border-t border-slate-600">
                             {route.stops
                               .filter((s: any) => s.status === "completed")
                               .map((stop: any) => (
@@ -1963,7 +1968,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               )}
 
               <Button
-                onClick={() => setShowDeliveryHistory(false)}
+                onClick={() => { setShowDeliveryHistory(false); setExpandedHistoryRoute(null); }}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
                 Close
