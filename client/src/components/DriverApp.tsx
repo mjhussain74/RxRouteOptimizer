@@ -151,9 +151,26 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     enabled: !!activeRoute?.id,
   });
 
-  const { data: deliveryHistory = [], isLoading: historyLoading } = useQuery({
+  const {
+    data: deliveryHistory = [],
+    isLoading: historyLoading,
+    refetch: refetchHistory,
+    error: historyError,
+  } = useQuery({
     queryKey: [`/api/drivers/${driverId}/delivery-history`],
     enabled: !!driverId && showDeliveryHistory,
+    staleTime: 0, // always re-fetch when modal opens
+    retry: 1,
+    queryFn: async () => {
+      const res = await fetch(`/api/drivers/${driverId}/delivery-history`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText);
+        throw new Error(`${res.status}: ${text}`);
+      }
+      return res.json();
+    },
   });
 
   useEffect(() => {
@@ -743,7 +760,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               <BarChart3 className="h-5 w-5" />
             </button>
             <button
-              onClick={() => setShowDeliveryHistory(true)}
+              onClick={() => {
+                setShowDeliveryHistory(true);
+                setTimeout(() => refetchHistory(), 50);
+              }}
               className="text-slate-400 hover:text-white transition-colors"
               title="Delivery History"
             >
@@ -1418,6 +1438,21 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                   {historyLoading ? (
                     <div className="flex items-center justify-center py-8">
                       <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+                    </div>
+                  ) : historyError ? (
+                    <div className="text-center py-8">
+                      <p className="text-red-400 text-sm mb-3">
+                        Failed to load history
+                      </p>
+                      <p className="text-slate-500 text-xs mb-4">
+                        {(historyError as Error).message}
+                      </p>
+                      <button
+                        onClick={() => refetchHistory()}
+                        className="text-blue-400 text-sm underline"
+                      >
+                        Try again
+                      </button>
                     </div>
                   ) : (deliveryHistory as any[]).length === 0 ? (
                     <div className="text-center py-8">
