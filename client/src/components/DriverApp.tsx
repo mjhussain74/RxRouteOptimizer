@@ -27,12 +27,12 @@ import {
   History,
 } from "lucide-react";
 import { saveProofLocally, getProofByStopId } from "../lib/localProofStorage";
-import { 
-  startAutoSync, 
-  stopAutoSync, 
-  subscribeSyncStatus, 
+import {
+  startAutoSync,
+  stopAutoSync,
+  subscribeSyncStatus,
   forceSyncNow,
-  SyncStatus 
+  SyncStatus,
 } from "../lib/proofSyncService";
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
 import { Button } from "./ui/button";
@@ -111,7 +111,9 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [showDeliveryReport, setShowDeliveryReport] = useState(false);
   const [showDeliveryHistory, setShowDeliveryHistory] = useState(false);
   const [showRouteActivation, setShowRouteActivation] = useState(false);
-  const [activationScanningStopId, setActivationScanningStopId] = useState<number | null>(null);
+  const [activationScanningStopId, setActivationScanningStopId] = useState<
+    number | null
+  >(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
@@ -157,7 +159,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   useEffect(() => {
     startAutoSync(30000);
     const unsubscribe = subscribeSyncStatus(setSyncStatus);
-    
+
     return () => {
       stopAutoSync();
       unsubscribe();
@@ -199,46 +201,54 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       if (scannedBarcode) {
         const trimmedBarcode = scannedBarcode.trim().toLowerCase();
         const delivery = currentStop?.delivery;
-        
+
         // Check if barcode matches delivery ID, any prescription, or legacy rxNumber
         let barcodeValid = false;
-        
+
         // Check against delivery identifier (actual or fallback DEL{id})
         if (delivery?.deliveryIdentifier) {
-          barcodeValid = delivery.deliveryIdentifier.toLowerCase() === trimmedBarcode;
+          barcodeValid =
+            delivery.deliveryIdentifier.toLowerCase() === trimmedBarcode;
         }
         // Also check fallback format DEL{id} for deliveries without identifiers
         if (!barcodeValid && delivery?.id) {
           const fallbackId = `del${delivery.id}`;
           barcodeValid = fallbackId === trimmedBarcode;
         }
-        
+
         // If not matched, check prescriptions
-        if (!barcodeValid && delivery?.prescriptions && delivery.prescriptions.length > 0) {
+        if (
+          !barcodeValid &&
+          delivery?.prescriptions &&
+          delivery.prescriptions.length > 0
+        ) {
           barcodeValid = delivery.prescriptions.some(
-            (rx: any) => rx.rxNumber?.toLowerCase() === trimmedBarcode
+            (rx: any) => rx.rxNumber?.toLowerCase() === trimmedBarcode,
           );
         }
-        
+
         // If still not matched, check legacy rxNumber
         if (!barcodeValid && delivery?.rxNumber) {
-          barcodeValid = delivery.rxNumber.trim().toLowerCase() === trimmedBarcode;
+          barcodeValid =
+            delivery.rxNumber.trim().toLowerCase() === trimmedBarcode;
         }
-        
+
         if (!barcodeValid && delivery) {
-          throw new Error("Scanned barcode does not match delivery ID or any prescription number");
+          throw new Error(
+            "Scanned barcode does not match delivery ID or any prescription number",
+          );
         }
       }
 
-      console.log("📦 Saving proof locally first:", { 
-        routeId, 
-        stopId, 
-        hasSignature: !!signature, 
+      console.log("📦 Saving proof locally first:", {
+        routeId,
+        stopId,
+        hasSignature: !!signature,
         hasPicture: !!picture,
         signatureLength: signature?.length || 0,
         pictureLength: picture?.length || 0,
         notes: proofNotes,
-        barcode: scannedBarcode
+        barcode: scannedBarcode,
       });
 
       // Save proof locally first (local-first approach)
@@ -250,7 +260,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         notes: proofNotes,
         barcode: scannedBarcode,
       });
-      
+
       console.log("📦 Proof saved locally:", localProof.id);
 
       // Mark stop as complete on the server immediately (without proof images)
@@ -267,30 +277,30 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
           credentials: "include",
         },
       );
-      
+
       console.log("📥 Complete-local response status:", response.status);
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         console.error("❌ Complete-local failed:", errorData);
         throw new Error(errorData.error || "Failed to mark delivery complete");
       }
-      
-      return { ...await response.json(), localProofId: localProof.id };
+
+      return { ...(await response.json()), localProofId: localProof.id };
     },
     onSuccess: async (data) => {
       console.log("✅ Delivery marked complete, proof saved locally", data);
       console.log("📤 Proof will upload in background...");
-      
+
       setSignature(null);
       setPicture(null);
       setProofNotes("");
       setScannedBarcode(null);
       setShowProofModal(false);
-      
+
       // Refetch route data immediately
       await refetchRoute();
-      
+
       // Trigger sync to upload proofs in background
       forceSyncNow();
     },
@@ -340,11 +350,20 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   });
 
   const scanPackageMutation = useMutation({
-    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
-      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/scan`, {
-        method: "POST",
-        credentials: "include",
-      });
+    mutationFn: async ({
+      routeId,
+      stopId,
+    }: {
+      routeId: number;
+      stopId: number;
+    }) => {
+      const response = await fetch(
+        `/api/routes/${routeId}/stops/${stopId}/scan`,
+        {
+          method: "POST",
+          credentials: "include",
+        },
+      );
       if (!response.ok) throw new Error("Failed to scan package");
       return response.json();
     },
@@ -374,12 +393,21 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   });
 
   const setUrgentPriorityMutation = useMutation({
-    mutationFn: async ({ routeId, stopId }: { routeId: number; stopId: number }) => {
-      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/urgent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      });
+    mutationFn: async ({
+      routeId,
+      stopId,
+    }: {
+      routeId: number;
+      stopId: number;
+    }) => {
+      const response = await fetch(
+        `/api/routes/${routeId}/stops/${stopId}/urgent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        },
+      );
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Failed to set priority");
@@ -395,13 +423,24 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   });
 
   const cancelDeliveryMutation = useMutation({
-    mutationFn: async ({ routeId, stopId, reason }: { routeId: number; stopId: number; reason: string }) => {
-      const response = await fetch(`/api/routes/${routeId}/stops/${stopId}/cancel`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason }),
-        credentials: "include",
-      });
+    mutationFn: async ({
+      routeId,
+      stopId,
+      reason,
+    }: {
+      routeId: number;
+      stopId: number;
+      reason: string;
+    }) => {
+      const response = await fetch(
+        `/api/routes/${routeId}/stops/${stopId}/cancel`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+          credentials: "include",
+        },
+      );
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Failed to cancel delivery");
@@ -516,8 +555,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
           { facingMode: "environment" },
           config,
           (decodedText) => {
-            const cleaned = decodedText.replace(/\s*RX\s*$/i, '').trim();
-            setScannedBarcode(cleaned);
+            setScannedBarcode(decodedText);
             setIsScanning(false);
             html5QrCode
               .stop()
@@ -603,8 +641,11 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
 
   const route = (routeData as any)?.route;
   const stops = (routeData as any)?.stops || [];
-  const pendingStops = stops.filter((s: any) => s.status !== "completed" && s.status !== "cancelled");
-  const completedStops = stops.filter((s: any) => s.status === "completed" || s.status === "cancelled");
+  const pendingStops = stops.filter(
+    (s: any) => s.status !== "completed" && s.status !== "cancelled",
+  );
+  const completedStops = stops.filter((s: any) => s.status === "completed");
+  const cancelledStops = stops.filter((s: any) => s.status === "cancelled");
 
   const currentStop = pendingStops[selectedStopIndex] || pendingStops[0];
 
@@ -676,11 +717,11 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               <button
                 onClick={() => forceSyncNow()}
                 className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${
-                  syncStatus.failedCount > 0 
-                    ? 'bg-red-500/20 text-red-400' 
-                    : syncStatus.isSyncing 
-                      ? 'bg-blue-500/20 text-blue-400' 
-                      : 'bg-yellow-500/20 text-yellow-400'
+                  syncStatus.failedCount > 0
+                    ? "bg-red-500/20 text-red-400"
+                    : syncStatus.isSyncing
+                      ? "bg-blue-500/20 text-blue-400"
+                      : "bg-yellow-500/20 text-yellow-400"
                 }`}
                 title={`${syncStatus.pendingCount} pending, ${syncStatus.failedCount} failed`}
               >
@@ -808,7 +849,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-white text-lg">Progress</CardTitle>
                   <span className="text-blue-400 font-bold">
-                    {completedStops.length}/{stops.length}
+                    {completedStops.length + cancelledStops.length}/
+                    {stops.length}
                   </span>
                 </div>
               </CardHeader>
@@ -817,7 +859,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                   <div
                     className="bg-blue-500 h-2.5 rounded-full transition-all"
                     style={{
-                      width: `${(completedStops.length / stops.length) * 100}%`,
+                      width: `${((completedStops.length + cancelledStops.length) / stops.length) * 100}%`,
                     }}
                   />
                 </div>
@@ -834,7 +876,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     <div className="bg-slate-900/50 rounded-lg p-3">
                       <p className="text-slate-500">Distance</p>
                       <p className="text-white font-bold text-lg">
-                        {((route.estimatedDistance || 0) * 0.621371).toFixed(1)} mi
+                        {((route.estimatedDistance || 0) * 0.621371).toFixed(1)}{" "}
+                        mi
                       </p>
                     </div>
                   </div>
@@ -847,7 +890,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 <CardHeader className="pb-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                      {completedStops.length + 1}
+                      {completedStops.length + cancelledStops.length + 1}
                     </div>
                     <CardTitle className="text-green-400">Next Stop</CardTitle>
                   </div>
@@ -870,9 +913,12 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       )}
                     </div>
                     {/* Show prescriptions */}
-                    {currentStop.delivery?.prescriptions && currentStop.delivery.prescriptions.length > 0 ? (
+                    {currentStop.delivery?.prescriptions &&
+                    currentStop.delivery.prescriptions.length > 0 ? (
                       <div className="mt-2 space-y-1">
-                        <p className="text-slate-500 text-xs font-medium">Prescriptions:</p>
+                        <p className="text-slate-500 text-xs font-medium">
+                          Prescriptions:
+                        </p>
                         <div className="flex flex-wrap gap-1">
                           {currentStop.delivery.prescriptions.map((rx: any) => (
                             <span
@@ -910,7 +956,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     <Button
                       size="sm"
                       onClick={() => {
-                        if (currentStop.delivery?.lat && currentStop.delivery?.lng) {
+                        if (
+                          currentStop.delivery?.lat &&
+                          currentStop.delivery?.lng
+                        ) {
                           openInMaps(
                             currentStop.delivery.lat,
                             currentStop.delivery.lng,
@@ -918,8 +967,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                           );
                         } else {
                           // Fallback to address-based navigation
-                          const address = encodeURIComponent(currentStop.delivery?.addressText || '');
-                          window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank');
+                          const address = encodeURIComponent(
+                            currentStop.delivery?.addressText || "",
+                          );
+                          window.open(
+                            `https://www.google.com/maps/search/?api=1&query=${address}`,
+                            "_blank",
+                          );
                         }
                       }}
                       className="flex-1 bg-blue-500 hover:bg-blue-600"
@@ -979,12 +1033,16 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       key={stop.id}
                       className="flex items-center gap-3 p-2 rounded-lg bg-slate-900/30"
                     >
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                        stop.priority === "urgent" 
-                          ? "bg-red-500/20 text-red-400"
-                          : "bg-blue-500/20 text-blue-400"
-                      }`}>
-                        {stop.priority === "urgent" ? "!" : completedStops.length + index + 2}
+                      <div
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                          stop.priority === "urgent"
+                            ? "bg-red-500/20 text-red-400"
+                            : "bg-blue-500/20 text-blue-400"
+                        }`}
+                      >
+                        {stop.priority === "urgent"
+                          ? "!"
+                          : completedStops.length + index + 2}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm truncate">
@@ -1000,11 +1058,16 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => setUrgentPriorityMutation.mutate({
-                          routeId: activeRoute.id,
-                          stopId: stop.id
-                        })}
-                        disabled={stop.priority === "urgent" || setUrgentPriorityMutation.isPending}
+                        onClick={() =>
+                          setUrgentPriorityMutation.mutate({
+                            routeId: activeRoute.id,
+                            stopId: stop.id,
+                          })
+                        }
+                        disabled={
+                          stop.priority === "urgent" ||
+                          setUrgentPriorityMutation.isPending
+                        }
                         className={`h-7 px-2 ${
                           stop.priority === "urgent"
                             ? "text-slate-500"
@@ -1020,26 +1083,43 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               </Card>
             )}
 
-            {completedStops.length > 0 && (
+            {(completedStops.length > 0 || cancelledStops.length > 0) && (
               <Card className="bg-slate-800/50 border-slate-700">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-white text-sm flex items-center gap-2">
                     <CheckCircle className="h-4 w-4 text-green-400" />
-                    Completed ({completedStops.length})
+                    Done ({completedStops.length} delivered
+                    {cancelledStops.length > 0
+                      ? `, ${cancelledStops.length} cancelled`
+                      : ""}
+                    )
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {completedStops.slice(-3).map((stop: any, index: number) => (
-                    <div
-                      key={stop.id}
-                      className="flex items-center gap-3 p-2 rounded-lg bg-green-500/10"
-                    >
-                      <CheckCircle className="h-5 w-5 text-green-400" />
-                      <p className="text-slate-300 text-sm truncate">
-                        {stop.delivery?.addressText}
-                      </p>
-                    </div>
-                  ))}
+                  {[...completedStops, ...cancelledStops]
+                    .slice(-4)
+                    .map((stop: any) => (
+                      <div
+                        key={stop.id}
+                        className={`flex items-center gap-3 p-2 rounded-lg ${stop.status === "cancelled" ? "bg-red-500/10" : "bg-green-500/10"}`}
+                      >
+                        {stop.status === "cancelled" ? (
+                          <X className="h-4 w-4 text-red-400 flex-shrink-0" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4 text-green-400 flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-slate-300 text-sm truncate">
+                            {stop.delivery?.addressText}
+                          </p>
+                          {stop.status === "cancelled" && (
+                            <p className="text-red-400 text-xs">
+                              Not delivered
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                 </CardContent>
               </Card>
             )}
@@ -1052,18 +1132,24 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     Route Complete!
                   </h2>
                   <p className="text-slate-400">
-                    You've completed all {completedStops.length} deliveries.
+                    {completedStops.length} delivered
+                    {cancelledStops.length > 0
+                      ? `, ${cancelledStops.length} couldn't be delivered`
+                      : ""}
+                    .
                   </p>
                   {route?.endAddress && (
                     <div className="mt-4 pt-4 border-t border-green-500/30">
                       <p className="text-slate-300 text-sm mb-2">Return to:</p>
-                      <p className="text-white font-medium">{route.endAddress}</p>
+                      <p className="text-white font-medium">
+                        {route.endAddress}
+                      </p>
                       <Button
                         onClick={() => {
                           if (route.endLat && route.endLng) {
                             window.open(
                               `https://www.google.com/maps/dir/?api=1&destination=${route.endLat},${route.endLng}`,
-                              "_blank"
+                              "_blank",
                             );
                           }
                         }}
@@ -1097,9 +1183,14 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 <CardContent className="space-y-4">
                   <div className="p-3 bg-slate-700/50 rounded">
                     <p className="text-slate-400 text-xs">Route</p>
-                    <p className="text-white font-semibold">{activeRoute.name}</p>
+                    <p className="text-white font-semibold">
+                      {activeRoute.name}
+                    </p>
                     <p className="text-slate-400 text-xs mt-1">
-                      Started: {activeRoute.createdAt ? new Date(activeRoute.createdAt).toLocaleString() : 'N/A'}
+                      Started:{" "}
+                      {activeRoute.createdAt
+                        ? new Date(activeRoute.createdAt).toLocaleString()
+                        : "N/A"}
                     </p>
                     {route?.endAddress && (
                       <p className="text-blue-400 text-xs mt-1">
@@ -1107,28 +1198,43 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       </p>
                     )}
                   </div>
-                  
+
+                  {/* Summary stats */}
                   <div className="grid grid-cols-3 gap-3">
                     <div className="p-3 bg-slate-700/50 rounded text-center">
-                      <p className="text-2xl font-bold text-white">{(routeData as any)?.stops?.length || 0}</p>
+                      <p className="text-2xl font-bold text-white">
+                        {(routeData as any)?.stops?.length || 0}
+                      </p>
                       <p className="text-slate-400 text-xs">Total</p>
                     </div>
                     <div className="p-3 bg-green-500/10 rounded border border-green-500/30 text-center">
-                      <p className="text-2xl font-bold text-green-400">{completedStops.length}</p>
-                      <p className="text-green-400 text-xs">Completed</p>
+                      <p className="text-2xl font-bold text-green-400">
+                        {completedStops.length}
+                      </p>
+                      <p className="text-green-400 text-xs">Delivered</p>
                     </div>
                     <div className="p-3 bg-yellow-500/10 rounded border border-yellow-500/30 text-center">
-                      <p className="text-2xl font-bold text-yellow-400">{pendingStops.length}</p>
+                      <p className="text-2xl font-bold text-yellow-400">
+                        {pendingStops.length}
+                      </p>
                       <p className="text-yellow-400 text-xs">Pending</p>
                     </div>
                   </div>
+                  {cancelledStops.length > 0 && (
+                    <div className="p-3 bg-red-500/10 rounded border border-red-500/20 text-center">
+                      <p className="text-xl font-bold text-red-400">
+                        {cancelledStops.length} couldn't be delivered
+                      </p>
+                    </div>
+                  )}
 
+                  {/* Delivered stops — read-only, no action buttons */}
                   <div className="border-t border-slate-600 pt-4">
                     <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-400" />
-                      Completed Deliveries ({completedStops.length})
+                      Delivered ({completedStops.length})
                     </h3>
-                    <div className="space-y-3 max-h-80 overflow-y-auto">
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
                       {completedStops.map((stop: any, idx: number) => (
                         <div
                           key={stop.id}
@@ -1141,32 +1247,35 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                                   #{idx + 1}
                                 </span>
                                 <span className="text-xs font-mono text-blue-400">
-                                  {stop.delivery?.deliveryIdentifier || `DEL${stop.delivery?.id}`}
+                                  {stop.delivery?.deliveryIdentifier ||
+                                    `DEL${stop.delivery?.id}`}
                                 </span>
                               </div>
                               <p className="text-white text-sm font-medium">
-                                {stop.delivery?.customerName || 'Customer'}
+                                {stop.delivery?.customerName || "Customer"}
                               </p>
                               <p className="text-slate-400 text-xs mt-1">
                                 {stop.delivery?.addressText}
                               </p>
-                              {stop.delivery?.customerPhone && (
-                                <p className="text-slate-500 text-xs mt-1">
-                                  Phone: {stop.delivery.customerPhone}
-                                </p>
-                              )}
-                              {stop.delivery?.prescriptions && stop.delivery.prescriptions.length > 0 && (
-                                <div className="mt-2 flex flex-wrap gap-1">
-                                  {stop.delivery.prescriptions.map((rx: any, rxIdx: number) => (
-                                    <span key={rxIdx} className="bg-slate-600/50 text-slate-300 text-xs px-2 py-0.5 rounded">
-                                      Rx: {rx.rxNumber}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              {stop.delivery?.prescriptions &&
+                                stop.delivery.prescriptions.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {stop.delivery.prescriptions.map(
+                                      (rx: any, rxIdx: number) => (
+                                        <span
+                                          key={rxIdx}
+                                          className="bg-slate-600/50 text-slate-300 text-xs px-2 py-0.5 rounded"
+                                        >
+                                          Rx: {rx.rxNumber}
+                                        </span>
+                                      ),
+                                    )}
+                                  </div>
+                                )}
                               {stop.completedAt && (
                                 <p className="text-slate-500 text-xs mt-2">
-                                  Completed: {new Date(stop.completedAt).toLocaleString()}
+                                  Delivered:{" "}
+                                  {new Date(stop.completedAt).toLocaleString()}
                                 </p>
                               )}
                             </div>
@@ -1175,16 +1284,78 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                         </div>
                       ))}
                       {completedStops.length === 0 && (
-                        <p className="text-slate-500 text-center py-4">No completed deliveries yet</p>
+                        <p className="text-slate-500 text-center py-4">
+                          No delivered stops yet
+                        </p>
                       )}
                     </div>
                   </div>
 
+                  {/* Cancelled stops — visible but read-only, no navigate/complete buttons */}
+                  {cancelledStops.length > 0 && (
+                    <div className="border-t border-slate-600 pt-4">
+                      <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                        <X className="h-4 w-4 text-red-400" />
+                        Not Delivered ({cancelledStops.length})
+                      </h3>
+                      <div className="space-y-3 max-h-64 overflow-y-auto">
+                        {cancelledStops.map((stop: any) => (
+                          <div
+                            key={stop.id}
+                            className="p-3 bg-red-500/5 rounded border border-red-500/20 opacity-75"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-0.5 rounded">
+                                    CANCELLED
+                                  </span>
+                                  <span className="text-xs font-mono text-slate-400">
+                                    {stop.delivery?.deliveryIdentifier ||
+                                      `DEL${stop.delivery?.id}`}
+                                  </span>
+                                </div>
+                                <p className="text-slate-300 text-sm font-medium">
+                                  {stop.delivery?.customerName || "Customer"}
+                                </p>
+                                <p className="text-slate-400 text-xs mt-1">
+                                  {stop.delivery?.addressText}
+                                </p>
+                                {stop.delivery?.prescriptions &&
+                                  stop.delivery.prescriptions.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                      {stop.delivery.prescriptions.map(
+                                        (rx: any, rxIdx: number) => (
+                                          <span
+                                            key={rxIdx}
+                                            className="bg-slate-600/50 text-slate-400 text-xs px-2 py-0.5 rounded"
+                                          >
+                                            Rx: {rx.rxNumber}
+                                          </span>
+                                        ),
+                                      )}
+                                    </div>
+                                  )}
+                                {stop.notes && (
+                                  <p className="text-red-400/70 text-xs mt-2 italic">
+                                    {stop.notes.replace(/^CANCELLED:\s*/i, "")}
+                                  </p>
+                                )}
+                              </div>
+                              <X className="h-5 w-5 text-red-400 flex-shrink-0" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pending stops — read-only list, no action buttons */}
                   {pendingStops.length > 0 && (
                     <div className="border-t border-slate-600 pt-4">
                       <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
                         <Clock className="h-4 w-4 text-yellow-400" />
-                        Pending Deliveries ({pendingStops.length})
+                        Remaining ({pendingStops.length})
                       </h3>
                       <div className="space-y-2 max-h-40 overflow-y-auto">
                         {pendingStops.map((stop: any, idx: number) => (
@@ -1192,16 +1363,24 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                             key={stop.id}
                             className="p-2 bg-slate-700/20 rounded border border-slate-700 flex items-center gap-2"
                           >
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                              stop.priority === "urgent" 
-                                ? "bg-red-500/20 text-red-400" 
-                                : "bg-yellow-500/20 text-yellow-400"
-                            }`}>
-                              {stop.priority === "urgent" ? "URGENT" : `#${completedStops.length + idx + 1}`}
+                            <span
+                              className={`text-xs font-bold px-2 py-0.5 rounded ${
+                                stop.priority === "urgent"
+                                  ? "bg-red-500/20 text-red-400"
+                                  : "bg-yellow-500/20 text-yellow-400"
+                              }`}
+                            >
+                              {stop.priority === "urgent"
+                                ? "URGENT"
+                                : `#${completedStops.length + cancelledStops.length + idx + 1}`}
                             </span>
                             <div className="flex-1 min-w-0">
-                              <p className="text-white text-sm truncate">{stop.delivery?.customerName || 'Customer'}</p>
-                              <p className="text-slate-500 text-xs truncate">{stop.delivery?.addressText}</p>
+                              <p className="text-white text-sm truncate">
+                                {stop.delivery?.customerName || "Customer"}
+                              </p>
+                              <p className="text-slate-500 text-xs truncate">
+                                {stop.delivery?.addressText}
+                              </p>
                             </div>
                           </div>
                         ))}
@@ -1256,68 +1435,137 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                         </div>
                         <div className="p-3 bg-green-500/10 rounded border border-green-500/30 text-center">
                           <p className="text-2xl font-bold text-green-400">
-                            {(deliveryHistory as any[]).reduce((acc, r) => acc + (r.completedCount || 0), 0)}
+                            {(deliveryHistory as any[]).reduce(
+                              (acc, r) => acc + (r.completedCount || 0),
+                              0,
+                            )}
                           </p>
-                          <p className="text-green-400 text-xs">Total Deliveries</p>
+                          <p className="text-green-400 text-xs">
+                            Total Deliveries
+                          </p>
                         </div>
                       </div>
 
                       <div className="space-y-4">
                         {(deliveryHistory as any[]).map((route: any) => (
-                          <div key={route.id} className="border border-slate-600 rounded-lg overflow-hidden">
+                          <div
+                            key={route.id}
+                            className="border border-slate-600 rounded-lg overflow-hidden"
+                          >
                             <div className="bg-slate-700/50 p-3 flex items-center justify-between">
                               <div>
-                                <p className="text-white font-semibold">{route.name}</p>
+                                <p className="text-white font-semibold">
+                                  {route.name}
+                                </p>
                                 <p className="text-slate-400 text-xs">
-                                  {route.createdAt ? new Date(route.createdAt).toLocaleDateString() : 'N/A'}
+                                  {route.createdAt
+                                    ? new Date(
+                                        route.createdAt,
+                                      ).toLocaleDateString()
+                                    : "N/A"}
                                 </p>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className={`text-xs px-2 py-1 rounded ${
-                                  route.status === 'completed' 
-                                    ? 'bg-green-500/20 text-green-400'
-                                    : route.status === 'active' || route.status === 'dispatched'
-                                    ? 'bg-blue-500/20 text-blue-400'
-                                    : 'bg-slate-500/20 text-slate-400'
-                                }`}>
+                                <span
+                                  className={`text-xs px-2 py-1 rounded ${
+                                    route.status === "completed"
+                                      ? "bg-green-500/20 text-green-400"
+                                      : route.status === "cancelled"
+                                        ? "bg-red-500/20 text-red-400"
+                                        : route.status === "active" ||
+                                            route.status === "dispatched"
+                                          ? "bg-blue-500/20 text-blue-400"
+                                          : "bg-slate-500/20 text-slate-400"
+                                  }`}
+                                >
                                   {route.status}
                                 </span>
                                 <span className="text-sm text-white">
-                                  {route.completedCount || 0}/{route.totalCount || 0}
+                                  {route.completedCount || 0}/
+                                  {route.totalCount || 0}
                                 </span>
                               </div>
                             </div>
-                            
+
                             {route.stops && route.stops.length > 0 && (
-                              <div className="p-3 space-y-2 max-h-48 overflow-y-auto bg-slate-800/50">
-                                {route.stops.filter((s: any) => s.status === 'completed').map((stop: any, idx: number) => (
-                                  <div
-                                    key={stop.id}
-                                    className="flex items-start gap-2 p-2 bg-slate-700/30 rounded"
-                                  >
-                                    <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2 mb-1">
+                              <div className="p-3 space-y-2 max-h-64 overflow-y-auto bg-slate-800/50">
+                                {/* Delivered stops — read-only */}
+                                {route.stops
+                                  .filter((s: any) => s.status === "completed")
+                                  .map((stop: any) => (
+                                    <div
+                                      key={stop.id}
+                                      className="flex items-start gap-2 p-2 bg-slate-700/30 rounded"
+                                    >
+                                      <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
+                                      <div className="flex-1 min-w-0">
                                         <span className="text-xs font-mono text-blue-400">
-                                          {stop.delivery?.deliveryIdentifier || `DEL${stop.delivery?.id}`}
+                                          {stop.delivery?.deliveryIdentifier ||
+                                            `DEL${stop.delivery?.id}`}
                                         </span>
-                                      </div>
-                                      <p className="text-white text-sm">
-                                        {stop.delivery?.customerName || 'Customer'}
-                                      </p>
-                                      <p className="text-slate-400 text-xs truncate">
-                                        {stop.delivery?.addressText}
-                                      </p>
-                                      {stop.completedAt && (
-                                        <p className="text-slate-500 text-xs mt-1">
-                                          {new Date(stop.completedAt).toLocaleString()}
+                                        <p className="text-white text-sm">
+                                          {stop.delivery?.customerName ||
+                                            "Customer"}
                                         </p>
-                                      )}
+                                        <p className="text-slate-400 text-xs truncate">
+                                          {stop.delivery?.addressText}
+                                        </p>
+                                        {stop.completedAt && (
+                                          <p className="text-slate-500 text-xs mt-1">
+                                            {new Date(
+                                              stop.completedAt,
+                                            ).toLocaleString()}
+                                          </p>
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
-                                {route.stops.filter((s: any) => s.status === 'completed').length === 0 && (
-                                  <p className="text-slate-500 text-xs text-center py-2">No completed deliveries</p>
+                                  ))}
+                                {/* Cancelled stops — visible but clearly marked, no action buttons */}
+                                {route.stops
+                                  .filter((s: any) => s.status === "cancelled")
+                                  .map((stop: any) => (
+                                    <div
+                                      key={stop.id}
+                                      className="flex items-start gap-2 p-2 bg-red-500/5 rounded border border-red-500/15"
+                                    >
+                                      <X className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1 mb-0.5">
+                                          <span className="text-xs font-mono text-slate-400">
+                                            {stop.delivery
+                                              ?.deliveryIdentifier ||
+                                              `DEL${stop.delivery?.id}`}
+                                          </span>
+                                          <span className="text-xs text-red-400 font-medium">
+                                            · Not delivered
+                                          </span>
+                                        </div>
+                                        <p className="text-slate-300 text-sm">
+                                          {stop.delivery?.customerName ||
+                                            "Customer"}
+                                        </p>
+                                        <p className="text-slate-500 text-xs truncate">
+                                          {stop.delivery?.addressText}
+                                        </p>
+                                        {stop.notes && (
+                                          <p className="text-red-400/60 text-xs mt-0.5 italic">
+                                            {stop.notes.replace(
+                                              /^CANCELLED:\s*/i,
+                                              "",
+                                            )}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                {route.stops.filter(
+                                  (s: any) =>
+                                    s.status === "completed" ||
+                                    s.status === "cancelled",
+                                ).length === 0 && (
+                                  <p className="text-slate-500 text-xs text-center py-2">
+                                    No stops recorded
+                                  </p>
                                 )}
                               </div>
                             )}
@@ -1364,15 +1612,22 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                             Scan Delivery Label
                           </Label>
                           <span className="text-xs font-mono text-green-400">
-                            {currentStop?.delivery?.deliveryIdentifier || `DEL${currentStop?.delivery?.id || 'N/A'}`}
+                            {currentStop?.delivery?.deliveryIdentifier ||
+                              `DEL${currentStop?.delivery?.id || "N/A"}`}
                           </span>
                         </div>
-                        {(currentStop?.delivery?.prescriptions?.length > 0 || currentStop?.delivery?.rxNumber) && (
+                        {(currentStop?.delivery?.prescriptions?.length > 0 ||
+                          currentStop?.delivery?.rxNumber) && (
                           <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-500">or Rx Number</span>
+                            <span className="text-xs text-slate-500">
+                              or Rx Number
+                            </span>
                             <span className="text-xs font-mono text-blue-400">
-                              {currentStop?.delivery?.prescriptions && currentStop.delivery.prescriptions.length > 0 
-                                ? currentStop.delivery.prescriptions.map((rx: any) => rx.rxNumber).join(", ")
+                              {currentStop?.delivery?.prescriptions &&
+                              currentStop.delivery.prescriptions.length > 0
+                                ? currentStop.delivery.prescriptions
+                                    .map((rx: any) => rx.rxNumber)
+                                    .join(", ")
                                 : currentStop?.delivery?.rxNumber || "N/A"}
                             </span>
                           </div>
@@ -1424,7 +1679,6 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                           Scan Barcode
                         </Button>
                       )}
-
                     </div>
 
                     <div>
@@ -1653,7 +1907,9 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                           reason: cancelReason,
                         })
                       }
-                      disabled={!cancelReason.trim() || cancelDeliveryMutation.isPending}
+                      disabled={
+                        !cancelReason.trim() || cancelDeliveryMutation.isPending
+                      }
                       className="flex-1 bg-red-500 hover:bg-red-600"
                     >
                       {cancelDeliveryMutation.isPending ? (
