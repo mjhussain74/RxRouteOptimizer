@@ -3,10 +3,13 @@ import { neon } from "@neondatabase/serverless";
 import {
   eq,
   and,
+  or,
   desc,
   inArray,
   notInArray,
   isNotNull,
+  isNull,
+  ne,
   sql as drizzleSql,
   like,
 } from "drizzle-orm";
@@ -1468,21 +1471,35 @@ export class DatabaseStorage implements IStorage {
 
   async getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]> {
     return db
-      .select()
+      .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
+      .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
       .where(and(
         eq(deliveryOrders.pharmacyId, pharmacyId),
-        eq(deliveryOrders.deliveryStatus, 'ROUTE_ELIGIBLE')
+        eq(deliveryOrders.deliveryStatus, 'ROUTE_ELIGIBLE'),
+        or(
+          isNull(deliveryOrders.batchId),
+          ne(deliveryBatches.status, 'cancelled')
+        )
       ))
-      .orderBy(desc(deliveryOrders.lastSeenAt));
+      .orderBy(desc(deliveryOrders.lastSeenAt))
+      .then(rows => rows.map(r => r.deliveryOrder));
   }
 
   async getAllDeliveryOrders(): Promise<DeliveryOrder[]> {
     return db
-      .select()
+      .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
-      .where(notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED']))
-      .orderBy(desc(deliveryOrders.lastSeenAt));
+      .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
+      .where(and(
+        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED']),
+        or(
+          isNull(deliveryOrders.batchId),
+          ne(deliveryBatches.status, 'cancelled')
+        )
+      ))
+      .orderBy(desc(deliveryOrders.lastSeenAt))
+      .then(rows => rows.map(r => r.deliveryOrder));
   }
 
   async deleteRouteStop(stopId: number): Promise<boolean> {
