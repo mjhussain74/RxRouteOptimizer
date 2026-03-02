@@ -1658,6 +1658,12 @@ export async function registerRoutes(
             .json({ error: `No order found for RX: ${cleanBarcode}` });
         }
 
+        if (order.deliveryStatus === "CANCELLED") {
+          return res.status(400).json({
+            error: `Order RX ${cleanBarcode} has been cancelled and cannot be scanned`,
+          });
+        }
+
         if (
           order.deliveryStatus === "ROUTED" ||
           order.deliveryStatus === "DELIVERED"
