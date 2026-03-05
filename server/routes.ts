@@ -1169,6 +1169,26 @@ export async function registerRoutes(
 
         const fileName = req.file.originalname || "upload.csv";
 
+        interface ParsedRow {
+          rxNumber: string;
+          addressText: string;
+          normalizedData: {
+            streetAddress: string;
+            city: string;
+            state: string;
+            zipCode: string;
+            normalizedHash: string;
+            fullAddress: string;
+          } | null;
+          customerName: string;
+          customerPhone: string;
+          notes: string;
+          fillDate: string;
+          priority: string;
+        }
+
+        const parsedRows: ParsedRow[] = [];
+
         for (const row of parsed.data as any[]) {
           const streetAddress = cleanExcelValue(
             row.PATADDRESS ||
@@ -1337,55 +1357,75 @@ export async function registerRoutes(
             continue;
           }
 
-          // Geocode the address for new orders
-          let lat: number | null = null;
-          let lng: number | null = null;
-
-          // Check if this RX already exists for this pharmacy
-          const existingOrder = await storage.findDeliveryOrderByRx(
-            pharmacyId,
+          parsedRows.push({
             rxNumber,
-          );
-          if (!existingOrder) {
-            const geocoded = await geocodeAddress(addressText);
-            lat = geocoded?.lat || null;
-            lng = geocoded?.lng || null;
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
+            addressText,
+            normalizedData,
+            customerName,
+            customerPhone,
+            notes,
+            fillDate,
+            priority: row.priority || "normal",
+          });
+        }
 
-          // Upsert into delivery_orders - no duplicates
-          const { order, isNew } = await storage.upsertDeliveryOrder(
-            {
-              rxNumber,
-              pharmacyId,
-              fillDate: fillDate || null,
-              deliveryStatus: existingOrder
-                ? existingOrder.deliveryStatus
-                : "IMPORTED",
-              addressText,
-              streetAddress: normalizedData?.streetAddress || null,
-              city: normalizedData?.city || null,
-              state: normalizedData?.state || null,
-              zipCode: normalizedData?.zipCode || null,
-              normalizedAddressHash: normalizedData?.normalizedHash || null,
-              lat,
-              lng,
-              customerName,
-              customerPhone,
-              notes,
-              priority: row.priority || "normal",
-              lastSeenAt: new Date(),
-              uploadCount: 1,
-            },
-            batch.id,
-            fileName,
+        const GEOCODE_BATCH_SIZE = 5;
+        for (let i = 0; i < parsedRows.length; i += GEOCODE_BATCH_SIZE) {
+          const chunk = parsedRows.slice(i, i + GEOCODE_BATCH_SIZE);
+
+          const chunkResults = await Promise.all(
+            chunk.map(async (parsedRow) => {
+              let lat: number | null = null;
+              let lng: number | null = null;
+
+              const existingOrder = await storage.findDeliveryOrderByRx(
+                pharmacyId!,
+                parsedRow.rxNumber,
+              );
+              if (!existingOrder) {
+                const geocoded = await geocodeAddress(parsedRow.addressText);
+                lat = geocoded?.lat || null;
+                lng = geocoded?.lng || null;
+              }
+
+              const { order, isNew } = await storage.upsertDeliveryOrder(
+                {
+                  rxNumber: parsedRow.rxNumber,
+                  pharmacyId: pharmacyId!,
+                  fillDate: parsedRow.fillDate || null,
+                  deliveryStatus: existingOrder
+                    ? existingOrder.deliveryStatus
+                    : "IMPORTED",
+                  addressText: parsedRow.addressText,
+                  streetAddress: parsedRow.normalizedData?.streetAddress || null,
+                  city: parsedRow.normalizedData?.city || null,
+                  state: parsedRow.normalizedData?.state || null,
+                  zipCode: parsedRow.normalizedData?.zipCode || null,
+                  normalizedAddressHash: parsedRow.normalizedData?.normalizedHash || null,
+                  lat,
+                  lng,
+                  customerName: parsedRow.customerName,
+                  customerPhone: parsedRow.customerPhone,
+                  notes: parsedRow.notes,
+                  priority: parsedRow.priority,
+                  lastSeenAt: new Date(),
+                  uploadCount: 1,
+                },
+                batch.id,
+                fileName,
+              );
+
+              return { order, isNew };
+            }),
           );
 
-          orderResults.push(order);
-          if (isNew) {
-            newOrderCount++;
-          } else {
-            updatedOrderCount++;
+          for (const result of chunkResults) {
+            orderResults.push(result.order);
+            if (result.isNew) {
+              newOrderCount++;
+            } else {
+              updatedOrderCount++;
+            }
           }
         }
 
