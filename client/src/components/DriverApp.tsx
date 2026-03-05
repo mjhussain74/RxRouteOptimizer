@@ -110,7 +110,16 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   const [isScanning, setIsScanning] = useState(false);
   const [showDeliveryReport, setShowDeliveryReport] = useState(false);
   const [showDeliveryHistory, setShowDeliveryHistory] = useState(false);
-  const [expandedHistoryRoute, setExpandedHistoryRoute] = useState<number | null>(null);
+  const [routeNotification, setRouteNotification] = useState<{
+    routeName: string;
+    stopCount: number;
+  } | null>(null);
+  const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [expandedHistoryRoute, setExpandedHistoryRoute] = useState<
+    number | null
+  >(null);
   const [showRouteActivation, setShowRouteActivation] = useState(false);
   const [activationScanningStopId, setActivationScanningStopId] = useState<
     number | null
@@ -173,6 +182,16 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       return res.json();
     },
   });
+
+  // Request browser notification permission once on first load
+  useEffect(() => {
+    if (
+      typeof Notification !== "undefined" &&
+      Notification.permission === "default"
+    ) {
+      Notification.requestPermission();
+    }
+  }, []);
 
   useEffect(() => {
     startAutoSync(30000);
@@ -609,6 +628,32 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     newSocket.on("route_dispatched", (data: any) => {
       console.log("Route dispatched:", data);
       refetchRoutes();
+      // Only notify this specific driver (check driverId matches)
+      const dispatchedDriverId = data?.route?.driverId;
+      if (dispatchedDriverId && driverId && dispatchedDriverId !== driverId)
+        return;
+
+      // In-app notification banner
+      const routeName = data?.route?.name || "New Route";
+      const stopCount = data?.stops?.length ?? 0;
+      setRouteNotification({ routeName, stopCount });
+      if (notificationTimerRef.current)
+        clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = setTimeout(
+        () => setRouteNotification(null),
+        8000,
+      );
+
+      // Browser push notification (if permission granted)
+      if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted"
+      ) {
+        new Notification("🚚 New Route Assigned", {
+          body: `${routeName} — ${stopCount} stop${stopCount !== 1 ? "s" : ""} ready for pickup`,
+          icon: "/favicon.ico",
+        });
+      }
     });
 
     newSocket.on("stop_status_update", (data: any) => {
@@ -714,6 +759,34 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Route Dispatch Notification Banner */}
+      {routeNotification && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[92vw] max-w-sm
+                     bg-teal-600 text-white rounded-xl shadow-2xl px-4 py-3
+                     flex items-start gap-3"
+          style={{ animation: "slideDown 0.3s ease-out" }}
+        >
+          <span className="text-2xl mt-0.5">🚚</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-sm leading-tight">
+              New Route Assigned!
+            </p>
+            <p className="text-xs text-teal-100 mt-0.5 truncate">
+              {routeNotification.routeName} &mdash;{" "}
+              {routeNotification.stopCount} stop
+              {routeNotification.stopCount !== 1 ? "s" : ""} ready for pickup
+            </p>
+          </div>
+          <button
+            onClick={() => setRouteNotification(null)}
+            className="text-teal-200 hover:text-white transition-colors ml-1 mt-0.5 flex-shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <header className="bg-slate-800/80 backdrop-blur-sm border-b border-slate-700 sticky top-0 z-50">
         <div className="px-4 py-3 flex items-center justify-between">
           <button
@@ -1758,8 +1831,12 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 </>
               ) : (
                 <div className="text-center py-8">
-                  <p className="text-slate-400">No active route to report on.</p>
-                  <p className="text-slate-500 text-sm mt-2">Check your delivery history for past routes.</p>
+                  <p className="text-slate-400">
+                    No active route to report on.
+                  </p>
+                  <p className="text-slate-500 text-sm mt-2">
+                    Check your delivery history for past routes.
+                  </p>
                 </div>
               )}
 
@@ -1783,7 +1860,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 Delivery History
               </CardTitle>
               <button
-                onClick={() => { setShowDeliveryHistory(false); setExpandedHistoryRoute(null); }}
+                onClick={() => {
+                  setShowDeliveryHistory(false);
+                  setExpandedHistoryRoute(null);
+                }}
                 className="text-slate-400 hover:text-white"
               >
                 <X className="h-5 w-5" />
@@ -1830,9 +1910,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                           0,
                         )}
                       </p>
-                      <p className="text-green-400 text-xs">
-                        Total Deliveries
-                      </p>
+                      <p className="text-green-400 text-xs">Total Deliveries</p>
                     </div>
                   </div>
 
@@ -1843,18 +1921,28 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                         className="border border-slate-600 rounded-lg overflow-hidden"
                       >
                         <button
-                          onClick={() => setExpandedHistoryRoute(expandedHistoryRoute === route.id ? null : route.id)}
+                          onClick={() =>
+                            setExpandedHistoryRoute(
+                              expandedHistoryRoute === route.id
+                                ? null
+                                : route.id,
+                            )
+                          }
                           className="w-full bg-slate-700/50 p-3 flex items-center justify-between hover:bg-slate-700/70 transition-colors"
                         >
                           <div className="flex items-center gap-3 min-w-0">
-                            <ChevronRight className={`h-4 w-4 text-slate-400 flex-shrink-0 transition-transform ${expandedHistoryRoute === route.id ? "rotate-90" : ""}`} />
+                            <ChevronRight
+                              className={`h-4 w-4 text-slate-400 flex-shrink-0 transition-transform ${expandedHistoryRoute === route.id ? "rotate-90" : ""}`}
+                            />
                             <div className="text-left min-w-0">
                               <p className="text-white font-semibold text-sm truncate">
                                 {route.name}
                               </p>
                               <p className="text-slate-400 text-xs">
                                 {route.createdAt
-                                  ? new Date(route.createdAt).toLocaleDateString()
+                                  ? new Date(
+                                      route.createdAt,
+                                    ).toLocaleDateString()
                                   : "N/A"}
                               </p>
                             </div>
@@ -1881,86 +1969,87 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                           </div>
                         </button>
 
-                        {expandedHistoryRoute === route.id && route.stops && route.stops.length > 0 && (
-                          <div className="p-3 space-y-2 max-h-64 overflow-y-auto bg-slate-800/50 border-t border-slate-600">
-                            {route.stops
-                              .filter((s: any) => s.status === "completed")
-                              .map((stop: any) => (
-                                <div
-                                  key={stop.id}
-                                  className="flex items-start gap-2 p-2 bg-slate-700/30 rounded"
-                                >
-                                  <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-xs font-mono text-blue-400">
-                                      {stop.delivery?.deliveryIdentifier ||
-                                        `DEL${stop.delivery?.id}`}
-                                    </span>
-                                    <p className="text-white text-sm">
-                                      {stop.delivery?.customerName ||
-                                        "Customer"}
-                                    </p>
-                                    <p className="text-slate-400 text-xs truncate">
-                                      {stop.delivery?.addressText}
-                                    </p>
-                                    {stop.completedAt && (
-                                      <p className="text-slate-500 text-xs mt-1">
-                                        {new Date(
-                                          stop.completedAt,
-                                        ).toLocaleString()}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            {route.stops
-                              .filter((s: any) => s.status === "cancelled")
-                              .map((stop: any) => (
-                                <div
-                                  key={stop.id}
-                                  className="flex items-start gap-2 p-2 bg-red-500/5 rounded border border-red-500/15"
-                                >
-                                  <X className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                      <span className="text-xs font-mono text-slate-400">
-                                        {stop.delivery
-                                          ?.deliveryIdentifier ||
+                        {expandedHistoryRoute === route.id &&
+                          route.stops &&
+                          route.stops.length > 0 && (
+                            <div className="p-3 space-y-2 max-h-64 overflow-y-auto bg-slate-800/50 border-t border-slate-600">
+                              {route.stops
+                                .filter((s: any) => s.status === "completed")
+                                .map((stop: any) => (
+                                  <div
+                                    key={stop.id}
+                                    className="flex items-start gap-2 p-2 bg-slate-700/30 rounded"
+                                  >
+                                    <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-xs font-mono text-blue-400">
+                                        {stop.delivery?.deliveryIdentifier ||
                                           `DEL${stop.delivery?.id}`}
                                       </span>
-                                      <span className="text-xs text-red-400 font-medium">
-                                        · Not delivered
-                                      </span>
-                                    </div>
-                                    <p className="text-slate-300 text-sm">
-                                      {stop.delivery?.customerName ||
-                                        "Customer"}
-                                    </p>
-                                    <p className="text-slate-500 text-xs truncate">
-                                      {stop.delivery?.addressText}
-                                    </p>
-                                    {stop.notes && (
-                                      <p className="text-red-400/60 text-xs mt-0.5 italic">
-                                        {stop.notes.replace(
-                                          /^CANCELLED:\s*/i,
-                                          "",
-                                        )}
+                                      <p className="text-white text-sm">
+                                        {stop.delivery?.customerName ||
+                                          "Customer"}
                                       </p>
-                                    )}
+                                      <p className="text-slate-400 text-xs truncate">
+                                        {stop.delivery?.addressText}
+                                      </p>
+                                      {stop.completedAt && (
+                                        <p className="text-slate-500 text-xs mt-1">
+                                          {new Date(
+                                            stop.completedAt,
+                                          ).toLocaleString()}
+                                        </p>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
-                            {route.stops.filter(
-                              (s: any) =>
-                                s.status === "completed" ||
-                                s.status === "cancelled",
-                            ).length === 0 && (
-                              <p className="text-slate-500 text-xs text-center py-2">
-                                No stops recorded
-                              </p>
-                            )}
-                          </div>
-                        )}
+                                ))}
+                              {route.stops
+                                .filter((s: any) => s.status === "cancelled")
+                                .map((stop: any) => (
+                                  <div
+                                    key={stop.id}
+                                    className="flex items-start gap-2 p-2 bg-red-500/5 rounded border border-red-500/15"
+                                  >
+                                    <X className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1 mb-0.5">
+                                        <span className="text-xs font-mono text-slate-400">
+                                          {stop.delivery?.deliveryIdentifier ||
+                                            `DEL${stop.delivery?.id}`}
+                                        </span>
+                                        <span className="text-xs text-red-400 font-medium">
+                                          · Not delivered
+                                        </span>
+                                      </div>
+                                      <p className="text-slate-300 text-sm">
+                                        {stop.delivery?.customerName ||
+                                          "Customer"}
+                                      </p>
+                                      <p className="text-slate-500 text-xs truncate">
+                                        {stop.delivery?.addressText}
+                                      </p>
+                                      {stop.notes && (
+                                        <p className="text-red-400/60 text-xs mt-0.5 italic">
+                                          {stop.notes.replace(
+                                            /^CANCELLED:\s*/i,
+                                            "",
+                                          )}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              {route.stops.filter(
+                                (s: any) =>
+                                  s.status === "completed" ||
+                                  s.status === "cancelled",
+                              ).length === 0 && (
+                                <p className="text-slate-500 text-xs text-center py-2">
+                                  No stops recorded
+                                </p>
+                              )}
+                            </div>
+                          )}
                       </div>
                     ))}
                   </div>
@@ -1968,7 +2057,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
               )}
 
               <Button
-                onClick={() => { setShowDeliveryHistory(false); setExpandedHistoryRoute(null); }}
+                onClick={() => {
+                  setShowDeliveryHistory(false);
+                  setExpandedHistoryRoute(null);
+                }}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
                 Close

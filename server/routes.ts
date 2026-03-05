@@ -16,6 +16,38 @@ import {
   isObjectStorageAvailable,
 } from "./uploadQueue";
 
+// ── Email helper ──────────────────────────────────────────────────────────────
+function createTransporter() {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port: parseInt(process.env.SMTP_PORT || "587"),
+    secure: process.env.SMTP_SECURE === "true",
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+}
+
+async function sendEmail(to: string, subject: string, html: string) {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.log("[Email] SMTP not configured — skipping email to:", to);
+    return;
+  }
+  try {
+    const transporter = createTransporter();
+    await transporter.sendMail({
+      from: `"RxRoute Delivery" <${process.env.SMTP_USER}>`,
+      to,
+      subject,
+      html,
+    });
+    console.log(`[Email] Sent "${subject}" to ${to}`);
+  } catch (err) {
+    console.error("[Email] Failed to send email:", err);
+  }
+}
+
 const upload = multer({ storage: multer.memoryStorage() });
 
 declare module "express-session" {
@@ -133,12 +165,10 @@ function requirePharmacyScopeOrPharmacyAdmin(
     req.session.user.role === "dispatcher"
   ) {
     if (!req.session.user.pharmacyId) {
-      return res
-        .status(403)
-        .json({
-          message:
-            "Your account is not associated with a pharmacy. Please contact admin.",
-        });
+      return res.status(403).json({
+        message:
+          "Your account is not associated with a pharmacy. Please contact admin.",
+      });
     }
     return next();
   }
@@ -160,12 +190,10 @@ function requirePharmacyScope(req: Request, res: Response, next: NextFunction) {
   }
   // Dispatchers must have a pharmacy association
   if (!req.session.user.pharmacyId) {
-    return res
-      .status(403)
-      .json({
-        message:
-          "Your account is not associated with a pharmacy. Please contact admin.",
-      });
+    return res.status(403).json({
+      message:
+        "Your account is not associated with a pharmacy. Please contact admin.",
+    });
   }
   next();
 }
@@ -1056,12 +1084,10 @@ export async function registerRoutes(
         !status ||
         !["pending", "ready", "complete", "cancelled"].includes(status)
       ) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "Invalid status. Must be pending, ready, complete, or cancelled",
-          });
+        return res.status(400).json({
+          error:
+            "Invalid status. Must be pending, ready, complete, or cancelled",
+        });
       }
 
       const batch = await storage.updateBatchStatus(batchId, status);
@@ -1397,11 +1423,13 @@ export async function registerRoutes(
                     ? existingOrder.deliveryStatus
                     : "IMPORTED",
                   addressText: parsedRow.addressText,
-                  streetAddress: parsedRow.normalizedData?.streetAddress || null,
+                  streetAddress:
+                    parsedRow.normalizedData?.streetAddress || null,
                   city: parsedRow.normalizedData?.city || null,
                   state: parsedRow.normalizedData?.state || null,
                   zipCode: parsedRow.normalizedData?.zipCode || null,
-                  normalizedAddressHash: parsedRow.normalizedData?.normalizedHash || null,
+                  normalizedAddressHash:
+                    parsedRow.normalizedData?.normalizedHash || null,
                   lat,
                   lng,
                   customerName: parsedRow.customerName,
@@ -1430,6 +1458,59 @@ export async function registerRoutes(
         }
 
         await storage.updateBatchStatus(batch.id, "ready");
+
+        // ── Notify admin that a batch is ready for pickup ─────────────────────
+        try {
+          const adminEmail = process.env.ADMIN_EMAIL;
+          const pharmacyId = (req.session as any)?.user?.pharmacyId;
+          const pharmacy = pharmacyId
+            ? await storage.getPharmacy(pharmacyId)
+            : null;
+          const pharmacyName = pharmacy?.name || "A pharmacy";
+          const pharmacyEmail = pharmacy?.email;
+
+          const batchSummary = `${newOrderCount} new, ${updatedOrderCount} updated (${parsed.data.length} total rows)`;
+          const emailHtml = `
+            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+              <div style="background:#0B1F3A;padding:24px;border-radius:8px 8px 0 0;">
+                <h2 style="color:#0D9488;margin:0;">📦 Delivery Batch Ready for Pickup</h2>
+              </div>
+              <div style="background:#f9fafb;padding:24px;border:1px solid #e5e7eb;border-radius:0 0 8px 8px;">
+                <p style="color:#374151;font-size:16px;"><strong>${pharmacyName}</strong> has uploaded a new delivery batch and it is ready for pickup.</p>
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;">Batch Name</td><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;font-weight:bold;">${batch.name}</td></tr>
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;">Orders</td><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;font-weight:bold;">${batchSummary}</td></tr>
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;">Pharmacy</td><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;font-weight:bold;">${pharmacyName}</td></tr>
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;">Uploaded At</td><td style="padding:8px;border:1px solid #e5e7eb;background:#fff;">${new Date().toLocaleString()}</td></tr>
+                </table>
+                <p style="color:#6b7280;font-size:14px;">Log in to the dispatcher dashboard to assign and dispatch routes.</p>
+                <p style="color:#6b7280;font-size:12px;margin-top:24px;border-top:1px solid #e5e7eb;padding-top:12px;">This is an automated notification from RxRoute Delivery Management.</p>
+              </div>
+            </div>`;
+
+          // Email the admin
+          if (adminEmail) {
+            await sendEmail(
+              adminEmail,
+              `📦 Batch Ready for Pickup — ${pharmacyName}`,
+              emailHtml,
+            );
+          }
+          // Also email the pharmacy contact if they have an email on file
+          if (pharmacyEmail && pharmacyEmail !== adminEmail) {
+            await sendEmail(
+              pharmacyEmail,
+              `✅ Batch Submitted — ${batch.name}`,
+              emailHtml.replace(
+                "ready for pickup.",
+                "submitted successfully and is ready for pickup by our drivers.",
+              ),
+            );
+          }
+        } catch (emailErr) {
+          console.error("[Email] Batch-ready notification error:", emailErr);
+          // Never block the response for email failures
+        }
 
         res.json({
           batch,
@@ -2257,11 +2338,9 @@ export async function registerRoutes(
         const deliveries = await storage.getDeliveriesByBatch(batchId);
         geocodedDeliveries = deliveries.filter((d) => d.lat && d.lng);
       } else {
-        return res
-          .status(400)
-          .json({
-            error: "Either batchId, deliveryIds, or orderIds is required",
-          });
+        return res.status(400).json({
+          error: "Either batchId, deliveryIds, or orderIds is required",
+        });
       }
 
       if (geocodedDeliveries.length === 0) {
@@ -2558,6 +2637,9 @@ export async function registerRoutes(
         route: updatedRoute,
         stops: stopsWithDeliveries,
       });
+
+      // Driver is notified via the route_dispatched WebSocket event above.
+      // The DriverApp shows an in-app banner + browser push notification.
 
       res.json({ route: updatedRoute, stops: stopsWithDeliveries });
     } catch (error) {
@@ -3344,12 +3426,10 @@ export async function registerRoutes(
       const sourcePrescriptions =
         await storage.getPrescriptionsByDelivery(sourceDeliveryId);
       if (sourcePrescriptions.length <= prescriptionIds.length) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "Cannot split all prescriptions - at least one must remain in the original delivery",
-          });
+        return res.status(400).json({
+          error:
+            "Cannot split all prescriptions - at least one must remain in the original delivery",
+        });
       }
 
       const newDelivery = await storage.splitDelivery(
@@ -3466,12 +3546,10 @@ export async function registerRoutes(
         prescription.deliveryId,
       );
       if (sourcePrescriptions.length <= 1) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "Cannot move the last prescription from a delivery. Delete the delivery instead.",
-          });
+        return res.status(400).json({
+          error:
+            "Cannot move the last prescription from a delivery. Delete the delivery instead.",
+        });
       }
 
       const movedPrescription = await storage.movePrescriptionToDelivery(
@@ -3516,11 +3594,9 @@ export async function registerRoutes(
       ];
 
       if (!validStatuses.includes(status)) {
-        return res
-          .status(400)
-          .json({
-            error: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
-          });
+        return res.status(400).json({
+          error: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+        });
       }
 
       const delivery = await storage.updateDeliveryStatus(
@@ -3646,11 +3722,9 @@ export async function registerRoutes(
       }
 
       if (delivery.status === "complete" || delivery.status === "cancelled") {
-        return res
-          .status(400)
-          .json({
-            error: "Cannot add a completed or cancelled delivery to a route",
-          });
+        return res.status(400).json({
+          error: "Cannot add a completed or cancelled delivery to a route",
+        });
       }
 
       const existingStops = await storage.getRouteStops(routeId);
