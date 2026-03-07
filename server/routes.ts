@@ -1753,13 +1753,31 @@ export async function registerRoutes(
     requireStaff,
     async (req, res) => {
       try {
-        const { barcode } = req.body;
+        const { barcode, confirmOrderIds } = req.body;
         if (!barcode) {
           return res.status(400).json({ error: "Barcode is required" });
         }
 
         const session = req.session as any;
         const pharmacyId = session?.user?.pharmacyId;
+
+        // ── Phase 2: confirmation call — staff chose which RXs to include ────
+        if (
+          confirmOrderIds &&
+          Array.isArray(confirmOrderIds) &&
+          confirmOrderIds.length > 0
+        ) {
+          const updated = await Promise.all(
+            confirmOrderIds.map((id: number) =>
+              storage.updateDeliveryOrderStatus(id, "ROUTE_ELIGIBLE"),
+            ),
+          );
+          return res.json({
+            confirmed: true,
+            updatedCount: updated.filter(Boolean).length,
+            message: `${updated.filter(Boolean).length} prescription(s) marked as route-eligible`,
+          });
+        }
 
         // Strip trailing non-numeric characters from barcode
         const cleanBarcode = barcode.replace(/[^0-9]+$/, "");
@@ -1796,14 +1814,50 @@ export async function registerRoutes(
           });
         }
 
-        const updated = await storage.updateDeliveryOrderStatus(
-          order.id,
-          "ROUTE_ELIGIBLE",
+        // ── Find all IMPORTED orders for the same address ─────────────────────
+        const allPharmacyOrders = pharmacyId
+          ? await storage.getDeliveryOrdersByPharmacy(pharmacyId)
+          : [];
+
+        const addressKey =
+          order.normalizedAddressHash ||
+          order.addressText?.toLowerCase().trim();
+
+        const sameAddressOrders = allPharmacyOrders.filter((o: any) => {
+          const key =
+            o.normalizedAddressHash || o.addressText?.toLowerCase().trim();
+          return key === addressKey && o.deliveryStatus === "IMPORTED";
+        });
+
+        // Always include the scanned order even if it is already ROUTE_ELIGIBLE
+        const scannedIncluded = sameAddressOrders.find(
+          (o: any) => o.id === order.id,
         );
-        res.json({
-          order: updated,
-          alreadyProcessed: false,
-          message: "Order marked as route-eligible",
+        const groupedOrders = scannedIncluded
+          ? sameAddressOrders
+          : [order, ...sameAddressOrders];
+
+        // ── Only one RX for this address — mark it directly (original behaviour)
+        if (groupedOrders.length <= 1) {
+          const updated = await storage.updateDeliveryOrderStatus(
+            order.id,
+            "ROUTE_ELIGIBLE",
+          );
+          return res.json({
+            order: updated,
+            alreadyProcessed: false,
+            message: "Order marked as route-eligible",
+          });
+        }
+
+        // ── Multiple RXs — return them for pharmacy staff to confirm ──────────
+        return res.json({
+          requiresConfirmation: true,
+          scannedOrder: order,
+          groupedOrders,
+          address: order.addressText,
+          customerName: order.customerName,
+          message: `${groupedOrders.length} prescriptions found for this address`,
         });
       } catch (error) {
         res.status(500).json({ error: "Failed to process barcode scan" });

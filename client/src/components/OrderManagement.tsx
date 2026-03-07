@@ -65,7 +65,10 @@ interface OrderManagementProps {
   onBatchSelected?: (batchId: number | null) => void;
 }
 
-const STATUS_COLORS: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
+const STATUS_COLORS: Record<
+  string,
+  { bg: string; text: string; icon: React.ReactNode }
+> = {
   IMPORTED: {
     bg: "bg-yellow-500/20",
     text: "text-yellow-400",
@@ -115,13 +118,23 @@ export default function OrderManagement({
     skippedReasons: string[];
   } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [scanMessage, setScanMessage] = useState<{ text: string; type: "success" | "warning" | "error" } | null>(null);
+  const [scanMessage, setScanMessage] = useState<{
+    text: string;
+    type: "success" | "warning" | "error";
+  } | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const [confirmAction, setConfirmAction] = useState<{
     type: "complete" | "cancel";
     batchId?: number;
   } | null>(null);
   const [showAddOrderDialog, setShowAddOrderDialog] = useState(false);
+  const [addressGroupDialog, setAddressGroupDialog] = useState<{
+    scannedOrder: DeliveryOrder;
+    groupedOrders: DeliveryOrder[];
+    address: string;
+    customerName: string | null;
+    selectedIds: Set<number>;
+  } | null>(null);
   const [newOrderRx, setNewOrderRx] = useState("");
   const [newOrderAddress, setNewOrderAddress] = useState("");
   const [newOrderCustomerName, setNewOrderCustomerName] = useState("");
@@ -206,12 +219,28 @@ export default function OrderManagement({
         credentials: "include",
       });
       if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Scan failed" }));
+        const err = await response
+          .json()
+          .catch(() => ({ error: "Scan failed" }));
         throw new Error(err.error || "Scan failed");
       }
       return response.json();
     },
     onSuccess: (data) => {
+      // Multiple RXs found for same address — show grouping dialog
+      if (data.requiresConfirmation) {
+        setAddressGroupDialog({
+          scannedOrder: data.scannedOrder,
+          groupedOrders: data.groupedOrders,
+          address: data.address,
+          customerName: data.customerName,
+          selectedIds: new Set(
+            data.groupedOrders.map((o: DeliveryOrder) => o.id),
+          ),
+        });
+        return;
+      }
+
       if (activeBatchId) {
         queryClient.invalidateQueries({
           queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
@@ -220,9 +249,15 @@ export default function OrderManagement({
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
 
       if (data.alreadyProcessed) {
-        setScanMessage({ text: data.message || "Already scanned", type: "warning" });
+        setScanMessage({
+          text: data.message || "Already scanned",
+          type: "warning",
+        });
       } else {
-        setScanMessage({ text: data.message || "Scanned successfully - marked ROUTE_ELIGIBLE", type: "success" });
+        setScanMessage({
+          text: data.message || "Scanned successfully - marked ROUTE_ELIGIBLE",
+          type: "success",
+        });
       }
       setTimeout(() => setScanMessage(null), 4000);
     },
@@ -236,6 +271,48 @@ export default function OrderManagement({
     },
   });
 
+  const confirmGroupMutation = useMutation({
+    mutationFn: async ({
+      barcode,
+      orderIds,
+    }: {
+      barcode: string;
+      orderIds: number[];
+    }) => {
+      const response = await fetch("/api/delivery-orders/scan-barcode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ barcode, confirmOrderIds: orderIds }),
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Failed to confirm orders");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setAddressGroupDialog(null);
+      if (activeBatchId) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      setScanMessage({
+        text:
+          data.message ||
+          `${data.updatedCount} prescription(s) marked as route-eligible`,
+        type: "success",
+      });
+      setTimeout(() => setScanMessage(null), 4000);
+    },
+    onError: () => {
+      setScanMessage({
+        text: "Failed to confirm delivery group",
+        type: "error",
+      });
+      setTimeout(() => setScanMessage(null), 4000);
+    },
+  });
+
   const resetNewOrderForm = () => {
     setNewOrderRx("");
     setNewOrderAddress("");
@@ -245,7 +322,13 @@ export default function OrderManagement({
   };
 
   const createOrderMutation = useMutation({
-    mutationFn: async (data: { rxNumber: string; addressText: string; customerName: string; customerPhone: string; notes: string }) => {
+    mutationFn: async (data: {
+      rxNumber: string;
+      addressText: string;
+      customerName: string;
+      customerPhone: string;
+      notes: string;
+    }) => {
       const response = await fetch("/api/delivery-orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -253,14 +336,18 @@ export default function OrderManagement({
         credentials: "include",
       });
       if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Failed to create order" }));
+        const err = await response
+          .json()
+          .catch(() => ({ error: "Failed to create order" }));
         throw new Error(err.error || "Failed to create order");
       }
       return response.json();
     },
     onSuccess: (data) => {
       if (activeBatchId) {
-        queryClient.invalidateQueries({ queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`] });
+        queryClient.invalidateQueries({
+          queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`],
+        });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
       setShowAddOrderDialog(false);
@@ -268,7 +355,10 @@ export default function OrderManagement({
       const msg = data.geocodeWarning
         ? `Order created for RX ${data.rxNumber} - ${data.geocodeWarning}`
         : `Order created for RX ${data.rxNumber} - marked as ROUTE_ELIGIBLE`;
-      setScanMessage({ text: msg, type: data.geocodeWarning ? "warning" : "success" });
+      setScanMessage({
+        text: msg,
+        type: data.geocodeWarning ? "warning" : "success",
+      });
       setTimeout(() => setScanMessage(null), 6000);
     },
     onError: (error: Error) => {
@@ -278,7 +368,13 @@ export default function OrderManagement({
   });
 
   const updateStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status }: { orderId: number; status: string }) => {
+    mutationFn: async ({
+      orderId,
+      status,
+    }: {
+      orderId: number;
+      status: string;
+    }) => {
       const response = await fetch(`/api/delivery-orders/${orderId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -335,7 +431,9 @@ export default function OrderManagement({
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/delivery-orders/eligible"],
+      });
     },
   });
 
@@ -364,7 +462,9 @@ export default function OrderManagement({
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/delivery-orders/eligible"],
+      });
     },
   });
 
@@ -416,7 +516,12 @@ export default function OrderManagement({
   );
 
   const canPrintLabel = (order: DeliveryOrder) => {
-    return order.deliveryIdentifier && (order.deliveryStatus === 'ROUTE_ELIGIBLE' || order.deliveryStatus === 'ROUTED' || order.deliveryStatus === 'DELIVERED');
+    return (
+      order.deliveryIdentifier &&
+      (order.deliveryStatus === "ROUTE_ELIGIBLE" ||
+        order.deliveryStatus === "ROUTED" ||
+        order.deliveryStatus === "DELIVERED")
+    );
   };
 
   const printDeliveryLabel = (
@@ -425,7 +530,8 @@ export default function OrderManagement({
   ) => {
     if (!canPrintLabel(order)) return;
     const today = new Date().toLocaleDateString();
-    const labelId = order.deliveryIdentifier || order.rxNumber || `ORD-${order.id}`;
+    const labelId =
+      order.deliveryIdentifier || order.rxNumber || `ORD-${order.id}`;
 
     const canvas = document.createElement("canvas");
     try {
@@ -577,7 +683,8 @@ export default function OrderManagement({
 
     const labelsHtml = printableOrders
       .map((order) => {
-        const labelId = order.deliveryIdentifier || order.rxNumber || `ORD-${order.id}`;
+        const labelId =
+          order.deliveryIdentifier || order.rxNumber || `ORD-${order.id}`;
 
         const canvas = document.createElement("canvas");
         try {
@@ -760,9 +867,7 @@ export default function OrderManagement({
                 }
                 className="flex-1 bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2"
               >
-                <option value="">
-                  -- Select a batch to view orders --
-                </option>
+                <option value="">-- Select a batch to view orders --</option>
                 {(batches as any[])
                   .filter(
                     (batch: any) =>
@@ -913,28 +1018,37 @@ export default function OrderManagement({
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div>
                   <span className="text-slate-400">Total Rows:</span>{" "}
-                  <span className="text-white font-medium">{uploadResult.totalRows}</span>
+                  <span className="text-white font-medium">
+                    {uploadResult.totalRows}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-400">New Orders:</span>{" "}
-                  <span className="text-green-400 font-medium">{uploadResult.newOrderCount}</span>
+                  <span className="text-green-400 font-medium">
+                    {uploadResult.newOrderCount}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-400">Updated:</span>{" "}
-                  <span className="text-blue-400 font-medium">{uploadResult.updatedOrderCount}</span>
+                  <span className="text-blue-400 font-medium">
+                    {uploadResult.updatedOrderCount}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-400">Skipped:</span>{" "}
-                  <span className="text-yellow-400 font-medium">{uploadResult.skippedCount}</span>
+                  <span className="text-yellow-400 font-medium">
+                    {uploadResult.skippedCount}
+                  </span>
                 </div>
               </div>
-              {uploadResult.skippedReasons && uploadResult.skippedReasons.length > 0 && (
-                <div className="mt-2 text-xs text-yellow-400">
-                  {uploadResult.skippedReasons.map((reason, i) => (
-                    <p key={i}>• {reason}</p>
-                  ))}
-                </div>
-              )}
+              {uploadResult.skippedReasons &&
+                uploadResult.skippedReasons.length > 0 && (
+                  <div className="mt-2 text-xs text-yellow-400">
+                    {uploadResult.skippedReasons.map((reason, i) => (
+                      <p key={i}>• {reason}</p>
+                    ))}
+                  </div>
+                )}
               <Button
                 size="sm"
                 variant="ghost"
@@ -1090,7 +1204,9 @@ export default function OrderManagement({
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => markScanMutation.mutate(order.id)}
+                                onClick={() =>
+                                  markScanMutation.mutate(order.id)
+                                }
                                 disabled={markScanMutation.isPending}
                                 className="h-8 px-2 text-green-400 hover:text-green-300 hover:bg-green-500/10"
                                 title="Mark Routing Eligible"
@@ -1113,26 +1229,35 @@ export default function OrderManagement({
                               }}
                               disabled={!canPrintLabel(order)}
                               className={`h-8 w-8 p-0 ${canPrintLabel(order) ? "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10" : "text-slate-600 cursor-not-allowed"}`}
-                              title={canPrintLabel(order) ? "Print Label" : "Scan barcode first to enable label printing"}
+                              title={
+                                canPrintLabel(order)
+                                  ? "Print Label"
+                                  : "Scan barcode first to enable label printing"
+                              }
                             >
                               <Printer className="h-4 w-4" />
                             </Button>
-                            {order.deliveryStatus !== "DELIVERED" && order.deliveryStatus !== "CANCELLED" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  if (confirm(`Cancel order ${order.rxNumber}? This cannot be undone.`)) {
-                                    cancelOrderMutation.mutate(order.id);
-                                  }
-                                }}
-                                disabled={cancelOrderMutation.isPending}
-                                className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                                title="Cancel Order"
-                              >
-                                <Ban className="h-4 w-4" />
-                              </Button>
-                            )}
+                            {order.deliveryStatus !== "DELIVERED" &&
+                              order.deliveryStatus !== "CANCELLED" && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    if (
+                                      confirm(
+                                        `Cancel order ${order.rxNumber}? This cannot be undone.`,
+                                      )
+                                    ) {
+                                      cancelOrderMutation.mutate(order.id);
+                                    }
+                                  }}
+                                  disabled={cancelOrderMutation.isPending}
+                                  className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                  title="Cancel Order"
+                                >
+                                  <Ban className="h-4 w-4" />
+                                </Button>
+                              )}
                           </div>
                         </td>
                       </tr>
@@ -1148,42 +1273,110 @@ export default function OrderManagement({
       {orders.length === 0 && activeBatchId && (
         <Card className="bg-slate-800/50 border-slate-700">
           <CardContent className="p-8 text-center">
-            <p className="text-slate-400">No delivery orders in this batch yet.</p>
-            <p className="text-slate-500 text-sm mt-1">Upload a CSV/Excel file to create orders.</p>
+            <p className="text-slate-400">
+              No delivery orders in this batch yet.
+            </p>
+            <p className="text-slate-500 text-sm mt-1">
+              Upload a CSV/Excel file to create orders.
+            </p>
           </CardContent>
         </Card>
       )}
 
       {showAddOrderDialog && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAddOrderDialog(false)}>
-          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-white mb-1">Add Missing Prescription</h3>
-            <p className="text-slate-400 text-sm mb-4">This RX was not found in the system. Create a new order for it.</p>
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowAddOrderDialog(false)}
+        >
+          <div
+            className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-white mb-1">
+              Add Missing Prescription
+            </h3>
+            <p className="text-slate-400 text-sm mb-4">
+              This RX was not found in the system. Create a new order for it.
+            </p>
             <div className="space-y-3">
               <div>
                 <Label className="text-slate-300">RX Number</Label>
-                <Input value={newOrderRx} onChange={e => setNewOrderRx(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Enter RX number" />
+                <Input
+                  value={newOrderRx}
+                  onChange={(e) => setNewOrderRx(e.target.value)}
+                  className="bg-slate-900/50 border-slate-600 text-white"
+                  placeholder="Enter RX number"
+                />
               </div>
               <div>
                 <Label className="text-slate-300">Address</Label>
-                <Input value={newOrderAddress} onChange={e => setNewOrderAddress(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Full delivery address" />
+                <Input
+                  value={newOrderAddress}
+                  onChange={(e) => setNewOrderAddress(e.target.value)}
+                  className="bg-slate-900/50 border-slate-600 text-white"
+                  placeholder="Full delivery address"
+                />
               </div>
               <div>
                 <Label className="text-slate-300">Customer Name</Label>
-                <Input value={newOrderCustomerName} onChange={e => setNewOrderCustomerName(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Customer name" />
+                <Input
+                  value={newOrderCustomerName}
+                  onChange={(e) => setNewOrderCustomerName(e.target.value)}
+                  className="bg-slate-900/50 border-slate-600 text-white"
+                  placeholder="Customer name"
+                />
               </div>
               <div>
                 <Label className="text-slate-300">Phone</Label>
-                <Input value={newOrderCustomerPhone} onChange={e => setNewOrderCustomerPhone(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Phone number" />
+                <Input
+                  value={newOrderCustomerPhone}
+                  onChange={(e) => setNewOrderCustomerPhone(e.target.value)}
+                  className="bg-slate-900/50 border-slate-600 text-white"
+                  placeholder="Phone number"
+                />
               </div>
               <div>
                 <Label className="text-slate-300">Notes</Label>
-                <Input value={newOrderNotes} onChange={e => setNewOrderNotes(e.target.value)} className="bg-slate-900/50 border-slate-600 text-white" placeholder="Delivery notes (optional)" />
+                <Input
+                  value={newOrderNotes}
+                  onChange={(e) => setNewOrderNotes(e.target.value)}
+                  className="bg-slate-900/50 border-slate-600 text-white"
+                  placeholder="Delivery notes (optional)"
+                />
               </div>
             </div>
             <div className="flex gap-2 mt-4 justify-end">
-              <Button variant="outline" onClick={() => { setShowAddOrderDialog(false); resetNewOrderForm(); }} className="border-slate-600 text-slate-300 hover:bg-slate-700">Cancel</Button>
-              <Button onClick={() => { if (!newOrderRx.trim() || !newOrderAddress.trim()) return; createOrderMutation.mutate({ rxNumber: newOrderRx.trim(), addressText: newOrderAddress.trim(), customerName: newOrderCustomerName.trim(), customerPhone: newOrderCustomerPhone.trim(), notes: newOrderNotes.trim() }); }} disabled={!newOrderRx.trim() || !newOrderAddress.trim() || createOrderMutation.isPending} className="bg-green-600 hover:bg-green-700"><Plus className="h-4 w-4 mr-1" />Create Order</Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowAddOrderDialog(false);
+                  resetNewOrderForm();
+                }}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!newOrderRx.trim() || !newOrderAddress.trim()) return;
+                  createOrderMutation.mutate({
+                    rxNumber: newOrderRx.trim(),
+                    addressText: newOrderAddress.trim(),
+                    customerName: newOrderCustomerName.trim(),
+                    customerPhone: newOrderCustomerPhone.trim(),
+                    notes: newOrderNotes.trim(),
+                  });
+                }}
+                disabled={
+                  !newOrderRx.trim() ||
+                  !newOrderAddress.trim() ||
+                  createOrderMutation.isPending
+                }
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Create Order
+              </Button>
             </div>
           </div>
         </div>
@@ -1244,6 +1437,139 @@ export default function OrderManagement({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Address Group Confirmation Dialog */}
+      {addressGroupDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-700">
+              <div className="flex items-center gap-3 mb-1">
+                <div className="p-2 bg-blue-500/20 rounded-lg">
+                  <CheckCircle className="h-5 w-5 text-blue-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-white">
+                  Multiple Prescriptions Found
+                </h3>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              {/* Address card */}
+              <div className="bg-slate-700/50 rounded-lg p-3 space-y-1">
+                <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">
+                  Address
+                </p>
+                <p className="text-white font-medium">
+                  {addressGroupDialog.address}
+                </p>
+                {addressGroupDialog.customerName && (
+                  <p className="text-slate-300 text-sm">
+                    {addressGroupDialog.customerName}
+                  </p>
+                )}
+              </div>
+
+              {/* Count message */}
+              <p className="text-slate-300 text-sm">
+                <span className="text-white font-semibold">
+                  {addressGroupDialog.groupedOrders.length} prescription
+                  {addressGroupDialog.groupedOrders.length !== 1 ? "s" : ""}
+                </span>{" "}
+                found for this address. Select which ones to include in this
+                delivery:
+              </p>
+
+              {/* RX checklist */}
+              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                {addressGroupDialog.groupedOrders.map((order) => {
+                  const isSelected = addressGroupDialog.selectedIds.has(
+                    order.id,
+                  );
+                  const isScanned =
+                    order.id === addressGroupDialog.scannedOrder.id;
+                  return (
+                    <label
+                      key={order.id}
+                      className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                        isSelected
+                          ? "bg-blue-500/10 border-blue-500/40"
+                          : "bg-slate-700/30 border-slate-600/50 hover:border-slate-500"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        disabled={isScanned}
+                        onChange={() => {
+                          const next = new Set(addressGroupDialog.selectedIds);
+                          if (isSelected) next.delete(order.id);
+                          else next.add(order.id);
+                          setAddressGroupDialog({
+                            ...addressGroupDialog,
+                            selectedIds: next,
+                          });
+                        }}
+                        className="w-4 h-4 accent-blue-500 flex-shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white text-sm font-medium">
+                            RX {order.rxNumber}
+                          </span>
+                          {isScanned && (
+                            <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">
+                              Scanned
+                            </span>
+                          )}
+                        </div>
+                        {order.notes && (
+                          <p className="text-slate-400 text-xs mt-0.5 truncate">
+                            {order.notes}
+                          </p>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-5 border-t border-slate-700 flex gap-3">
+              <Button
+                onClick={() => {
+                  const selectedIds = Array.from(
+                    addressGroupDialog.selectedIds,
+                  );
+                  if (selectedIds.length === 0) return;
+                  confirmGroupMutation.mutate({
+                    barcode: addressGroupDialog.scannedOrder.rxNumber,
+                    orderIds: selectedIds,
+                  });
+                }}
+                disabled={
+                  addressGroupDialog.selectedIds.size === 0 ||
+                  confirmGroupMutation.isPending
+                }
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {confirmGroupMutation.isPending
+                  ? "Creating..."
+                  : `Create Delivery (${addressGroupDialog.selectedIds.size} RX${addressGroupDialog.selectedIds.size !== 1 ? "s" : ""})`}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setAddressGroupDialog(null)}
+                disabled={confirmGroupMutation.isPending}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
