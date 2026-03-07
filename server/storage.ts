@@ -1396,17 +1396,41 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateDeliveryOrderStatus(id: number, status: string): Promise<DeliveryOrder | undefined> {
-    const updates: any = { deliveryStatus: status };
     if (status === 'ROUTE_ELIGIBLE') {
-      updates.scannedAt = new Date();
       const order = await this.getDeliveryOrder(id);
-      if (order && !order.deliveryIdentifier) {
+      if (!order) return undefined;
+
+      if (order.deliveryStatus === 'CANCELLED') {
+        console.log(`⚠️ Refusing to set ROUTE_ELIGIBLE on cancelled order ${id}`);
+        return undefined;
+      }
+
+      if (order.batchId) {
+        const batch = await this.getBatch(order.batchId);
+        if (batch && batch.status === 'cancelled') {
+          console.log(`⚠️ Refusing to set ROUTE_ELIGIBLE on order ${id} — batch ${order.batchId} is cancelled`);
+          return undefined;
+        }
+      }
+
+      const updates: any = {
+        deliveryStatus: status,
+        scannedAt: new Date(),
+      };
+      if (!order.deliveryIdentifier) {
         updates.deliveryIdentifier = await this.getOrCreateDeliveryIdentifierForAddress(order);
       }
+      const result = await db
+        .update(deliveryOrders)
+        .set(updates)
+        .where(eq(deliveryOrders.id, id))
+        .returning();
+      return result[0];
     }
+
     const result = await db
       .update(deliveryOrders)
-      .set(updates)
+      .set({ deliveryStatus: status })
       .where(eq(deliveryOrders.id, id))
       .returning();
     return result[0];
