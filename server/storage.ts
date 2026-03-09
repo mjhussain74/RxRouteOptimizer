@@ -805,6 +805,17 @@ export class DatabaseStorage implements IStorage {
       .set(data)
       .where(eq(routes.id, id))
       .returning();
+
+    if (result[0] && (data as any).status === 'complete') {
+      await db
+        .update(deliveryOrders)
+        .set({ deliveryStatus: 'DELIVERED' })
+        .where(and(
+          eq(deliveryOrders.routeId, id),
+          eq(deliveryOrders.deliveryStatus, 'ROUTED')
+        ));
+    }
+
     return result[0];
   }
 
@@ -1202,6 +1213,14 @@ export class DatabaseStorage implements IStorage {
         }
       }
     }
+
+    await db
+      .update(deliveryOrders)
+      .set({ deliveryStatus: 'CANCELLED' })
+      .where(and(
+        eq(deliveryOrders.routeId, routeId),
+        notInArray(deliveryOrders.deliveryStatus, ['DELIVERED', 'CANCELLED'])
+      ));
 
     return updatedRoute[0];
   }
