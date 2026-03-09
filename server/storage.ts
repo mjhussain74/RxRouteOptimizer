@@ -1288,13 +1288,19 @@ export class DatabaseStorage implements IStorage {
   // Delivery Orders implementation
   async getDeliveryOrdersByPharmacy(pharmacyId: number): Promise<DeliveryOrder[]> {
     return db
-      .select()
+      .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
+      .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
       .where(and(
         eq(deliveryOrders.pharmacyId, pharmacyId),
-        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED'])
+        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED']),
+        or(
+          isNull(deliveryOrders.batchId),
+          notInArray(deliveryBatches.status, ['cancelled', 'complete'])
+        )
       ))
-      .orderBy(desc(deliveryOrders.lastSeenAt));
+      .orderBy(desc(deliveryOrders.lastSeenAt))
+      .then(rows => rows.map(r => r.deliveryOrder));
   }
 
   async getDeliveryOrdersByBatch(batchId: number): Promise<DeliveryOrder[]> {
@@ -1444,6 +1450,22 @@ export class DatabaseStorage implements IStorage {
         eq(deliveryOrders.batchId, batchId),
         notInArray(deliveryOrders.deliveryStatus, ['DELIVERED', 'CANCELLED'])
       ));
+
+    const uploads = await db
+      .select({ deliveryOrderId: deliveryOrderUploads.deliveryOrderId })
+      .from(deliveryOrderUploads)
+      .where(eq(deliveryOrderUploads.batchId, batchId));
+
+    if (uploads.length > 0) {
+      const orderIds = uploads.map(u => u.deliveryOrderId);
+      await db
+        .update(deliveryOrders)
+        .set({ deliveryStatus: 'CANCELLED' })
+        .where(and(
+          inArray(deliveryOrders.id, orderIds),
+          notInArray(deliveryOrders.deliveryStatus, ['DELIVERED', 'CANCELLED', 'ROUTED'])
+        ));
+    }
   }
 
   async getOrCreateDeliveryIdentifierForAddress(order: DeliveryOrder): Promise<string> {
@@ -1503,7 +1525,7 @@ export class DatabaseStorage implements IStorage {
         eq(deliveryOrders.deliveryStatus, 'ROUTE_ELIGIBLE'),
         or(
           isNull(deliveryOrders.batchId),
-          ne(deliveryBatches.status, 'cancelled')
+          notInArray(deliveryBatches.status, ['cancelled', 'complete'])
         )
       ))
       .orderBy(desc(deliveryOrders.lastSeenAt))
@@ -1519,7 +1541,7 @@ export class DatabaseStorage implements IStorage {
         notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED']),
         or(
           isNull(deliveryOrders.batchId),
-          ne(deliveryBatches.status, 'cancelled')
+          notInArray(deliveryBatches.status, ['cancelled', 'complete'])
         )
       ))
       .orderBy(desc(deliveryOrders.lastSeenAt))
