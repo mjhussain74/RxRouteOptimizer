@@ -210,8 +210,11 @@ export default function OrderManagement({
     },
   });
 
+  const lastScannedBarcodeRef = useRef<string>("");
+
   const scanBarcodeMutation = useMutation({
     mutationFn: async (barcode: string) => {
+      lastScannedBarcodeRef.current = barcode;
       const response = await fetch("/api/delivery-orders/scan-barcode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -227,7 +230,6 @@ export default function OrderManagement({
       return response.json();
     },
     onSuccess: (data) => {
-      // Multiple RXs found for same address — show grouping dialog
       if (data.requiresConfirmation) {
         setAddressGroupDialog({
           scannedOrder: data.scannedOrder,
@@ -262,8 +264,7 @@ export default function OrderManagement({
       setTimeout(() => setScanMessage(null), 4000);
     },
     onError: (error: Error) => {
-      const rxMatch = error.message.match(/RX: (.+)/);
-      const scannedRx = rxMatch ? rxMatch[1] : "";
+      const scannedRx = lastScannedBarcodeRef.current.replace(/[^0-9]+$/, "");
       setNewOrderRx(scannedRx);
       setShowAddOrderDialog(true);
       setScanMessage({ text: error.message, type: "error" });

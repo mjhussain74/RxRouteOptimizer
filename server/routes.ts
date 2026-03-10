@@ -1570,12 +1570,11 @@ export async function registerRoutes(
           .json({ error: "RX number and address are required" });
       }
 
-      // Check if RX already exists
       const existing = await storage.findDeliveryOrderByRx(
         pharmacyId,
         rxNumber,
       );
-      if (existing) {
+      if (existing && existing.deliveryStatus !== 'CANCELLED' && existing.deliveryStatus !== 'DELIVERED') {
         return res
           .status(409)
           .json({ error: `RX ${rxNumber} already exists`, order: existing });
@@ -1797,16 +1796,21 @@ export async function registerRoutes(
             .json({ error: `No order found for RX: ${cleanBarcode}` });
         }
 
-        if (order.deliveryStatus === "CANCELLED") {
-          return res.status(400).json({
-            error: `Order RX ${cleanBarcode} has been cancelled and cannot be scanned`,
+        if (order.deliveryStatus === "CANCELLED" || order.deliveryStatus === "DELIVERED") {
+          const reactivated = await storage.reactivateDeliveryOrder(order.id);
+          if (reactivated && reactivated.lat && reactivated.lng && !reactivated.deliveryIdentifier) {
+            const deliveryIdentifier = await storage.getOrCreateDeliveryIdentifierForAddress(reactivated);
+            await storage.updateDeliveryOrderDeliveryIdentifier(reactivated.id, deliveryIdentifier);
+          }
+          const finalOrder = await storage.getDeliveryOrder(order.id);
+          return res.json({
+            order: finalOrder || order,
+            alreadyProcessed: false,
+            message: `Order RX ${cleanBarcode} reactivated and marked ROUTE_ELIGIBLE`,
           });
         }
 
-        if (
-          order.deliveryStatus === "ROUTED" ||
-          order.deliveryStatus === "DELIVERED"
-        ) {
+        if (order.deliveryStatus === "ROUTED") {
           return res.json({
             order,
             alreadyProcessed: true,

@@ -1349,6 +1349,21 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async reactivateDeliveryOrder(id: number): Promise<DeliveryOrder | undefined> {
+    const result = await db
+      .update(deliveryOrders)
+      .set({ 
+        deliveryStatus: 'ROUTE_ELIGIBLE', 
+        routeId: null, 
+        batchId: null,
+        scannedAt: new Date(),
+        lastSeenAt: new Date(),
+      })
+      .where(eq(deliveryOrders.id, id))
+      .returning();
+    return result[0];
+  }
+
   async findDeliveryOrderByRx(pharmacyId: number, rxNumber: string): Promise<DeliveryOrder | undefined> {
     const result = await db
       .select()
@@ -1364,9 +1379,8 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.findDeliveryOrderByRx(data.pharmacyId, data.rxNumber);
     
     if (existing) {
-      const updated = await db
-        .update(deliveryOrders)
-        .set({
+      const isReactivating = existing.deliveryStatus === 'CANCELLED' || existing.deliveryStatus === 'DELIVERED';
+      const updateFields: any = {
           lastSeenAt: new Date(),
           uploadCount: (existing.uploadCount || 1) + 1,
           addressText: data.addressText || existing.addressText,
@@ -1382,7 +1396,14 @@ export class DatabaseStorage implements IStorage {
           notes: data.notes || existing.notes,
           fillDate: data.fillDate || existing.fillDate,
           batchId: batchId || existing.batchId,
-        })
+      };
+      if (isReactivating && data.deliveryStatus) {
+        updateFields.deliveryStatus = data.deliveryStatus;
+        updateFields.routeId = null;
+      }
+      const updated = await db
+        .update(deliveryOrders)
+        .set(updateFields)
         .where(eq(deliveryOrders.id, existing.id))
         .returning();
       
