@@ -1,19 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Upload,
-  MapPin,
-  Truck,
-  Route,
-  Users,
-  Map,
-  FileText,
-  Building2,
-  Settings,
-  LogOut,
-  Shield,
-  DollarSign,
-} from "lucide-react";
+import { Upload, MapPin, Truck, Route, Users, Map, FileText, Building2, Settings, LogOut, Shield } from "lucide-react";
 import { Button } from "./ui/button";
 import RouteOptimizer from "./RouteOptimizer";
 import RouteMap from "./RouteMap";
@@ -22,7 +9,6 @@ import OrderManagement from "./OrderManagement";
 import ZoneManager from "./ZoneManager";
 import ReportGenerator from "./ReportGenerator";
 import PharmacyManager from "./PharmacyManager";
-import BillingManager from "./BillingManager";
 import UserManager from "./UserManager";
 
 interface AdminDashboardProps {
@@ -30,21 +16,9 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabType =
-  | "orders"
-  | "optimize"
-  | "routes"
-  | "drivers"
-  | "zones"
-  | "reports"
-  | "pharmacies"
-  | "users"
-  | "billing";
+type TabType = "orders" | "optimize" | "routes" | "drivers" | "zones" | "reports" | "pharmacies" | "users";
 
-export default function AdminDashboard({
-  onOpenDriverView,
-  onLogout,
-}: AdminDashboardProps) {
+export default function AdminDashboard({ onOpenDriverView, onLogout }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("orders");
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
@@ -74,7 +48,6 @@ export default function AdminDashboard({
     { id: "reports" as TabType, label: "Reports", icon: FileText },
     { id: "pharmacies" as TabType, label: "Pharmacies", icon: Building2 },
     { id: "users" as TabType, label: "Users", icon: Settings },
-    { id: "billing" as TabType, label: "Billing", icon: DollarSign },
   ];
 
   return (
@@ -87,13 +60,11 @@ export default function AdminDashboard({
                 <Shield className="h-6 w-6 text-purple-400" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">
-                  Admin Dashboard
-                </h1>
+                <h1 className="text-xl font-bold text-white">Admin Dashboard</h1>
                 <p className="text-xs text-slate-400">Full System Control</p>
               </div>
             </div>
-
+            
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <div className="text-sm font-medium text-white">
@@ -171,7 +142,9 @@ export default function AdminDashboard({
           />
         )}
 
-        {activeTab === "zones" && <ZoneManager drivers={drivers as any[]} />}
+        {activeTab === "zones" && (
+          <ZoneManager drivers={drivers as any[]} />
+        )}
 
         {activeTab === "drivers" && (
           <DriverManager
@@ -180,14 +153,17 @@ export default function AdminDashboard({
           />
         )}
 
-        {activeTab === "reports" && <ReportGenerator isAdmin={true} />}
+        {activeTab === "reports" && (
+          <ReportGenerator isAdmin={true} />
+        )}
 
-        {activeTab === "pharmacies" && <PharmacyManager />}
+        {activeTab === "pharmacies" && (
+          <PharmacyManager />
+        )}
 
         {activeTab === "users" && (
           <UserManager pharmacies={pharmacies as any[]} />
         )}
-        {activeTab === "billing" && <BillingManager />}
       </main>
     </div>
   );

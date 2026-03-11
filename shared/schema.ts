@@ -140,6 +140,9 @@ export const routes = pgTable("routes", {
   startLat: real("start_lat"),
   startLng: real("start_lng"),
   startAddress: text("start_address"),
+  endLat: real("end_lat"),
+  endLng: real("end_lng"),
+  endAddress: text("end_address"),
   estimatedDuration: integer("estimated_duration"),
   estimatedDistance: real("estimated_distance"),
   polyline: text("polyline"),
@@ -460,82 +463,107 @@ export type Prescription = typeof prescriptions.$inferSelect;
 export type InsertUploadQueue = z.infer<typeof insertUploadQueueSchema>;
 export type UploadQueue = typeof uploadQueue.$inferSelect;
 
-export const deliveryOrders = pgTable("delivery_orders", {
-  id: serial("id").primaryKey(),
-  rxNumber: text("rx_number").notNull(),
-  pharmacyId: integer("pharmacy_id").references(() => pharmacies.id).notNull(),
-  batchId: integer("batch_id").references(() => deliveryBatches.id),
-  fillDate: text("fill_date"),
-  deliveryIdentifier: text("delivery_identifier"),
-  deliveryStatus: text("delivery_status").notNull().default("IMPORTED"),
-  routeId: integer("route_id").references(() => routes.id),
-  addressText: text("address_text").notNull(),
-  streetAddress: text("street_address"),
-  city: text("city"),
-  state: text("state"),
-  zipCode: text("zip_code"),
-  normalizedAddressHash: text("normalized_address_hash"),
-  lat: real("lat"),
-  lng: real("lng"),
-  customerName: text("customer_name"),
-  customerPhone: text("customer_phone"),
-  notes: text("notes"),
-  priority: text("priority").default("normal"),
-  uploadCount: integer("upload_count").notNull().default(1),
-  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
-  scannedAt: timestamp("scanned_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => ({
-  pharmacyRxUnique: uniqueIndex("delivery_orders_pharmacy_rx_unique").on(table.pharmacyId, table.rxNumber),
-}));
+export const deliveryOrders = pgTable(
+  "delivery_orders",
+  {
+    id: serial("id").primaryKey(),
+    rxNumber: text("rx_number").notNull(),
+    pharmacyId: integer("pharmacy_id")
+      .references(() => pharmacies.id)
+      .notNull(),
+    batchId: integer("batch_id").references(() => deliveryBatches.id),
+    fillDate: text("fill_date"),
+    deliveryIdentifier: text("delivery_identifier"),
+    deliveryStatus: text("delivery_status").notNull().default("IMPORTED"),
+    routeId: integer("route_id").references(() => routes.id),
+    addressText: text("address_text").notNull(),
+    streetAddress: text("street_address"),
+    city: text("city"),
+    state: text("state"),
+    zipCode: text("zip_code"),
+    normalizedAddressHash: text("normalized_address_hash"),
+    lat: real("lat"),
+    lng: real("lng"),
+    customerName: text("customer_name"),
+    customerPhone: text("customer_phone"),
+    notes: text("notes"),
+    priority: text("priority").default("normal"),
+    uploadCount: integer("upload_count").notNull().default(1),
+    lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+    scannedAt: timestamp("scanned_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    pharmacyRxUnique: uniqueIndex("delivery_orders_pharmacy_rx_unique").on(
+      table.pharmacyId,
+      table.rxNumber,
+    ),
+  }),
+);
 
 export const deliveryOrderUploads = pgTable("delivery_order_uploads", {
   id: serial("id").primaryKey(),
-  deliveryOrderId: integer("delivery_order_id").references(() => deliveryOrders.id).notNull(),
-  batchId: integer("batch_id").references(() => deliveryBatches.id).notNull(),
+  deliveryOrderId: integer("delivery_order_id")
+    .references(() => deliveryOrders.id)
+    .notNull(),
+  batchId: integer("batch_id")
+    .references(() => deliveryBatches.id)
+    .notNull(),
   fileName: text("file_name"),
   seenAt: timestamp("seen_at").defaultNow().notNull(),
 });
 
-export const deliveryOrdersRelations = relations(deliveryOrders, ({ one, many }) => ({
-  pharmacy: one(pharmacies, {
-    fields: [deliveryOrders.pharmacyId],
-    references: [pharmacies.id],
+export const deliveryOrdersRelations = relations(
+  deliveryOrders,
+  ({ one, many }) => ({
+    pharmacy: one(pharmacies, {
+      fields: [deliveryOrders.pharmacyId],
+      references: [pharmacies.id],
+    }),
+    batch: one(deliveryBatches, {
+      fields: [deliveryOrders.batchId],
+      references: [deliveryBatches.id],
+    }),
+    route: one(routes, {
+      fields: [deliveryOrders.routeId],
+      references: [routes.id],
+    }),
+    uploads: many(deliveryOrderUploads),
   }),
-  batch: one(deliveryBatches, {
-    fields: [deliveryOrders.batchId],
-    references: [deliveryBatches.id],
-  }),
-  route: one(routes, {
-    fields: [deliveryOrders.routeId],
-    references: [routes.id],
-  }),
-  uploads: many(deliveryOrderUploads),
-}));
+);
 
-export const deliveryOrderUploadsRelations = relations(deliveryOrderUploads, ({ one }) => ({
-  deliveryOrder: one(deliveryOrders, {
-    fields: [deliveryOrderUploads.deliveryOrderId],
-    references: [deliveryOrders.id],
+export const deliveryOrderUploadsRelations = relations(
+  deliveryOrderUploads,
+  ({ one }) => ({
+    deliveryOrder: one(deliveryOrders, {
+      fields: [deliveryOrderUploads.deliveryOrderId],
+      references: [deliveryOrders.id],
+    }),
+    batch: one(deliveryBatches, {
+      fields: [deliveryOrderUploads.batchId],
+      references: [deliveryBatches.id],
+    }),
   }),
-  batch: one(deliveryBatches, {
-    fields: [deliveryOrderUploads.batchId],
-    references: [deliveryBatches.id],
-  }),
-}));
+);
 
-export const insertDeliveryOrderSchema = createInsertSchema(deliveryOrders).omit({
+export const insertDeliveryOrderSchema = createInsertSchema(
+  deliveryOrders,
+).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertDeliveryOrderUploadSchema = createInsertSchema(deliveryOrderUploads).omit({
+export const insertDeliveryOrderUploadSchema = createInsertSchema(
+  deliveryOrderUploads,
+).omit({
   id: true,
 });
 
 export type InsertDeliveryOrder = z.infer<typeof insertDeliveryOrderSchema>;
 export type DeliveryOrder = typeof deliveryOrders.$inferSelect;
-export type InsertDeliveryOrderUpload = z.infer<typeof insertDeliveryOrderUploadSchema>;
+export type InsertDeliveryOrderUpload = z.infer<
+  typeof insertDeliveryOrderUploadSchema
+>;
 export type DeliveryOrderUpload = typeof deliveryOrderUploads.$inferSelect;
 
 // Delivery ID counter table for atomic sequence generation
@@ -545,3 +573,117 @@ export const deliveryIdCounters = pgTable("delivery_id_counters", {
 });
 
 export type DeliveryIdCounter = typeof deliveryIdCounters.$inferSelect;
+
+// ============================================================
+// ADD TO: shared/schema.ts
+// Paste at the bottom, before the final closing of the file
+// ============================================================
+
+// ── Billing Tiers ─────────────────────────────────────────────────────────────
+export const billingTiers = pgTable("billing_tiers", {
+  id: serial("id").primaryKey(),
+  label: text("label").notNull(),
+  minMiles: real("min_miles").notNull(),
+  maxMiles: real("max_miles").notNull(),
+  fee: real("fee").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── Invoices — one per completed route ────────────────────────────────────────
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: serial("id").primaryKey(),
+    routeId: integer("route_id")
+      .references(() => routes.id, { onDelete: "cascade" })
+      .notNull(),
+    pharmacyId: integer("pharmacy_id")
+      .references(() => pharmacies.id, { onDelete: "cascade" })
+      .notNull(),
+    pharmacyName: text("pharmacy_name").notNull(),
+    driverName: text("driver_name"),
+    routeName: text("route_name").notNull(),
+    totalDeliveries: integer("total_deliveries").notNull().default(0),
+    totalFee: real("total_fee").notNull().default(0),
+    status: text("status").notNull().default("generated"), // generated | paid | void
+    completedAt: timestamp("completed_at"),
+    generatedAt: timestamp("generated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    routeIdUnique: uniqueIndex("invoices_route_id_unique").on(table.routeId),
+  }),
+);
+
+// ── Invoice Line Items — one per delivery stop ────────────────────────────────
+export const invoiceItems = pgTable("invoice_items", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id")
+    .references(() => invoices.id, { onDelete: "cascade" })
+    .notNull(),
+  stopId: integer("stop_id").references(() => routeStops.id, {
+    onDelete: "set null",
+  }),
+  deliveryId: integer("delivery_id").references(() => deliveries.id, {
+    onDelete: "set null",
+  }),
+  addressText: text("address_text"),
+  customerName: text("customer_name"),
+  distanceMiles: real("distance_miles").notNull().default(0),
+  fee: real("fee").notNull().default(0),
+  stopStatus: text("stop_status"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Relations ─────────────────────────────────────────────────────────────────
+export const invoicesRelations = relations(invoices, ({ one, many }) => ({
+  route: one(routes, {
+    fields: [invoices.routeId],
+    references: [routes.id],
+  }),
+  pharmacy: one(pharmacies, {
+    fields: [invoices.pharmacyId],
+    references: [pharmacies.id],
+  }),
+  items: many(invoiceItems),
+}));
+
+export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
+  invoice: one(invoices, {
+    fields: [invoiceItems.invoiceId],
+    references: [invoices.id],
+  }),
+  stop: one(routeStops, {
+    fields: [invoiceItems.stopId],
+    references: [routeStops.id],
+  }),
+  delivery: one(deliveries, {
+    fields: [invoiceItems.deliveryId],
+    references: [deliveries.id],
+  }),
+}));
+
+// ── Zod insert schemas ────────────────────────────────────────────────────────
+export const insertBillingTierSchema = createInsertSchema(billingTiers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+  id: true,
+  generatedAt: true,
+});
+
+export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+export type BillingTier = typeof billingTiers.$inferSelect;
+export type InsertBillingTier = z.infer<typeof insertBillingTierSchema>;
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type InvoiceItem = typeof invoiceItems.$inferSelect;
+export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;

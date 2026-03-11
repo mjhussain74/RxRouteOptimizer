@@ -1574,7 +1574,11 @@ export async function registerRoutes(
         pharmacyId,
         rxNumber,
       );
-      if (existing && existing.deliveryStatus !== 'CANCELLED' && existing.deliveryStatus !== 'DELIVERED') {
+      if (
+        existing &&
+        existing.deliveryStatus !== "CANCELLED" &&
+        existing.deliveryStatus !== "DELIVERED"
+      ) {
         return res
           .status(409)
           .json({ error: `RX ${rxNumber} already exists`, order: existing });
@@ -1796,11 +1800,25 @@ export async function registerRoutes(
             .json({ error: `No order found for RX: ${cleanBarcode}` });
         }
 
-        if (order.deliveryStatus === "CANCELLED" || order.deliveryStatus === "DELIVERED") {
+        if (
+          order.deliveryStatus === "CANCELLED" ||
+          order.deliveryStatus === "DELIVERED"
+        ) {
           const reactivated = await storage.reactivateDeliveryOrder(order.id);
-          if (reactivated && reactivated.lat && reactivated.lng && !reactivated.deliveryIdentifier) {
-            const deliveryIdentifier = await storage.getOrCreateDeliveryIdentifierForAddress(reactivated);
-            await storage.updateDeliveryOrderDeliveryIdentifier(reactivated.id, deliveryIdentifier);
+          if (
+            reactivated &&
+            reactivated.lat &&
+            reactivated.lng &&
+            !reactivated.deliveryIdentifier
+          ) {
+            const deliveryIdentifier =
+              await storage.getOrCreateDeliveryIdentifierForAddress(
+                reactivated,
+              );
+            await storage.updateDeliveryOrderDeliveryIdentifier(
+              reactivated.id,
+              deliveryIdentifier,
+            );
           }
           const finalOrder = await storage.getDeliveryOrder(order.id);
           return res.json({
@@ -2735,6 +2753,9 @@ export async function registerRoutes(
             completedAt: new Date(),
           });
           io.emit("route_completed", { routeId });
+          generateInvoiceForRoute(routeId).catch((e) =>
+            console.error("[Billing] Invoice error:", e),
+          );
           console.log(
             `✅ All stops completed - Route ${routeId} marked as complete`,
           );
@@ -2792,6 +2813,9 @@ export async function registerRoutes(
             completedAt: new Date(),
           });
           io.emit("route_completed", { routeId });
+          generateInvoiceForRoute(routeId).catch((e) =>
+            console.error("[Billing] Invoice error:", e),
+          );
           console.log(
             `✅ All stops completed - Route ${routeId} marked as complete`,
           );
@@ -2936,6 +2960,9 @@ export async function registerRoutes(
             completedAt: new Date(),
           });
           io.emit("route_completed", { routeId });
+          generateInvoiceForRoute(routeId).catch((e) =>
+            console.error("[Billing] Invoice error:", e),
+          );
           console.log(
             `✅ All stops completed - Route ${routeId} marked as complete`,
           );
@@ -3081,6 +3108,188 @@ export async function registerRoutes(
       res.status(500).json({ error: "Failed to update pharmacy" });
     }
   });
+
+  // ── Billing Tier Endpoints ────────────────────────────────────────────────
+
+  function calculateDeliveryFee(
+    distanceMiles: number,
+    tiers: Array<{ minMiles: number; maxMiles: number; fee: number }>,
+  ): number {
+    const tier = tiers.find(
+      (t) => distanceMiles >= t.minMiles && distanceMiles < t.maxMiles,
+    );
+    return tier ? tier.fee : 0;
+  }
+
+  function kmToMiles(km: number): number {
+    return km * 0.621371;
+  }
+
+  app.get("/api/billing/tiers", requireAdmin, async (req, res) => {
+    try {
+      const tiers = await storage.getBillingTiers();
+      res.json(tiers);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch billing tiers" });
+    }
+  });
+
+  app.put("/api/billing/tiers", requireAdmin, async (req, res) => {
+    try {
+      const { tiers } = req.body;
+      if (!Array.isArray(tiers) || tiers.length === 0) {
+        return res.status(400).json({ error: "Tiers array is required" });
+      }
+      for (const tier of tiers) {
+        if (typeof tier.fee !== "number" || tier.fee < 0) {
+          return res
+            .status(400)
+            .json({ error: "Each tier must have a valid fee" });
+        }
+        if (
+          typeof tier.minMiles !== "number" ||
+          typeof tier.maxMiles !== "number"
+        ) {
+          return res
+            .status(400)
+            .json({ error: "Each tier must have minMiles and maxMiles" });
+        }
+      }
+      const updated = await storage.updateBillingTiers(tiers);
+      res.json({ success: true, tiers: updated });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update billing tiers" });
+    }
+  });
+
+  app.get("/api/billing/invoices", requireAdmin, async (req, res) => {
+    try {
+      const { pharmacyId } = req.query;
+      const invoices = await storage.getInvoices(
+        pharmacyId ? parseInt(pharmacyId as string) : undefined,
+      );
+      // Attach line items to each invoice
+      const withItems = await Promise.all(
+        invoices.map((inv) => storage.getInvoiceWithItems(inv.id)),
+      );
+      res.json(withItems.filter(Boolean));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoices" });
+    }
+  });
+
+  app.get("/api/billing/invoices/pharmacy", requireStaff, async (req, res) => {
+    try {
+      const session = req.session as any;
+      const pharmacyId = session?.user?.pharmacyId;
+      if (!pharmacyId) return res.json([]);
+      const invoices = await storage.getInvoices(pharmacyId);
+      const withItems = await Promise.all(
+        invoices.map((inv) => storage.getInvoiceWithItems(inv.id)),
+      );
+      res.json(withItems.filter(Boolean));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch pharmacy invoices" });
+    }
+  });
+
+  app.post(
+    "/api/billing/invoices/generate/:routeId",
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const routeId = parseInt(req.params.routeId);
+        const invoice = await generateInvoiceForRoute(routeId);
+        res.json(invoice || { error: "Could not generate invoice" });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to generate invoice" });
+      }
+    },
+  );
+
+  async function generateInvoiceForRoute(routeId: number) {
+    // Don't duplicate
+    const existing = await storage.getInvoiceByRouteId(routeId);
+    if (existing) return existing;
+
+    const route = await storage.getRoute(routeId);
+    if (!route) return null;
+
+    // routes table has no pharmacyId — resolve via batch → pharmacy
+    const batch = route.batchId ? await storage.getBatch(route.batchId) : null;
+    const pharmacyId = batch?.pharmacyId ?? null;
+    if (!pharmacyId) {
+      console.warn(
+        `[Billing] Route ${routeId} has no pharmacy — skipping invoice`,
+      );
+      return null;
+    }
+
+    const pharmacy = await storage.getPharmacy(pharmacyId);
+    if (!pharmacy || !pharmacy.lat || !pharmacy.lng) {
+      console.warn(
+        `[Billing] Pharmacy ${pharmacyId} missing coordinates — skipping invoice`,
+      );
+      return null;
+    }
+
+    const stops = await storage.getRouteStops(routeId);
+    const driver = route.driverId
+      ? await storage.getDriver(route.driverId)
+      : null;
+    const tiers = await storage.getBillingTiers();
+
+    const lineItems: any[] = [];
+    let totalFee = 0;
+
+    for (const stop of stops) {
+      if (!stop.deliveryId) continue;
+      const delivery = await storage.getDelivery(stop.deliveryId);
+      if (!delivery || !delivery.lat || !delivery.lng) continue;
+
+      const distanceKm = calculateDistance(
+        pharmacy.lat,
+        pharmacy.lng,
+        delivery.lat,
+        delivery.lng,
+      );
+      const distanceMiles = Math.round(kmToMiles(distanceKm) * 100) / 100;
+      const fee = calculateDeliveryFee(distanceMiles, tiers);
+      totalFee += fee;
+
+      lineItems.push({
+        stopId: stop.id,
+        deliveryId: delivery.id,
+        addressText: delivery.addressText,
+        customerName: delivery.customerName,
+        distanceMiles,
+        fee,
+        stopStatus: stop.status,
+      });
+    }
+
+    const totalFeeRounded = Math.round(totalFee * 100) / 100;
+
+    const invoice = await storage.createInvoiceWithItems(
+      {
+        routeId,
+        pharmacyId,
+        pharmacyName: pharmacy.name,
+        driverName: driver?.name || null,
+        routeName: route.name || `Route #${routeId}`,
+        totalDeliveries: lineItems.length,
+        totalFee: totalFeeRounded,
+        completedAt: route.completedAt || new Date(),
+        status: "generated",
+      },
+      lineItems,
+    );
+
+    console.log(
+      `[Billing] Invoice #${invoice.id} generated for route ${routeId}: $${totalFeeRounded} (${lineItems.length} stops)`,
+    );
+    return invoice;
+  }
 
   // Delivery Zone endpoints (admin only for global view)
   app.get("/api/zones", requireAdmin, async (req, res) => {

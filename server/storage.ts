@@ -221,12 +221,27 @@ export interface IStorage {
   getDeliveryOrdersByPharmacy(pharmacyId: number): Promise<DeliveryOrder[]>;
   getDeliveryOrdersByBatch(batchId: number): Promise<DeliveryOrder[]>;
   getDeliveryOrder(id: number): Promise<DeliveryOrder | undefined>;
-  findDeliveryOrderByRx(pharmacyId: number, rxNumber: string): Promise<DeliveryOrder | undefined>;
-  upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }>;
-  updateDeliveryOrderStatus(id: number, status: string): Promise<DeliveryOrder | undefined>;
+  findDeliveryOrderByRx(
+    pharmacyId: number,
+    rxNumber: string,
+  ): Promise<DeliveryOrder | undefined>;
+  upsertDeliveryOrder(
+    data: InsertDeliveryOrder,
+    batchId: number,
+    fileName?: string,
+  ): Promise<{ order: DeliveryOrder; isNew: boolean }>;
+  updateDeliveryOrderStatus(
+    id: number,
+    status: string,
+  ): Promise<DeliveryOrder | undefined>;
   cancelDeliveryOrdersByBatch(batchId: number): Promise<void>;
-  updateDeliveryOrderDeliveryIdentifier(id: number, deliveryIdentifier: string): Promise<DeliveryOrder | undefined>;
-  getOrCreateDeliveryIdentifierForAddress(order: DeliveryOrder): Promise<string>;
+  updateDeliveryOrderDeliveryIdentifier(
+    id: number,
+    deliveryIdentifier: string,
+  ): Promise<DeliveryOrder | undefined>;
+  getOrCreateDeliveryIdentifierForAddress(
+    order: DeliveryOrder,
+  ): Promise<string>;
   getDeliveryOrderUploads(orderId: number): Promise<DeliveryOrderUpload[]>;
   getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]>;
   getAllDeliveryOrders(): Promise<DeliveryOrder[]>;
@@ -765,7 +780,7 @@ export class DatabaseStorage implements IStorage {
   async deleteDelivery(id: number): Promise<boolean> {
     // Delete associated prescriptions first (foreign key constraint)
     await db.delete(prescriptions).where(eq(prescriptions.deliveryId, id));
-    
+
     // Now delete the delivery
     const result = await db
       .delete(deliveries)
@@ -806,14 +821,16 @@ export class DatabaseStorage implements IStorage {
       .where(eq(routes.id, id))
       .returning();
 
-    if (result[0] && (data as any).status === 'complete') {
+    if (result[0] && (data as any).status === "complete") {
       await db
         .update(deliveryOrders)
-        .set({ deliveryStatus: 'DELIVERED' })
-        .where(and(
-          eq(deliveryOrders.routeId, id),
-          eq(deliveryOrders.deliveryStatus, 'ROUTED')
-        ));
+        .set({ deliveryStatus: "DELIVERED" })
+        .where(
+          and(
+            eq(deliveryOrders.routeId, id),
+            eq(deliveryOrders.deliveryStatus, "ROUTED"),
+          ),
+        );
     }
 
     return result[0];
@@ -1182,11 +1199,11 @@ export class DatabaseStorage implements IStorage {
         and(
           inArray(routeStops.deliveryId, deliveryIds),
           drizzleSql`${routes.status} != 'cancelled'`,
-          drizzleSql`${routeStops.status} NOT IN ('cancelled', 'completed')`
-        )
+          drizzleSql`${routeStops.status} NOT IN ('cancelled', 'completed')`,
+        ),
       );
     return result
-      .map(r => r.deliveryId)
+      .map((r) => r.deliveryId)
       .filter((id): id is number => id !== null);
   }
 
@@ -1200,7 +1217,7 @@ export class DatabaseStorage implements IStorage {
 
     const stops = await this.getRouteStops(routeId);
     for (const stop of stops) {
-      if (stop.status !== 'completed' && stop.status !== 'cancelled') {
+      if (stop.status !== "completed" && stop.status !== "cancelled") {
         await db
           .update(routeStops)
           .set({ status: "cancelled" })
@@ -1216,11 +1233,13 @@ export class DatabaseStorage implements IStorage {
 
     await db
       .update(deliveryOrders)
-      .set({ deliveryStatus: 'CANCELLED' })
-      .where(and(
-        eq(deliveryOrders.routeId, routeId),
-        notInArray(deliveryOrders.deliveryStatus, ['DELIVERED', 'CANCELLED'])
-      ));
+      .set({ deliveryStatus: "CANCELLED" })
+      .where(
+        and(
+          eq(deliveryOrders.routeId, routeId),
+          notInArray(deliveryOrders.deliveryStatus, ["DELIVERED", "CANCELLED"]),
+        ),
+      );
 
     return updatedRoute[0];
   }
@@ -1305,21 +1324,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Delivery Orders implementation
-  async getDeliveryOrdersByPharmacy(pharmacyId: number): Promise<DeliveryOrder[]> {
+  async getDeliveryOrdersByPharmacy(
+    pharmacyId: number,
+  ): Promise<DeliveryOrder[]> {
     return db
       .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
-      .where(and(
-        eq(deliveryOrders.pharmacyId, pharmacyId),
-        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED']),
-        or(
-          isNull(deliveryOrders.batchId),
-          notInArray(deliveryBatches.status, ['cancelled', 'complete'])
-        )
-      ))
+      .where(
+        and(
+          eq(deliveryOrders.pharmacyId, pharmacyId),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED"]),
+          or(
+            isNull(deliveryOrders.batchId),
+            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
+          ),
+        ),
+      )
       .orderBy(desc(deliveryOrders.lastSeenAt))
-      .then(rows => rows.map(r => r.deliveryOrder));
+      .then((rows) => rows.map((r) => r.deliveryOrder));
   }
 
   async getDeliveryOrdersByBatch(batchId: number): Promise<DeliveryOrder[]> {
@@ -1327,17 +1350,19 @@ export class DatabaseStorage implements IStorage {
       .select({ deliveryOrderId: deliveryOrderUploads.deliveryOrderId })
       .from(deliveryOrderUploads)
       .where(eq(deliveryOrderUploads.batchId, batchId));
-    
+
     if (uploads.length === 0) return [];
-    
-    const orderIds = uploads.map(u => u.deliveryOrderId);
+
+    const orderIds = uploads.map((u) => u.deliveryOrderId);
     return db
       .select()
       .from(deliveryOrders)
-      .where(and(
-        inArray(deliveryOrders.id, orderIds),
-        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED'])
-      ))
+      .where(
+        and(
+          inArray(deliveryOrders.id, orderIds),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED"]),
+        ),
+      )
       .orderBy(desc(deliveryOrders.lastSeenAt));
   }
 
@@ -1349,12 +1374,14 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async reactivateDeliveryOrder(id: number): Promise<DeliveryOrder | undefined> {
+  async reactivateDeliveryOrder(
+    id: number,
+  ): Promise<DeliveryOrder | undefined> {
     const result = await db
       .update(deliveryOrders)
-      .set({ 
-        deliveryStatus: 'ROUTE_ELIGIBLE', 
-        routeId: null, 
+      .set({
+        deliveryStatus: "ROUTE_ELIGIBLE",
+        routeId: null,
         batchId: null,
         scannedAt: new Date(),
         lastSeenAt: new Date(),
@@ -1364,38 +1391,53 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async findDeliveryOrderByRx(pharmacyId: number, rxNumber: string): Promise<DeliveryOrder | undefined> {
+  async findDeliveryOrderByRx(
+    pharmacyId: number,
+    rxNumber: string,
+  ): Promise<DeliveryOrder | undefined> {
     const result = await db
       .select()
       .from(deliveryOrders)
-      .where(and(
-        eq(deliveryOrders.pharmacyId, pharmacyId),
-        eq(deliveryOrders.rxNumber, rxNumber)
-      ));
+      .where(
+        and(
+          eq(deliveryOrders.pharmacyId, pharmacyId),
+          eq(deliveryOrders.rxNumber, rxNumber),
+        ),
+      );
     return result[0];
   }
 
-  async upsertDeliveryOrder(data: InsertDeliveryOrder, batchId: number | null, fileName?: string): Promise<{ order: DeliveryOrder; isNew: boolean }> {
-    const existing = await this.findDeliveryOrderByRx(data.pharmacyId, data.rxNumber);
-    
+  async upsertDeliveryOrder(
+    data: InsertDeliveryOrder,
+    batchId: number | null,
+    fileName?: string,
+  ): Promise<{ order: DeliveryOrder; isNew: boolean }> {
+    const existing = await this.findDeliveryOrderByRx(
+      data.pharmacyId,
+      data.rxNumber,
+    );
+
     if (existing) {
-      const isReactivating = existing.deliveryStatus === 'CANCELLED' || existing.deliveryStatus === 'DELIVERED';
+      const isReactivating =
+        existing.deliveryStatus === "CANCELLED" ||
+        existing.deliveryStatus === "DELIVERED";
       const updateFields: any = {
-          lastSeenAt: new Date(),
-          uploadCount: (existing.uploadCount || 1) + 1,
-          addressText: data.addressText || existing.addressText,
-          streetAddress: data.streetAddress || existing.streetAddress,
-          city: data.city || existing.city,
-          state: data.state || existing.state,
-          zipCode: data.zipCode || existing.zipCode,
-          normalizedAddressHash: data.normalizedAddressHash || existing.normalizedAddressHash,
-          lat: data.lat ?? existing.lat,
-          lng: data.lng ?? existing.lng,
-          customerName: data.customerName || existing.customerName,
-          customerPhone: data.customerPhone || existing.customerPhone,
-          notes: data.notes || existing.notes,
-          fillDate: data.fillDate || existing.fillDate,
-          batchId: batchId || existing.batchId,
+        lastSeenAt: new Date(),
+        uploadCount: (existing.uploadCount || 1) + 1,
+        addressText: data.addressText || existing.addressText,
+        streetAddress: data.streetAddress || existing.streetAddress,
+        city: data.city || existing.city,
+        state: data.state || existing.state,
+        zipCode: data.zipCode || existing.zipCode,
+        normalizedAddressHash:
+          data.normalizedAddressHash || existing.normalizedAddressHash,
+        lat: data.lat ?? existing.lat,
+        lng: data.lng ?? existing.lng,
+        customerName: data.customerName || existing.customerName,
+        customerPhone: data.customerPhone || existing.customerPhone,
+        notes: data.notes || existing.notes,
+        fillDate: data.fillDate || existing.fillDate,
+        batchId: batchId || existing.batchId,
       };
       if (isReactivating && data.deliveryStatus) {
         updateFields.deliveryStatus = data.deliveryStatus;
@@ -1406,7 +1448,7 @@ export class DatabaseStorage implements IStorage {
         .set(updateFields)
         .where(eq(deliveryOrders.id, existing.id))
         .returning();
-      
+
       if (batchId) {
         await db.insert(deliveryOrderUploads).values({
           deliveryOrderId: existing.id,
@@ -1415,7 +1457,7 @@ export class DatabaseStorage implements IStorage {
           seenAt: new Date(),
         });
       }
-      
+
       return { order: updated[0], isNew: false };
     } else {
       const created = await db
@@ -1427,7 +1469,7 @@ export class DatabaseStorage implements IStorage {
           uploadCount: 1,
         })
         .returning();
-      
+
       if (batchId) {
         await db.insert(deliveryOrderUploads).values({
           deliveryOrderId: created[0].id,
@@ -1436,25 +1478,32 @@ export class DatabaseStorage implements IStorage {
           seenAt: new Date(),
         });
       }
-      
+
       return { order: created[0], isNew: true };
     }
   }
 
-  async updateDeliveryOrderStatus(id: number, status: string): Promise<DeliveryOrder | undefined> {
-    if (status === 'ROUTE_ELIGIBLE') {
+  async updateDeliveryOrderStatus(
+    id: number,
+    status: string,
+  ): Promise<DeliveryOrder | undefined> {
+    if (status === "ROUTE_ELIGIBLE") {
       const order = await this.getDeliveryOrder(id);
       if (!order) return undefined;
 
-      if (order.deliveryStatus === 'CANCELLED') {
-        console.log(`⚠️ Refusing to set ROUTE_ELIGIBLE on cancelled order ${id}`);
+      if (order.deliveryStatus === "CANCELLED") {
+        console.log(
+          `⚠️ Refusing to set ROUTE_ELIGIBLE on cancelled order ${id}`,
+        );
         return undefined;
       }
 
       if (order.batchId) {
         const batch = await this.getBatch(order.batchId);
-        if (batch && batch.status === 'cancelled') {
-          console.log(`⚠️ Refusing to set ROUTE_ELIGIBLE on order ${id} — batch ${order.batchId} is cancelled`);
+        if (batch && batch.status === "cancelled") {
+          console.log(
+            `⚠️ Refusing to set ROUTE_ELIGIBLE on order ${id} — batch ${order.batchId} is cancelled`,
+          );
           return undefined;
         }
       }
@@ -1464,7 +1513,8 @@ export class DatabaseStorage implements IStorage {
         scannedAt: new Date(),
       };
       if (!order.deliveryIdentifier) {
-        updates.deliveryIdentifier = await this.getOrCreateDeliveryIdentifierForAddress(order);
+        updates.deliveryIdentifier =
+          await this.getOrCreateDeliveryIdentifierForAddress(order);
       }
       const result = await db
         .update(deliveryOrders)
@@ -1485,11 +1535,13 @@ export class DatabaseStorage implements IStorage {
   async cancelDeliveryOrdersByBatch(batchId: number): Promise<void> {
     await db
       .update(deliveryOrders)
-      .set({ deliveryStatus: 'CANCELLED' })
-      .where(and(
-        eq(deliveryOrders.batchId, batchId),
-        notInArray(deliveryOrders.deliveryStatus, ['DELIVERED', 'CANCELLED'])
-      ));
+      .set({ deliveryStatus: "CANCELLED" })
+      .where(
+        and(
+          eq(deliveryOrders.batchId, batchId),
+          notInArray(deliveryOrders.deliveryStatus, ["DELIVERED", "CANCELLED"]),
+        ),
+      );
 
     const uploads = await db
       .select({ deliveryOrderId: deliveryOrderUploads.deliveryOrderId })
@@ -1497,18 +1549,26 @@ export class DatabaseStorage implements IStorage {
       .where(eq(deliveryOrderUploads.batchId, batchId));
 
     if (uploads.length > 0) {
-      const orderIds = uploads.map(u => u.deliveryOrderId);
+      const orderIds = uploads.map((u) => u.deliveryOrderId);
       await db
         .update(deliveryOrders)
-        .set({ deliveryStatus: 'CANCELLED' })
-        .where(and(
-          inArray(deliveryOrders.id, orderIds),
-          notInArray(deliveryOrders.deliveryStatus, ['DELIVERED', 'CANCELLED', 'ROUTED'])
-        ));
+        .set({ deliveryStatus: "CANCELLED" })
+        .where(
+          and(
+            inArray(deliveryOrders.id, orderIds),
+            notInArray(deliveryOrders.deliveryStatus, [
+              "DELIVERED",
+              "CANCELLED",
+              "ROUTED",
+            ]),
+          ),
+        );
     }
   }
 
-  async getOrCreateDeliveryIdentifierForAddress(order: DeliveryOrder): Promise<string> {
+  async getOrCreateDeliveryIdentifierForAddress(
+    order: DeliveryOrder,
+  ): Promise<string> {
     if (order.normalizedAddressHash) {
       const existing = await db
         .select()
@@ -1516,10 +1576,17 @@ export class DatabaseStorage implements IStorage {
         .where(
           and(
             eq(deliveryOrders.pharmacyId, order.pharmacyId),
-            eq(deliveryOrders.normalizedAddressHash, order.normalizedAddressHash),
+            eq(
+              deliveryOrders.normalizedAddressHash,
+              order.normalizedAddressHash,
+            ),
             isNotNull(deliveryOrders.deliveryIdentifier),
-            inArray(deliveryOrders.deliveryStatus, ['ROUTE_ELIGIBLE', 'ROUTED', 'DELIVERED'])
-          )
+            inArray(deliveryOrders.deliveryStatus, [
+              "ROUTE_ELIGIBLE",
+              "ROUTED",
+              "DELIVERED",
+            ]),
+          ),
         )
         .limit(1);
       if (existing.length > 0 && existing[0].deliveryIdentifier) {
@@ -1529,7 +1596,10 @@ export class DatabaseStorage implements IStorage {
     return this.generateUniqueDeliveryIdentifier();
   }
 
-  async updateDeliveryOrderDeliveryIdentifier(id: number, deliveryIdentifier: string): Promise<DeliveryOrder | undefined> {
+  async updateDeliveryOrderDeliveryIdentifier(
+    id: number,
+    deliveryIdentifier: string,
+  ): Promise<DeliveryOrder | undefined> {
     const result = await db
       .update(deliveryOrders)
       .set({ deliveryIdentifier })
@@ -1538,7 +1608,10 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async updateDeliveryOrderRoute(id: number, routeId: number): Promise<DeliveryOrder | undefined> {
+  async updateDeliveryOrderRoute(
+    id: number,
+    routeId: number,
+  ): Promise<DeliveryOrder | undefined> {
     const result = await db
       .update(deliveryOrders)
       .set({ routeId })
@@ -1547,7 +1620,9 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getDeliveryOrderUploads(orderId: number): Promise<DeliveryOrderUpload[]> {
+  async getDeliveryOrderUploads(
+    orderId: number,
+  ): Promise<DeliveryOrderUpload[]> {
     return db
       .select()
       .from(deliveryOrderUploads)
@@ -1560,16 +1635,18 @@ export class DatabaseStorage implements IStorage {
       .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
-      .where(and(
-        eq(deliveryOrders.pharmacyId, pharmacyId),
-        eq(deliveryOrders.deliveryStatus, 'ROUTE_ELIGIBLE'),
-        or(
-          isNull(deliveryOrders.batchId),
-          notInArray(deliveryBatches.status, ['cancelled', 'complete'])
-        )
-      ))
+      .where(
+        and(
+          eq(deliveryOrders.pharmacyId, pharmacyId),
+          eq(deliveryOrders.deliveryStatus, "ROUTE_ELIGIBLE"),
+          or(
+            isNull(deliveryOrders.batchId),
+            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
+          ),
+        ),
+      )
       .orderBy(desc(deliveryOrders.lastSeenAt))
-      .then(rows => rows.map(r => r.deliveryOrder));
+      .then((rows) => rows.map((r) => r.deliveryOrder));
   }
 
   async getAllDeliveryOrders(): Promise<DeliveryOrder[]> {
@@ -1577,15 +1654,17 @@ export class DatabaseStorage implements IStorage {
       .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
-      .where(and(
-        notInArray(deliveryOrders.deliveryStatus, ['CANCELLED', 'DELIVERED']),
-        or(
-          isNull(deliveryOrders.batchId),
-          notInArray(deliveryBatches.status, ['cancelled', 'complete'])
-        )
-      ))
+      .where(
+        and(
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED"]),
+          or(
+            isNull(deliveryOrders.batchId),
+            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
+          ),
+        ),
+      )
       .orderBy(desc(deliveryOrders.lastSeenAt))
-      .then(rows => rows.map(r => r.deliveryOrder));
+      .then((rows) => rows.map((r) => r.deliveryOrder));
   }
 
   async deleteRouteStop(stopId: number): Promise<boolean> {
@@ -1605,13 +1684,109 @@ export class DatabaseStorage implements IStorage {
 
   async resequenceRouteStops(routeId: number): Promise<void> {
     const stops = await this.getRouteStops(routeId);
-    const activeStops = stops.filter(s => s.status !== 'cancelled');
+    const activeStops = stops.filter((s) => s.status !== "cancelled");
     for (let i = 0; i < activeStops.length; i++) {
       await db
         .update(routeStops)
         .set({ sequence: i + 1 })
         .where(eq(routeStops.id, activeStops[i].id));
     }
+  }
+  
+  // ============================================================
+  // ADD TO: server/storage.ts
+  // ============================================================
+  // These methods use the same patterns as the rest of storage.ts.
+  // Make sure these are imported at the top of storage.ts:
+  //
+  //   import { billingTiers, invoices, invoiceItems,
+  //            InsertBillingTier, InsertInvoice, InsertInvoiceItem
+  //          } from "../shared/schema";
+  //
+  // The db instance, eq, desc, and asc should already be imported.
+  // ============================================================
+
+  // ── Billing Tiers ─────────────────────────────────────────────────────────────
+
+  async getBillingTiers() {
+    return db.select().from(billingTiers).orderBy(billingTiers.minMiles);
+  }
+
+  async updateBillingTiers(tiers: InsertBillingTier[]) {
+    return db.transaction(async (tx) => {
+      await tx.delete(billingTiers);
+      if (tiers.length > 0) {
+        await tx.insert(billingTiers).values(tiers);
+      }
+      return tx.select().from(billingTiers).orderBy(billingTiers.minMiles);
+    });
+  }
+
+  // ── Invoices ──────────────────────────────────────────────────────────────────
+
+  async getInvoices(pharmacyId?: number) {
+    if (pharmacyId) {
+      return db
+        .select()
+        .from(invoices)
+        .where(eq(invoices.pharmacyId, pharmacyId))
+        .orderBy(desc(invoices.generatedAt));
+    }
+    return db.select().from(invoices).orderBy(desc(invoices.generatedAt));
+  }
+
+  async getInvoiceByRouteId(routeId: number) {
+    const rows = await db
+      .select()
+      .from(invoices)
+      .where(eq(invoices.routeId, routeId))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async getInvoiceWithItems(invoiceId: number) {
+    const rows = await db
+      .select()
+      .from(invoices)
+      .where(eq(invoices.id, invoiceId))
+      .limit(1);
+    if (!rows[0]) return null;
+    const items = await db
+      .select()
+      .from(invoiceItems)
+      .where(eq(invoiceItems.invoiceId, invoiceId));
+    return { ...rows[0], lineItems: items };
+  }
+
+  async createInvoiceWithItems(
+    invoiceData: InsertInvoice,
+    items: Omit<InsertInvoiceItem, "invoiceId">[],
+  ) {
+    return db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .insert(invoices)
+        .values(invoiceData)
+        .returning();
+      if (items.length > 0) {
+        await tx
+          .insert(invoiceItems)
+          .values(items.map((item) => ({ ...item, invoiceId: invoice.id })));
+      }
+      const lineItems = await tx
+        .select()
+        .from(invoiceItems)
+        .where(eq(invoiceItems.invoiceId, invoice.id));
+      return { ...invoice, lineItems };
+    });
+  }
+
+  async updateInvoiceStatus(invoiceId: number, status: string) {
+    const [updated] = await db
+      .update(invoices)
+      .set({ status })
+      .where(eq(invoices.id, invoiceId))
+      .returning();
+    return updated ?? null;
   }
 }
 
