@@ -1334,7 +1334,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(deliveryOrders.pharmacyId, pharmacyId),
-          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED"]),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
           or(
             isNull(deliveryOrders.batchId),
             notInArray(deliveryBatches.status, ["cancelled", "complete"]),
@@ -1360,7 +1360,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           inArray(deliveryOrders.id, orderIds),
-          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED"]),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
         ),
       )
       .orderBy(desc(deliveryOrders.lastSeenAt));
@@ -1656,7 +1656,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
       .where(
         and(
-          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED"]),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
           or(
             isNull(deliveryOrders.batchId),
             notInArray(deliveryBatches.status, ["cancelled", "complete"]),
