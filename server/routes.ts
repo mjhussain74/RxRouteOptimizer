@@ -3215,9 +3215,29 @@ export async function registerRoutes(
     const route = await storage.getRoute(routeId);
     if (!route) return null;
 
-    // routes table has no pharmacyId — resolve via batch → pharmacy
-    const batch = route.batchId ? await storage.getBatch(route.batchId) : null;
-    const pharmacyId = batch?.pharmacyId ?? null;
+    let pharmacyId = null;
+    if (route.batchId) {
+      const batch = await storage.getBatch(route.batchId);
+      pharmacyId = batch?.pharmacyId ?? null;
+    }
+    if (!pharmacyId) {
+      const stops = await storage.getRouteStops(routeId);
+      for (const stop of stops) {
+        if (stop.deliveryId) {
+          const delivery = await storage.getDelivery(stop.deliveryId);
+          if (delivery?.pharmacyId) {
+            pharmacyId = delivery.pharmacyId;
+            break;
+          }
+        }
+      }
+    }
+    if (!pharmacyId) {
+      const deliveryOrdersForRoute = await storage.getDeliveryOrdersByRoute(routeId);
+      if (deliveryOrdersForRoute.length > 0) {
+        pharmacyId = deliveryOrdersForRoute[0].pharmacyId;
+      }
+    }
     if (!pharmacyId) {
       console.warn(
         `[Billing] Route ${routeId} has no pharmacy — skipping invoice`,

@@ -31,6 +31,9 @@ import {
   deliveryIdCounters,
   deliveryOrders,
   deliveryOrderUploads,
+  billingTiers,
+  invoices,
+  invoiceItems,
   type User,
   type InsertUser,
   type Driver,
@@ -60,6 +63,9 @@ import {
   type InsertDeliveryOrder,
   type DeliveryOrderUpload,
   type InsertDeliveryOrderUpload,
+  type InsertBillingTier,
+  type InsertInvoice,
+  type InsertInvoiceItem,
 } from "@shared/schema";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -1366,6 +1372,13 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(deliveryOrders.lastSeenAt));
   }
 
+  async getDeliveryOrdersByRoute(routeId: number): Promise<DeliveryOrder[]> {
+    return db
+      .select()
+      .from(deliveryOrders)
+      .where(eq(deliveryOrders.routeId, routeId));
+  }
+
   async getDeliveryOrder(id: number): Promise<DeliveryOrder | undefined> {
     const result = await db
       .select()
@@ -1696,14 +1709,6 @@ export class DatabaseStorage implements IStorage {
   // ============================================================
   // ADD TO: server/storage.ts
   // ============================================================
-  // These methods use the same patterns as the rest of storage.ts.
-  // Make sure these are imported at the top of storage.ts:
-  //
-  //   import { billingTiers, invoices, invoiceItems,
-  //            InsertBillingTier, InsertInvoice, InsertInvoiceItem
-  //          } from "../shared/schema";
-  //
-  // The db instance, eq, desc, and asc should already be imported.
   // ============================================================
 
   // ── Billing Tiers ─────────────────────────────────────────────────────────────
