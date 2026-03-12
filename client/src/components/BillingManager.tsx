@@ -9,11 +9,11 @@ import {
   Save,
   RefreshCw,
   Building2,
+  Zap,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
-import { Label } from "./ui/label";
 
 interface BillingTier {
   id: number;
@@ -54,6 +54,8 @@ export default function BillingManager() {
   const [expandedInvoice, setExpandedInvoice] = useState<number | null>(null);
   const [filterPharmacyId, setFilterPharmacyId] = useState<string>("");
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showFeeConfig, setShowFeeConfig] = useState(false);
+  const [generateAllMsg, setGenerateAllMsg] = useState<string | null>(null);
 
   const { data: tiers = [], isLoading: tiersLoading } = useQuery<BillingTier[]>({
     queryKey: ["/api/billing/tiers"],
@@ -94,6 +96,22 @@ export default function BillingManager() {
     },
   });
 
+  const generateAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/billing/invoices/generate-all", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to generate invoices");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      setGenerateAllMsg(`Generated ${data.generated} invoice(s), ${data.skipped} already existed or were skipped.`);
+      setTimeout(() => setGenerateAllMsg(null), 6000);
+    },
+  });
+
   const activeTiers = editedTiers || tiers;
 
   const updateTierFee = (id: number, fee: number) => {
@@ -106,10 +124,38 @@ export default function BillingManager() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Billing</h2>
-        <p className="text-slate-400">Configure delivery fees and view pharmacy invoices</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Billing</h2>
+          <p className="text-slate-400">View pharmacy invoices and configure delivery fees</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowFeeConfig(!showFeeConfig)}
+            className="border-slate-600 text-slate-300 hover:bg-slate-700"
+          >
+            <Settings className="h-4 w-4 mr-1" />
+            Delivery Fee Configuration
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => generateAllMutation.mutate()}
+            disabled={generateAllMutation.isPending}
+            className="bg-teal-600 hover:bg-teal-700 text-white"
+          >
+            <Zap className="h-4 w-4 mr-1" />
+            {generateAllMutation.isPending ? "Generating..." : "Generate Missing Invoices"}
+          </Button>
+        </div>
       </div>
+
+      {generateAllMsg && (
+        <div className="bg-teal-900/40 border border-teal-700 rounded-lg px-4 py-3 text-teal-300 text-sm">
+          {generateAllMsg}
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -148,74 +194,78 @@ export default function BillingManager() {
         </Card>
       </div>
 
-      {/* Billing Tier Config */}
-      <Card className="bg-slate-800/50 border-slate-700">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-white flex items-center gap-2">
-              <Settings className="h-5 w-5 text-teal-400" />
-              Delivery Fee Tiers
-            </CardTitle>
-            <div className="flex gap-2">
-              {editedTiers && (
+      {/* Delivery Fee Config — hidden by default */}
+      {showFeeConfig && (
+        <Card className="bg-slate-800/50 border-slate-700">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-white flex items-center gap-2">
+                <Settings className="h-5 w-5 text-teal-400" />
+                Delivery Fee Tiers
+              </CardTitle>
+              <div className="flex gap-2">
+                {editedTiers && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditedTiers(null)}
+                    className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                  >
+                    Cancel
+                  </Button>
+                )}
                 <Button
-                  variant="outline"
                   size="sm"
-                  onClick={() => setEditedTiers(null)}
-                  className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                  onClick={() => saveTiersMutation.mutate(activeTiers)}
+                  disabled={!editedTiers || saveTiersMutation.isPending}
+                  className="bg-teal-600 hover:bg-teal-700 text-white"
                 >
-                  Cancel
+                  <Save className="h-4 w-4 mr-1" />
+                  {saveTiersMutation.isPending ? "Saving..." : saveSuccess ? "Saved!" : "Save Changes"}
                 </Button>
-              )}
-              <Button
-                size="sm"
-                onClick={() => saveTiersMutation.mutate(activeTiers)}
-                disabled={!editedTiers || saveTiersMutation.isPending}
-                className="bg-teal-600 hover:bg-teal-700 text-white"
-              >
-                <Save className="h-4 w-4 mr-1" />
-                {saveTiersMutation.isPending ? "Saving..." : saveSuccess ? "Saved!" : "Save Changes"}
-              </Button>
+              </div>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {tiersLoading ? (
-            <p className="text-slate-400">Loading tiers...</p>
-          ) : (
-            <div className="space-y-3">
-              {activeTiers.map((tier) => (
-                <div
-                  key={tier.id}
-                  className="flex items-center gap-4 bg-slate-700/40 rounded-lg p-4 border border-slate-600/50"
-                >
-                  <div className="flex-1">
-                    <p className="text-white font-medium">{tier.label}</p>
-                    <p className="text-slate-400 text-sm">
-                      {tier.minMiles} – {tier.maxMiles} miles radius
-                    </p>
+          </CardHeader>
+          <CardContent>
+            {tiersLoading ? (
+              <p className="text-slate-400">Loading tiers...</p>
+            ) : (
+              <div className="space-y-3">
+                {activeTiers.map((tier) => (
+                  <div
+                    key={tier.id}
+                    className="flex items-center gap-4 bg-slate-700/40 rounded-lg p-4 border border-slate-600/50"
+                  >
+                    <div className="flex-1">
+                      <p className="text-white font-medium">{tier.label}</p>
+                      <p className="text-slate-400 text-sm">
+                        {tier.minMiles} – {tier.maxMiles} miles radius
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 text-sm">$</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={tier.fee}
+                        onChange={(e) => updateTierFee(tier.id, parseFloat(e.target.value) || 0)}
+                        className="w-24 bg-slate-900/50 border-slate-600 text-white text-right"
+                      />
+                      <span className="text-slate-400 text-sm">per delivery</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 text-sm">$</span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={tier.fee}
-                      onChange={(e) => updateTierFee(tier.id, parseFloat(e.target.value) || 0)}
-                      className="w-24 bg-slate-900/50 border-slate-600 text-white text-right"
-                    />
-                    <span className="text-slate-400 text-sm">per delivery</span>
-                  </div>
-                </div>
-              ))}
-              <p className="text-slate-500 text-xs mt-2">
-                Deliveries beyond {activeTiers[activeTiers.length - 1]?.maxMiles} miles are not charged.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+                {activeTiers.length > 0 && (
+                  <p className="text-slate-500 text-xs mt-2">
+                    Deliveries beyond {activeTiers[activeTiers.length - 1]?.maxMiles} miles are not charged.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Invoices */}
       <Card className="bg-slate-800/50 border-slate-700">
@@ -254,13 +304,15 @@ export default function BillingManager() {
             <div className="text-center py-10">
               <FileText className="h-10 w-10 text-slate-600 mx-auto mb-3" />
               <p className="text-slate-400">No invoices yet.</p>
-              <p className="text-slate-500 text-sm mt-1">Invoices are generated automatically when a route is completed.</p>
+              <p className="text-slate-500 text-sm mt-1">
+                Invoices are generated automatically when a route is completed.
+                Use "Generate Missing Invoices" to backfill past completed routes.
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
               {invoices.map((invoice) => (
                 <div key={invoice.id} className="bg-slate-700/30 rounded-lg border border-slate-600/50 overflow-hidden">
-                  {/* Invoice Header */}
                   <button
                     className="w-full flex items-center justify-between p-4 hover:bg-slate-700/40 transition-colors text-left"
                     onClick={() => setExpandedInvoice(expandedInvoice === invoice.id ? null : invoice.id)}
@@ -291,7 +343,6 @@ export default function BillingManager() {
                     </div>
                   </button>
 
-                  {/* Invoice Line Items */}
                   {expandedInvoice === invoice.id && (
                     <div className="border-t border-slate-600/50">
                       <div className="overflow-x-auto">

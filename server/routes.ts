@@ -3207,6 +3207,26 @@ export async function registerRoutes(
     },
   );
 
+  app.post("/api/billing/invoices/generate-all", requireAdmin, async (req, res) => {
+    try {
+      const allRoutes = await storage.getRoutes();
+      const completedRoutes = allRoutes.filter((r: any) => r.status === "complete");
+      const results: any[] = [];
+      for (const route of completedRoutes) {
+        try {
+          const invoice = await generateInvoiceForRoute(route.id);
+          if (invoice) results.push({ routeId: route.id, invoiceId: invoice.id, status: "generated" });
+          else results.push({ routeId: route.id, status: "skipped" });
+        } catch (e: any) {
+          results.push({ routeId: route.id, status: "error", message: e.message });
+        }
+      }
+      res.json({ generated: results.filter(r => r.status === "generated").length, skipped: results.filter(r => r.status === "skipped").length, results });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to generate invoices" });
+    }
+  });
+
   async function generateInvoiceForRoute(routeId: number) {
     // Don't duplicate
     const existing = await storage.getInvoiceByRouteId(routeId);
@@ -3246,11 +3266,17 @@ export async function registerRoutes(
     }
 
     const pharmacy = await storage.getPharmacy(pharmacyId);
-    if (!pharmacy || !pharmacy.lat || !pharmacy.lng) {
-      console.warn(
-        `[Billing] Pharmacy ${pharmacyId} missing coordinates — skipping invoice`,
-      );
-      return null;
+    let originLat = pharmacy?.lat;
+    let originLng = pharmacy?.lng;
+    if (!originLat || !originLng) {
+      if (route.startLat && route.startLng) {
+        originLat = route.startLat;
+        originLng = route.startLng;
+        console.log(`[Billing] Pharmacy ${pharmacyId} has no coords — using route start point as origin`);
+      } else {
+        console.warn(`[Billing] Route ${routeId} has no pharmacy coords or route start — skipping invoice`);
+        return null;
+      }
     }
 
     const stops = await storage.getRouteStops(routeId);
@@ -3268,8 +3294,8 @@ export async function registerRoutes(
       if (!delivery || !delivery.lat || !delivery.lng) continue;
 
       const distanceKm = calculateDistance(
-        pharmacy.lat,
-        pharmacy.lng,
+        originLat!,
+        originLng!,
         delivery.lat,
         delivery.lng,
       );
@@ -3294,7 +3320,7 @@ export async function registerRoutes(
       {
         routeId,
         pharmacyId,
-        pharmacyName: pharmacy.name,
+        pharmacyName: pharmacy?.name || `Pharmacy #${pharmacyId}`,
         driverName: driver?.name || null,
         routeName: route.name || `Route #${routeId}`,
         totalDeliveries: lineItems.length,
