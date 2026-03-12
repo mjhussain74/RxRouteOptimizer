@@ -1767,22 +1767,20 @@ export class DatabaseStorage implements IStorage {
     invoiceData: InsertInvoice,
     items: Omit<InsertInvoiceItem, "invoiceId">[],
   ) {
-    return db.transaction(async (tx) => {
-      const [invoice] = await tx
-        .insert(invoices)
-        .values(invoiceData)
-        .returning();
-      if (items.length > 0) {
-        await tx
-          .insert(invoiceItems)
-          .values(items.map((item) => ({ ...item, invoiceId: invoice.id })));
-      }
-      const lineItems = await tx
-        .select()
-        .from(invoiceItems)
-        .where(eq(invoiceItems.invoiceId, invoice.id));
-      return { ...invoice, lineItems };
-    });
+    const [invoice] = await db
+      .insert(invoices)
+      .values(invoiceData)
+      .returning();
+    if (items.length > 0) {
+      await db
+        .insert(invoiceItems)
+        .values(items.map((item) => ({ ...item, invoiceId: invoice.id })));
+    }
+    const lineItems = await db
+      .select()
+      .from(invoiceItems)
+      .where(eq(invoiceItems.invoiceId, invoice.id));
+    return { ...invoice, lineItems };
   }
 
   async updateInvoiceStatus(invoiceId: number, status: string) {
