@@ -328,173 +328,175 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
       y += 26;
       doc.setTextColor(0, 0, 0);
 
-      // One page per completed stop with proof
-      for (const stop of routeReportData.stops) {
+      const footerH = 12;
+      const usableBottom = pageH - footerH;
+
+      const addPageWithHeader = () => {
         doc.addPage();
-        drawHeader(
-          routeReportData.route.name,
-          `Stop ${stop.sequence} of ${routeReportData.summary.totalStops}`
-        );
+        drawHeader(routeReportData.route.name, `Generated ${now.toLocaleDateString()}`);
+        return 28;
+      };
 
-        let sy = 30;
-
-        // Stop header
-        const isComplete = stop.status === "complete" || stop.status === "completed";
-        doc.setFillColor(isComplete ? 220 : 254, isComplete ? 252 : 243, isComplete ? 231 : 199);
-        doc.rect(margin, sy, contentW, 7, "F");
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(isComplete ? 22 : 146, isComplete ? 101 : 64, isComplete ? 52 : 14);
-        doc.text(`STOP ${stop.sequence} — ${stop.status.toUpperCase()}`, margin + 3, sy + 5);
-        doc.setTextColor(0, 0, 0);
-        doc.setFont("helvetica", "normal");
-        sy += 12;
-
-        // Delivery info
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "bold");
-        doc.text(stop.delivery?.deliveryIdentifier || `Stop-${stop.id}`, margin, sy);
-        sy += 6;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(60, 60, 60);
-        const addrLines = doc.splitTextToSize(stop.delivery?.addressText || "N/A", contentW);
-        doc.text(addrLines, margin, sy);
-        sy += addrLines.length * 5 + 3;
-
-        // Two-col info
-        const leftCol = margin;
-        const rightCol = margin + contentW / 2;
-        doc.setTextColor(100, 100, 100);
-        doc.setFontSize(8);
-        doc.text("CUSTOMER", leftCol, sy);
-        doc.text("PHONE", rightCol, sy);
-        sy += 4;
-        doc.setFontSize(9);
-        doc.setTextColor(0, 0, 0);
-        doc.text(stop.delivery?.customerName || "N/A", leftCol, sy);
-        doc.text(stop.delivery?.customerPhone || "N/A", rightCol, sy);
-        sy += 8;
-
-        // Rx numbers
-        if (stop.prescriptions.length > 0) {
-          doc.setTextColor(100, 100, 100);
-          doc.setFontSize(8);
-          doc.text("PRESCRIPTIONS (RX)", leftCol, sy);
-          sy += 4;
-          doc.setFontSize(9);
-          doc.setTextColor(0, 0, 0);
-          const rxText = stop.prescriptions.map(p => `${p.rxNumber}${p.verified ? " ✓" : ""}`).join("   ");
-          const rxLines = doc.splitTextToSize(rxText, contentW);
-          doc.text(rxLines, leftCol, sy);
-          sy += rxLines.length * 5 + 4;
-        }
-
-        // Completion time
-        if (stop.proof?.timestamp) {
-          doc.setTextColor(100, 100, 100);
-          doc.setFontSize(8);
-          doc.text("COMPLETED AT", leftCol, sy);
-          sy += 4;
-          doc.setFontSize(9);
-          doc.setTextColor(0, 0, 0);
-          doc.text(new Date(stop.proof.timestamp).toLocaleString(), leftCol, sy);
-          sy += 8;
-        }
-
-        // Notes
-        if (stop.proof?.notes) {
-          doc.setTextColor(100, 100, 100);
-          doc.setFontSize(8);
-          doc.text("NOTES", leftCol, sy);
-          sy += 4;
-          doc.setFontSize(9);
-          doc.setTextColor(0, 0, 0);
-          const noteLines = doc.splitTextToSize(stop.proof.notes, contentW);
-          doc.text(noteLines, leftCol, sy);
-          sy += noteLines.length * 5 + 4;
-        }
-
-        drawDivider(sy);
-        sy += 8;
-
-        if (!stop.proof || (!stop.proof.hasSignature && !stop.proof.hasPhoto)) {
-          doc.setFontSize(9);
-          doc.setTextColor(150, 150, 150);
-          doc.text("No proof of delivery captured for this stop.", margin, sy);
-        } else {
-          // Signature
-          if (stop.proof.hasSignature && stop.proof.signatureData) {
-            doc.setFontSize(8);
-            doc.setTextColor(100, 100, 100);
-            doc.text("SIGNATURE", margin, sy);
-            sy += 5;
-            const sigBase64 = await fetchImageAsBase64(stop.proof.signatureData);
-            if (sigBase64) {
-              const sigW = Math.min(contentW * 0.6, 100);
-              const sigH = 35;
-              doc.setDrawColor(200, 200, 200);
-              doc.rect(margin, sy, sigW, sigH);
-              try {
-                doc.addImage(sigBase64, "PNG", margin + 1, sy + 1, sigW - 2, sigH - 2);
-              } catch {
-                doc.setFontSize(8);
-                doc.setTextColor(150, 150, 150);
-                doc.text("(Signature image unavailable)", margin + 4, sy + sigH / 2);
-              }
-              sy += sigH + 8;
-            } else {
-              doc.setFontSize(8);
-              doc.setTextColor(150, 150, 150);
-              doc.text("(Signature could not be loaded)", margin, sy);
-              sy += 8;
-            }
-          }
-
-          // Photo
-          if (stop.proof.hasPhoto && stop.proof.photoData) {
-            if (sy + 70 > pageH - 20) { doc.addPage(); sy = 20; }
-            doc.setFontSize(8);
-            doc.setTextColor(100, 100, 100);
-            doc.text("DELIVERY PHOTO", margin, sy);
-            sy += 5;
-            const photoBase64 = await fetchImageAsBase64(stop.proof.photoData);
-            if (photoBase64) {
-              const photoW = Math.min(contentW * 0.7, 120);
-              const photoH = 65;
-              doc.setDrawColor(200, 200, 200);
-              doc.rect(margin, sy, photoW, photoH);
-              try {
-                doc.addImage(photoBase64, "JPEG", margin + 1, sy + 1, photoW - 2, photoH - 2);
-              } catch {
-                try {
-                  doc.addImage(photoBase64, "PNG", margin + 1, sy + 1, photoW - 2, photoH - 2);
-                } catch {
-                  doc.setFontSize(8);
-                  doc.setTextColor(150, 150, 150);
-                  doc.text("(Photo image unavailable)", margin + 4, sy + photoH / 2);
-                }
-              }
-              sy += photoH + 8;
-            } else {
-              doc.setFontSize(8);
-              doc.setTextColor(150, 150, 150);
-              doc.text("(Photo could not be loaded)", margin, sy);
-              sy += 8;
-            }
-          }
-        }
-
-        // Footer
+      const drawPageFooter = () => {
         doc.setFontSize(7);
         doc.setTextColor(150, 150, 150);
         doc.text(
-          `${routeReportData.route.name}  ·  Stop ${stop.sequence}  ·  Page ${doc.getNumberOfPages()}`,
-          pageW / 2,
-          pageH - 8,
-          { align: "center" }
+          `${routeReportData.route.name}  ·  ${routeReportData.driver?.name || "Unassigned"}  ·  Page ${doc.getNumberOfPages()}`,
+          pageW / 2, pageH - 5, { align: "center" }
         );
+        doc.setTextColor(0, 0, 0);
+      };
+
+      // Continue on cover page after summary
+      // Stops flow continuously, page breaks inserted as needed
+      for (const stop of routeReportData.stops) {
+        // Pre-fetch images so we know layout before drawing
+        let sigBase64: string | null = null;
+        let photoBase64: string | null = null;
+        if (stop.proof?.hasSignature && stop.proof.signatureData) {
+          sigBase64 = await fetchImageAsBase64(stop.proof.signatureData);
+        }
+        if (stop.proof?.hasPhoto && stop.proof.photoData) {
+          photoBase64 = await fetchImageAsBase64(stop.proof.photoData);
+        }
+
+        const sigH = 25;
+        const photoH = 45;
+        const hasProofImages = !!(sigBase64 || photoBase64);
+
+        // Estimate minimum block height for this stop
+        const addrText = stop.delivery?.addressText || "N/A";
+        const addrLines = doc.splitTextToSize(addrText, contentW);
+        const rxText = stop.prescriptions.map(p => `${p.rxNumber}${p.verified ? " ✓" : ""}`).join("  ");
+        const rxLines = stop.prescriptions.length > 0 ? doc.splitTextToSize(rxText, contentW) : [];
+        let estimatedH = 9 + addrLines.length * 4.5 + 12 + (rxLines.length > 0 ? rxLines.length * 4.5 + 6 : 0) + 6;
+        if (sigBase64) estimatedH += sigH + 8;
+        if (photoBase64) estimatedH += photoH + 8;
+        if (!hasProofImages) estimatedH += 6;
+
+        // Break to new page if not enough room
+        if (y + estimatedH > usableBottom - 5) {
+          drawPageFooter();
+          y = addPageWithHeader();
+        }
+
+        // Stop header bar
+        const isComplete = stop.status === "complete" || stop.status === "completed";
+        doc.setFillColor(isComplete ? 220 : 254, isComplete ? 252 : 243, isComplete ? 231 : 199);
+        doc.rect(margin, y, contentW, 6, "F");
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(isComplete ? 22 : 146, isComplete ? 101 : 64, isComplete ? 52 : 14);
+        const stopLabel = `#${stop.sequence}  ${stop.delivery?.deliveryIdentifier || `Stop-${stop.id}`}  —  ${stop.status.toUpperCase()}`;
+        doc.text(stopLabel, margin + 3, y + 4.5);
+        if (stop.proof?.timestamp) {
+          const ts = new Date(stop.proof.timestamp).toLocaleString();
+          doc.setFont("helvetica", "normal");
+          doc.text(ts, pageW - margin - 3, y + 4.5, { align: "right" });
+        }
+        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "normal");
+        y += 8;
+
+        // Address
+        doc.setFontSize(8.5);
+        doc.setTextColor(40, 40, 40);
+        doc.text(addrLines, margin, y);
+        y += addrLines.length * 4.5 + 2;
+
+        // Customer | Phone | Rx on one line
+        doc.setFontSize(7.5);
+        doc.setTextColor(80, 80, 80);
+        const custLine = [
+          stop.delivery?.customerName || "N/A",
+          stop.delivery?.customerPhone || "",
+        ].filter(Boolean).join("  ·  ");
+        doc.text(custLine, margin, y);
+        y += 4.5;
+
+        if (rxLines.length > 0) {
+          doc.setTextColor(60, 60, 120);
+          doc.text(`Rx: ${rxLines.join(" ")}`, margin, y);
+          y += 4.5 * rxLines.length + 1;
+        }
+
+        if (stop.proof?.notes) {
+          doc.setTextColor(100, 60, 0);
+          const noteLines = doc.splitTextToSize(`Note: ${stop.proof.notes}`, contentW);
+          doc.text(noteLines, margin, y);
+          y += noteLines.length * 4.5 + 1;
+        }
+
+        doc.setTextColor(0, 0, 0);
+        y += 2;
+
+        // Images side by side if both present, otherwise single
+        if (sigBase64 || photoBase64) {
+          const bothImages = sigBase64 && photoBase64;
+          const imgAreaW = bothImages ? (contentW - 4) / 2 : Math.min(contentW * 0.55, 95);
+
+          if (sigBase64) {
+            const sigX = margin;
+            doc.setFontSize(7);
+            doc.setTextColor(100, 100, 100);
+            doc.text("SIGNATURE", sigX, y);
+            y += 3.5;
+            doc.setDrawColor(200, 200, 200);
+            doc.setFillColor(248, 250, 252);
+            doc.rect(sigX, y, imgAreaW, sigH, "FD");
+            try {
+              doc.addImage(sigBase64, "PNG", sigX + 1, y + 1, imgAreaW - 2, sigH - 2);
+            } catch {
+              doc.setFontSize(7);
+              doc.setTextColor(150, 150, 150);
+              doc.text("(unavailable)", sigX + 4, y + sigH / 2);
+            }
+            if (!photoBase64) y += sigH + 4;
+          }
+
+          if (photoBase64) {
+            const photoX = bothImages ? margin + imgAreaW + 4 : margin;
+            const photoY = bothImages ? y - (sigBase64 ? sigH + 4 + 3.5 : 0) : y;
+            if (!bothImages) {
+              doc.setFontSize(7);
+              doc.setTextColor(100, 100, 100);
+              doc.text("DELIVERY PHOTO", photoX, photoY);
+            } else {
+              doc.setFontSize(7);
+              doc.setTextColor(100, 100, 100);
+              doc.text("DELIVERY PHOTO", photoX, photoY);
+            }
+            const imgY = photoY + 3.5;
+            doc.setDrawColor(200, 200, 200);
+            doc.setFillColor(248, 250, 252);
+            doc.rect(photoX, imgY, imgAreaW, photoH, "FD");
+            try {
+              doc.addImage(photoBase64, "JPEG", photoX + 1, imgY + 1, imgAreaW - 2, photoH - 2);
+            } catch {
+              try {
+                doc.addImage(photoBase64, "PNG", photoX + 1, imgY + 1, imgAreaW - 2, photoH - 2);
+              } catch {
+                doc.setFontSize(7);
+                doc.setTextColor(150, 150, 150);
+                doc.text("(unavailable)", photoX + 4, imgY + photoH / 2);
+              }
+            }
+            if (bothImages) {
+              y += Math.max(sigH, photoH) + 4;
+            } else {
+              y += photoH + 4;
+            }
+          }
+        }
+
+        // Thin separator between stops
+        doc.setDrawColor(220, 220, 220);
+        doc.line(margin, y, pageW - margin, y);
+        y += 5;
       }
+
+      // Draw footer on last page
+      drawPageFooter();
 
       doc.save(`proof-of-delivery-${routeReportData.route.name}-${now.toISOString().split("T")[0]}.pdf`);
       return;
