@@ -148,6 +148,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>("open");
   const [reportType, setReportType] = useState<"orders" | "routes" | "route-details" | "deliveries" | "prescriptions">("orders");
   const [proofDialog, setProofDialog] = useState<{ open: boolean; type: 'signature' | 'photo'; data: string | null }>({ open: false, type: 'signature', data: null });
+  const [pdfGenerating, setPdfGenerating] = useState(false);
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -218,148 +219,359 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const totalDeliveries = filteredBatches.reduce((acc: number, b: any) => acc + (b.totalDeliveries || 0), 0);
   const totalPrescriptions = selectedBatchData?.prescriptions?.length || 0;
 
-  const generatePDFReport = () => {
+  const fetchImageAsBase64 = async (src: string): Promise<string | null> => {
+    try {
+      if (src.startsWith("data:")) return src;
+      const res = await fetch(src, { credentials: "include" });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const generatePDFReport = async () => {
+    setPdfGenerating(true);
+    try {
+      await _generatePDFReport();
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
+  const _generatePDFReport = async () => {
     const doc = new jsPDF();
     const now = new Date();
-    
-    doc.setFontSize(20);
-    doc.text("Delivery Report", 20, 20);
-    
-    doc.setFontSize(10);
-    doc.text(`Generated: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`, 20, 30);
-    
-    if (dateFrom || dateTo) {
-      doc.text(`Date Range: ${dateFrom || "Start"} to ${dateTo || "Present"}`, 20, 36);
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    const contentW = pageW - margin * 2;
+
+    const drawHeader = (title: string, subtitle?: string) => {
+      doc.setFillColor(30, 41, 59);
+      doc.rect(0, 0, pageW, 22, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text(title, margin, 14);
+      if (subtitle) {
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.text(subtitle, pageW - margin, 14, { align: "right" });
+      }
+      doc.setTextColor(0, 0, 0);
+    };
+
+    const drawDivider = (y: number) => {
+      doc.setDrawColor(200, 200, 200);
+      doc.line(margin, y, pageW - margin, y);
+    };
+
+    if (reportType === "route-details" && routeReportData) {
+      // Cover page
+      drawHeader(
+        `Proof of Delivery Report`,
+        `Generated ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`
+      );
+
+      let y = 35;
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text(routeReportData.route.name, margin, y);
+      y += 8;
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Driver: ${routeReportData.driver?.name || "Unassigned"}`, margin, y);
+      y += 6;
+      doc.text(`Status: ${routeReportData.route.status.toUpperCase()}`, margin, y);
+      y += 6;
+      if (routeReportData.route.completedAt) {
+        doc.text(`Completed: ${new Date(routeReportData.route.completedAt).toLocaleString()}`, margin, y);
+        y += 6;
+      }
+      doc.setTextColor(0, 0, 0);
+
+      y += 4;
+      drawDivider(y);
+      y += 8;
+
+      // Summary grid
+      const cols = 4;
+      const colW = contentW / cols;
+      const summaryItems = [
+        { label: "Total Stops", value: String(routeReportData.summary.totalStops) },
+        { label: "Completed", value: String(routeReportData.summary.completedStops) },
+        { label: "Proof Collected", value: `${routeReportData.summary.stopsWithProof}/${routeReportData.summary.totalStops}` },
+        { label: "Rx Verified", value: `${routeReportData.summary.verifiedPrescriptions}/${routeReportData.summary.totalPrescriptions}` },
+      ];
+      summaryItems.forEach((item, i) => {
+        const x = margin + i * colW;
+        doc.setFillColor(241, 245, 249);
+        doc.roundedRect(x, y, colW - 4, 18, 2, 2, "F");
+        doc.setFontSize(7);
+        doc.setTextColor(100, 100, 100);
+        doc.text(item.label.toUpperCase(), x + 4, y + 6);
+        doc.setFontSize(13);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(30, 41, 59);
+        doc.text(item.value, x + 4, y + 14);
+        doc.setFont("helvetica", "normal");
+      });
+      y += 26;
+      doc.setTextColor(0, 0, 0);
+
+      // One page per completed stop with proof
+      for (const stop of routeReportData.stops) {
+        doc.addPage();
+        drawHeader(
+          routeReportData.route.name,
+          `Stop ${stop.sequence} of ${routeReportData.summary.totalStops}`
+        );
+
+        let sy = 30;
+
+        // Stop header
+        const isComplete = stop.status === "complete" || stop.status === "completed";
+        doc.setFillColor(isComplete ? 220 : 254, isComplete ? 252 : 243, isComplete ? 231 : 199);
+        doc.rect(margin, sy, contentW, 7, "F");
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(isComplete ? 22 : 146, isComplete ? 101 : 64, isComplete ? 52 : 14);
+        doc.text(`STOP ${stop.sequence} — ${stop.status.toUpperCase()}`, margin + 3, sy + 5);
+        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "normal");
+        sy += 12;
+
+        // Delivery info
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text(stop.delivery?.deliveryIdentifier || `Stop-${stop.id}`, margin, sy);
+        sy += 6;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(60, 60, 60);
+        const addrLines = doc.splitTextToSize(stop.delivery?.addressText || "N/A", contentW);
+        doc.text(addrLines, margin, sy);
+        sy += addrLines.length * 5 + 3;
+
+        // Two-col info
+        const leftCol = margin;
+        const rightCol = margin + contentW / 2;
+        doc.setTextColor(100, 100, 100);
+        doc.setFontSize(8);
+        doc.text("CUSTOMER", leftCol, sy);
+        doc.text("PHONE", rightCol, sy);
+        sy += 4;
+        doc.setFontSize(9);
+        doc.setTextColor(0, 0, 0);
+        doc.text(stop.delivery?.customerName || "N/A", leftCol, sy);
+        doc.text(stop.delivery?.customerPhone || "N/A", rightCol, sy);
+        sy += 8;
+
+        // Rx numbers
+        if (stop.prescriptions.length > 0) {
+          doc.setTextColor(100, 100, 100);
+          doc.setFontSize(8);
+          doc.text("PRESCRIPTIONS (RX)", leftCol, sy);
+          sy += 4;
+          doc.setFontSize(9);
+          doc.setTextColor(0, 0, 0);
+          const rxText = stop.prescriptions.map(p => `${p.rxNumber}${p.verified ? " ✓" : ""}`).join("   ");
+          const rxLines = doc.splitTextToSize(rxText, contentW);
+          doc.text(rxLines, leftCol, sy);
+          sy += rxLines.length * 5 + 4;
+        }
+
+        // Completion time
+        if (stop.proof?.timestamp) {
+          doc.setTextColor(100, 100, 100);
+          doc.setFontSize(8);
+          doc.text("COMPLETED AT", leftCol, sy);
+          sy += 4;
+          doc.setFontSize(9);
+          doc.setTextColor(0, 0, 0);
+          doc.text(new Date(stop.proof.timestamp).toLocaleString(), leftCol, sy);
+          sy += 8;
+        }
+
+        // Notes
+        if (stop.proof?.notes) {
+          doc.setTextColor(100, 100, 100);
+          doc.setFontSize(8);
+          doc.text("NOTES", leftCol, sy);
+          sy += 4;
+          doc.setFontSize(9);
+          doc.setTextColor(0, 0, 0);
+          const noteLines = doc.splitTextToSize(stop.proof.notes, contentW);
+          doc.text(noteLines, leftCol, sy);
+          sy += noteLines.length * 5 + 4;
+        }
+
+        drawDivider(sy);
+        sy += 8;
+
+        if (!stop.proof || (!stop.proof.hasSignature && !stop.proof.hasPhoto)) {
+          doc.setFontSize(9);
+          doc.setTextColor(150, 150, 150);
+          doc.text("No proof of delivery captured for this stop.", margin, sy);
+        } else {
+          // Signature
+          if (stop.proof.hasSignature && stop.proof.signatureData) {
+            doc.setFontSize(8);
+            doc.setTextColor(100, 100, 100);
+            doc.text("SIGNATURE", margin, sy);
+            sy += 5;
+            const sigBase64 = await fetchImageAsBase64(stop.proof.signatureData);
+            if (sigBase64) {
+              const sigW = Math.min(contentW * 0.6, 100);
+              const sigH = 35;
+              doc.setDrawColor(200, 200, 200);
+              doc.rect(margin, sy, sigW, sigH);
+              try {
+                doc.addImage(sigBase64, "PNG", margin + 1, sy + 1, sigW - 2, sigH - 2);
+              } catch {
+                doc.setFontSize(8);
+                doc.setTextColor(150, 150, 150);
+                doc.text("(Signature image unavailable)", margin + 4, sy + sigH / 2);
+              }
+              sy += sigH + 8;
+            } else {
+              doc.setFontSize(8);
+              doc.setTextColor(150, 150, 150);
+              doc.text("(Signature could not be loaded)", margin, sy);
+              sy += 8;
+            }
+          }
+
+          // Photo
+          if (stop.proof.hasPhoto && stop.proof.photoData) {
+            if (sy + 70 > pageH - 20) { doc.addPage(); sy = 20; }
+            doc.setFontSize(8);
+            doc.setTextColor(100, 100, 100);
+            doc.text("DELIVERY PHOTO", margin, sy);
+            sy += 5;
+            const photoBase64 = await fetchImageAsBase64(stop.proof.photoData);
+            if (photoBase64) {
+              const photoW = Math.min(contentW * 0.7, 120);
+              const photoH = 65;
+              doc.setDrawColor(200, 200, 200);
+              doc.rect(margin, sy, photoW, photoH);
+              try {
+                doc.addImage(photoBase64, "JPEG", margin + 1, sy + 1, photoW - 2, photoH - 2);
+              } catch {
+                try {
+                  doc.addImage(photoBase64, "PNG", margin + 1, sy + 1, photoW - 2, photoH - 2);
+                } catch {
+                  doc.setFontSize(8);
+                  doc.setTextColor(150, 150, 150);
+                  doc.text("(Photo image unavailable)", margin + 4, sy + photoH / 2);
+                }
+              }
+              sy += photoH + 8;
+            } else {
+              doc.setFontSize(8);
+              doc.setTextColor(150, 150, 150);
+              doc.text("(Photo could not be loaded)", margin, sy);
+              sy += 8;
+            }
+          }
+        }
+
+        // Footer
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text(
+          `${routeReportData.route.name}  ·  Stop ${stop.sequence}  ·  Page ${doc.getNumberOfPages()}`,
+          pageW / 2,
+          pageH - 8,
+          { align: "center" }
+        );
+      }
+
+      doc.save(`proof-of-delivery-${routeReportData.route.name}-${now.toISOString().split("T")[0]}.pdf`);
+      return;
     }
-    
+
+    // Non-route-details modes
+    drawHeader("Delivery Report", `Generated ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`);
+    let y = 35;
+
+    if (dateFrom || dateTo) {
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Date Range: ${dateFrom || "Start"} — ${dateTo || "Present"}`, margin, y);
+      y += 8;
+      doc.setTextColor(0, 0, 0);
+    }
+
     doc.setFontSize(14);
-    doc.text("Summary", 20, 50);
-    
-    doc.setFontSize(11);
-    let y = 60;
-    doc.text(`Total Batches: ${filteredBatches.length}`, 20, y);
+    doc.setFont("helvetica", "bold");
+    doc.text("Summary", margin, y);
     y += 8;
-    doc.text(`Total Deliveries: ${totalDeliveries}`, 20, y);
-    y += 8;
-    doc.text(`Completed Routes: ${completedRoutes.length}`, 20, y);
-    y += 8;
-    doc.text(`Active Routes: ${activeRoutes.length}`, 20, y);
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Total Batches: ${filteredBatches.length}`, margin, y); y += 7;
+    doc.text(`Total Deliveries: ${totalDeliveries}`, margin, y); y += 7;
+    doc.text(`Completed Routes: ${completedRoutes.length}`, margin, y); y += 7;
+    doc.text(`Active Routes: ${activeRoutes.length}`, margin, y); y += 7;
 
     if (reportType === "routes") {
-      y += 20;
-      doc.setFontSize(14);
-      doc.text("Route Details", 20, y);
-      y += 10;
-      
+      y += 8;
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text("Route Details", margin, y);
+      y += 8;
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      filteredRoutes.slice(0, 15).forEach((route: any, index: number) => {
-        if (y > 270) {
-          doc.addPage();
-          y = 20;
-        }
+      filteredRoutes.forEach((route: any, index: number) => {
+        if (y > 270) { doc.addPage(); y = 20; }
         const driverName = getDriverName(route.driverId);
         const status = route.completedAt ? "Completed" : route.status;
-        doc.text(
-          `${index + 1}. ${route.name} - Driver: ${driverName} - Status: ${status}`,
-          20,
-          y
-        );
+        doc.text(`${index + 1}. ${route.name}  ·  ${driverName}  ·  ${status}`, margin, y);
         y += 6;
       });
-    } else if (reportType === "route-details" && routeReportData) {
-      y += 20;
-      doc.setFontSize(14);
-      doc.text(`Route: ${routeReportData.route.name}`, 20, y);
-      y += 8;
-      doc.setFontSize(10);
-      doc.text(`Driver: ${routeReportData.driver?.name || "Unassigned"}`, 20, y);
-      y += 6;
-      doc.text(`Status: ${routeReportData.route.status}`, 20, y);
-      y += 6;
-      doc.text(`Completed: ${routeReportData.summary.completedStops}/${routeReportData.summary.totalStops} stops`, 20, y);
-      y += 6;
-      doc.text(`Proof Collected: ${routeReportData.summary.stopsWithProof}/${routeReportData.summary.totalStops}`, 20, y);
-      y += 6;
-      doc.text(`Rx Verified: ${routeReportData.summary.verifiedPrescriptions}/${routeReportData.summary.totalPrescriptions}`, 20, y);
-      y += 15;
-      
-      doc.setFontSize(12);
-      doc.text("Stop Details", 20, y);
-      y += 10;
-      
-      doc.setFontSize(8);
-      routeReportData.stops.forEach((stop, index: number) => {
-        if (y > 260) {
-          doc.addPage();
-          y = 20;
-        }
-        const rxList = stop.prescriptions.map(p => `${p.rxNumber}${p.verified ? ' [V]' : ''}`).join(", ");
-        const proofStatus = stop.proof ? `Sig:${stop.proof.hasSignature ? 'Y' : 'N'} Photo:${stop.proof.hasPhoto ? 'Y' : 'N'}` : "No Proof";
-        
-        doc.text(`${index + 1}. ${stop.delivery?.deliveryIdentifier || `Stop-${stop.id}`} - ${stop.status.toUpperCase()}`, 20, y);
-        y += 5;
-        doc.text(`   Address: ${stop.delivery?.addressText || "N/A"}`, 20, y);
-        y += 5;
-        doc.text(`   Customer: ${stop.delivery?.customerName || "N/A"} | ${proofStatus}`, 20, y);
-        y += 5;
-        if (rxList) {
-          doc.text(`   Rx: ${rxList}`, 20, y);
-          y += 5;
-        }
-        if (stop.proof?.timestamp) {
-          doc.text(`   Completed: ${new Date(stop.proof.timestamp).toLocaleString()}`, 20, y);
-          y += 5;
-        }
-        y += 3;
-      });
     } else if (reportType === "deliveries" && selectedBatchData) {
-      y += 20;
-      doc.setFontSize(14);
-      doc.text(`Delivery Details - ${selectedBatchData.batch.name}`, 20, y);
-      y += 10;
-      
+      y += 8;
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Batch: ${selectedBatchData.batch.name}`, margin, y);
+      y += 8;
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       selectedBatchData.deliveries.forEach((delivery, index: number) => {
-        if (y > 260) {
-          doc.addPage();
-          y = 20;
-        }
+        if (y > 260) { doc.addPage(); y = 20; }
         const rxCount = delivery.prescriptions?.length || 0;
-        doc.text(`${index + 1}. ${delivery.deliveryIdentifier || `DEL${delivery.id}`}`, 20, y);
-        y += 5;
-        doc.text(`   Address: ${delivery.addressText}`, 20, y);
-        y += 5;
-        doc.text(`   Customer: ${delivery.customerName || "N/A"} | Status: ${delivery.status} | Rx Count: ${rxCount}`, 20, y);
-        y += 5;
-        if (rxCount > 0) {
-          const rxNumbers = delivery.prescriptions.map(p => p.rxNumber).join(", ");
-          doc.text(`   Rx Numbers: ${rxNumbers}`, 20, y);
-          y += 5;
-        }
-        y += 3;
+        doc.text(`${index + 1}. ${delivery.deliveryIdentifier || `DEL${delivery.id}`}  ·  ${delivery.addressText}`, margin, y); y += 5;
+        doc.text(`   ${delivery.customerName || "N/A"}  ·  ${delivery.status}  ·  ${rxCount} Rx`, margin, y); y += 7;
       });
     } else if (reportType === "prescriptions" && selectedBatchData) {
-      y += 20;
-      doc.setFontSize(14);
-      doc.text(`Prescription Details - ${selectedBatchData.batch.name}`, 20, y);
-      y += 10;
-      
+      y += 8;
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Prescriptions: ${selectedBatchData.batch.name}`, margin, y);
+      y += 8;
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       selectedBatchData.prescriptions.forEach((prescription, index: number) => {
-        if (y > 270) {
-          doc.addPage();
-          y = 20;
-        }
+        if (y > 270) { doc.addPage(); y = 20; }
         const delivery = selectedBatchData.deliveries.find(d => d.id === prescription.deliveryId);
         doc.text(
-          `${index + 1}. Rx: ${prescription.rxNumber} | Patient: ${prescription.patientName || "N/A"} | Delivery: ${delivery?.deliveryIdentifier || `DEL${prescription.deliveryId}`}`,
-          20,
-          y
+          `${index + 1}. Rx: ${prescription.rxNumber}  ·  ${prescription.patientName || "N/A"}  ·  ${delivery?.deliveryIdentifier || `DEL${prescription.deliveryId}`}`,
+          margin, y
         );
         y += 6;
       });
     }
-    
+
     doc.save(`${reportType}-report-${now.toISOString().split("T")[0]}.pdf`);
   };
 
@@ -493,10 +705,11 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
           </Button>
           <Button
             onClick={generatePDFReport}
+            disabled={pdfGenerating}
             className="bg-blue-600 hover:bg-blue-700"
           >
             <FileText className="h-4 w-4 mr-2" />
-            Export PDF
+            {pdfGenerating ? "Generating PDF..." : "Export PDF"}
           </Button>
         </div>
       </div>
