@@ -60,6 +60,7 @@ export default function BillingManager({
   const [filterPharmacyId, setFilterPharmacyId] = useState<string>("");
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [generateAllMsg, setGenerateAllMsg] = useState<string | null>(null);
+  const [showFeeConfig, setShowFeeConfig] = useState(false);
 
   const { data: tiers = [], isLoading: tiersLoading } = useQuery<BillingTier[]>(
     {
@@ -149,12 +150,25 @@ export default function BillingManager({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Billing</h2>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Billing</h2>
           <p className="text-slate-400">
             {isPharmacyView ? "View invoices for your deliveries" : "Configure delivery fees and view pharmacy invoices"}
           </p>
         </div>
+        {!isPharmacyView && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowFeeConfig(!showFeeConfig)}
+            className="border-slate-600 text-slate-300 hover:bg-slate-700"
+          >
+            <Settings className="h-4 w-4 mr-1" />
+            {showFeeConfig ? "Hide Fee Config" : "Delivery Fee Configuration"}
+          </Button>
+        )}
+      </div>
       {/* commented out as part of billing and reporting updates by claude
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -232,8 +246,8 @@ export default function BillingManager({
         </Card>
       </div>
 
-      {/* Delivery Fee Config — hidden by default */}
-      {!isPharmacyView && (
+      {/* Delivery Fee Config — hidden by default, shown when button clicked */}
+      {!isPharmacyView && showFeeConfig && (
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
