@@ -277,6 +277,22 @@ export interface IStorage {
     targetDeliveryId: number,
     sourceDeliveryIds: number[],
   ): Promise<Delivery | undefined>;
+
+  // Billing methods
+  getBillingTiers(): Promise<any[]>;
+  updateBillingTiers(tiers: InsertBillingTier[]): Promise<any[]>;
+  getInvoices(pharmacyId?: number): Promise<any[]>;
+  getInvoiceByRouteId(routeId: number): Promise<any | null>;
+  getInvoiceByPharmacyAndRoute(
+    pharmacyId: number,
+    routeId: number,
+  ): Promise<any | null>;
+  getInvoiceWithItems(invoiceId: number): Promise<any | null>;
+  createInvoiceWithItems(
+    invoiceData: InsertInvoice,
+    items: Omit<InsertInvoiceItem, "invoiceId">[],
+  ): Promise<any>;
+  updateInvoiceStatus(invoiceId: number, status: string): Promise<any | null>;
 }
 
 export type SafeUser = Omit<User, "password">;
@@ -1340,7 +1356,11 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(deliveryOrders.pharmacyId, pharmacyId),
-          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
+          notInArray(deliveryOrders.deliveryStatus, [
+            "CANCELLED",
+            "DELIVERED",
+            "ROUTED",
+          ]),
           or(
             isNull(deliveryOrders.batchId),
             notInArray(deliveryBatches.status, ["cancelled", "complete"]),
@@ -1366,7 +1386,11 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           inArray(deliveryOrders.id, orderIds),
-          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
+          notInArray(deliveryOrders.deliveryStatus, [
+            "CANCELLED",
+            "DELIVERED",
+            "ROUTED",
+          ]),
         ),
       )
       .orderBy(desc(deliveryOrders.lastSeenAt));
@@ -1669,7 +1693,11 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
       .where(
         and(
-          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
+          notInArray(deliveryOrders.deliveryStatus, [
+            "CANCELLED",
+            "DELIVERED",
+            "ROUTED",
+          ]),
           or(
             isNull(deliveryOrders.batchId),
             notInArray(deliveryBatches.status, ["cancelled", "complete"]),
@@ -1705,7 +1733,7 @@ export class DatabaseStorage implements IStorage {
         .where(eq(routeStops.id, activeStops[i].id));
     }
   }
-  
+
   // ============================================================
   // ADD TO: server/storage.ts
   // ============================================================
@@ -1749,6 +1777,17 @@ export class DatabaseStorage implements IStorage {
     return rows[0] ?? null;
   }
 
+  async getInvoiceByPharmacyAndRoute(pharmacyId: number, routeId: number) {
+    const rows = await db
+      .select()
+      .from(invoices)
+      .where(
+        and(eq(invoices.pharmacyId, pharmacyId), eq(invoices.routeId, routeId)),
+      )
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
   async getInvoiceWithItems(invoiceId: number) {
     const rows = await db
       .select()
@@ -1767,10 +1806,7 @@ export class DatabaseStorage implements IStorage {
     invoiceData: InsertInvoice,
     items: Omit<InsertInvoiceItem, "invoiceId">[],
   ) {
-    const [invoice] = await db
-      .insert(invoices)
-      .values(invoiceData)
-      .returning();
+    const [invoice] = await db.insert(invoices).values(invoiceData).returning();
     if (items.length > 0) {
       await db
         .insert(invoiceItems)

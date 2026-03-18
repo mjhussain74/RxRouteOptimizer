@@ -1,6 +1,16 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Upload, MapPin, Route, Users, Map, FileText, LogOut, Shield } from "lucide-react";
+import {
+  Upload,
+  MapPin,
+  Route,
+  Users,
+  Map,
+  FileText,
+  LogOut,
+  Shield,
+  DollarSign,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import RouteOptimizer from "./RouteOptimizer";
 import RouteMap from "./RouteMap";
@@ -8,6 +18,7 @@ import DriverManager from "./DriverManager";
 import OrderManagement from "./OrderManagement";
 import ZoneManager from "./ZoneManager";
 import ReportGenerator from "./ReportGenerator";
+import BillingManager from "./BillingManager";
 
 interface PharmacyAdminDashboardProps {
   onOpenDriverView: (driverId: number) => void;
@@ -16,9 +27,21 @@ interface PharmacyAdminDashboardProps {
   pharmacyName?: string;
 }
 
-type TabType = "orders" | "optimize" | "routes" | "zones" | "drivers" | "reports";
+type TabType =
+  | "orders"
+  | "optimize"
+  | "routes"
+  | "zones"
+  | "drivers"
+  | "reports"
+  | "billing";
 
-export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pharmacyId, pharmacyName }: PharmacyAdminDashboardProps) {
+export default function PharmacyAdminDashboard({
+  onOpenDriverView,
+  onLogout,
+  pharmacyId,
+  pharmacyName,
+}: PharmacyAdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("orders");
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
@@ -42,6 +65,7 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
     { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
     { id: "drivers" as TabType, label: "Drivers", icon: Users },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
+    { id: "billing" as TabType, label: "Billing", icon: DollarSign },
   ];
 
   return (
@@ -60,7 +84,7 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
                 <p className="text-xs text-slate-400">Pharmacy Admin</p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <div className="text-sm font-medium text-white">
@@ -138,9 +162,7 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
           />
         )}
 
-        {activeTab === "zones" && (
-          <ZoneManager drivers={drivers as any[]} />
-        )}
+        {activeTab === "zones" && <ZoneManager drivers={drivers as any[]} />}
 
         {activeTab === "drivers" && (
           <DriverManager
@@ -149,8 +171,9 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
           />
         )}
 
-        {activeTab === "reports" && (
-          <ReportGenerator isAdmin={false} />
+        {activeTab === "reports" && <ReportGenerator isAdmin={false} />}
+        {activeTab === "billing" && (
+          <BillingManager isPharmacyView={true} />
         )}
       </main>
     </div>

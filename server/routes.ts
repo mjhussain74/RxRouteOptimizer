@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
+import nodemailer from "nodemailer";
 import Papa from "papaparse";
 import { storage } from "./storage";
 import {
@@ -2358,6 +2359,7 @@ export async function registerRoutes(
             await storage.generateUniqueDeliveryIdentifier();
           const delivery = await storage.createDelivery({
             batchId: firstOrder.batchId,
+            pharmacyId: firstOrder.pharmacyId || null, // ← ADDED for Billing and Reporting
             deliveryIdentifier,
             addressText: firstOrder.addressText,
             streetAddress: firstOrder.streetAddress || null,
@@ -2753,7 +2755,7 @@ export async function registerRoutes(
             completedAt: new Date(),
           });
           io.emit("route_completed", { routeId });
-          generateInvoiceForRoute(routeId).catch((e) =>
+          generateInvoicesForRoute(routeId).catch((e) =>
             console.error("[Billing] Invoice error:", e),
           );
           console.log(
@@ -2813,7 +2815,7 @@ export async function registerRoutes(
             completedAt: new Date(),
           });
           io.emit("route_completed", { routeId });
-          generateInvoiceForRoute(routeId).catch((e) =>
+          generateInvoicesForRoute(routeId).catch((e) =>
             console.error("[Billing] Invoice error:", e),
           );
           console.log(
@@ -2960,7 +2962,7 @@ export async function registerRoutes(
             completedAt: new Date(),
           });
           io.emit("route_completed", { routeId });
-          generateInvoiceForRoute(routeId).catch((e) =>
+          generateInvoicesForRoute(routeId).catch((e) =>
             console.error("[Billing] Invoice error:", e),
           );
           console.log(
@@ -3207,77 +3209,53 @@ export async function registerRoutes(
     },
   );
 
-  app.post("/api/billing/invoices/generate-all", requireAdmin, async (req, res) => {
-    try {
-      const allRoutes = await storage.getRoutes();
-      const completedRoutes = allRoutes.filter((r: any) => r.status === "complete");
-      const results: any[] = [];
-      for (const route of completedRoutes) {
-        try {
-          const invoice = await generateInvoiceForRoute(route.id);
-          if (invoice) results.push({ routeId: route.id, invoiceId: invoice.id, status: "generated" });
-          else results.push({ routeId: route.id, status: "skipped" });
-        } catch (e: any) {
-          results.push({ routeId: route.id, status: "error", message: e.message });
-        }
-      }
-      res.json({ generated: results.filter(r => r.status === "generated").length, skipped: results.filter(r => r.status === "skipped").length, results });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to generate invoices" });
-    }
-  });
-
-  async function generateInvoiceForRoute(routeId: number) {
-    // Don't duplicate
-    const existing = await storage.getInvoiceByRouteId(routeId);
-    if (existing) return existing;
-
-    const route = await storage.getRoute(routeId);
-    if (!route) return null;
-
-    let pharmacyId = null;
-    if (route.batchId) {
-      const batch = await storage.getBatch(route.batchId);
-      pharmacyId = batch?.pharmacyId ?? null;
-    }
-    if (!pharmacyId) {
-      const stops = await storage.getRouteStops(routeId);
-      for (const stop of stops) {
-        if (stop.deliveryId) {
-          const delivery = await storage.getDelivery(stop.deliveryId);
-          if (delivery?.pharmacyId) {
-            pharmacyId = delivery.pharmacyId;
-            break;
+  app.post(
+    "/api/billing/invoices/generate-all",
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const allRoutes = await storage.getRoutes();
+        const completedRoutes = allRoutes.filter(
+          (r: any) => r.status === "complete",
+        );
+        const results: any[] = [];
+        for (const route of completedRoutes) {
+          try {
+            const invoice = await generateInvoiceForRoute(route.id);
+            if (invoice)
+              results.push({
+                routeId: route.id,
+                invoiceId: invoice.id,
+                status: "generated",
+              });
+            else results.push({ routeId: route.id, status: "skipped" });
+          } catch (e: any) {
+            results.push({
+              routeId: route.id,
+              status: "error",
+              message: e.message,
+            });
           }
         }
+        res.json({
+          generated: results.filter((r) => r.status === "generated").length,
+          skipped: results.filter((r) => r.status === "skipped").length,
+          results,
+        });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to generate invoices" });
       }
-    }
-    if (!pharmacyId) {
-      const deliveryOrdersForRoute = await storage.getDeliveryOrdersByRoute(routeId);
-      if (deliveryOrdersForRoute.length > 0) {
-        pharmacyId = deliveryOrdersForRoute[0].pharmacyId;
-      }
-    }
-    if (!pharmacyId) {
-      console.warn(
-        `[Billing] Route ${routeId} has no pharmacy — skipping invoice`,
-      );
-      return null;
-    }
+    },
+  );
 
-    const pharmacy = await storage.getPharmacy(pharmacyId);
-    let originLat = pharmacy?.lat;
-    let originLng = pharmacy?.lng;
-    if (!originLat || !originLng) {
-      if (route.startLat && route.startLng) {
-        originLat = route.startLat;
-        originLng = route.startLng;
-        console.log(`[Billing] Pharmacy ${pharmacyId} has no coords — using route start point as origin`);
-      } else {
-        console.warn(`[Billing] Route ${routeId} has no pharmacy coords or route start — skipping invoice`);
-        return null;
-      }
-    }
+  // ── generateInvoicesForRoute ─────────────────────────────────────────────
+  // Creates one invoice per pharmacy represented on the route.
+  // A route with stops from Pharmacy A and Pharmacy B produces 2 invoices.
+  // Only COMPLETED stops are charged. Idempotent — skips already-invoiced pairs.
+
+  async function generateInvoicesForRoute(routeId: number) {
+    const route = await storage.getRoute(routeId);
+    if (!route) return [];
 
     const stops = await storage.getRouteStops(routeId);
     const driver = route.driverId
@@ -3285,57 +3263,248 @@ export async function registerRoutes(
       : null;
     const tiers = await storage.getBillingTiers();
 
-    const lineItems: any[] = [];
-    let totalFee = 0;
+    // Group COMPLETED stops by pharmacyId
+    // Resolution chain per stop: delivery.pharmacyId → delivery_order.pharmacyId → skip
+    const pharmacyStops = new Map<number, any[]>();
 
     for (const stop of stops) {
+      // Only charge delivered stops
+      if (stop.status !== "completed" && stop.status !== "complete") continue;
       if (!stop.deliveryId) continue;
+
       const delivery = await storage.getDelivery(stop.deliveryId);
       if (!delivery || !delivery.lat || !delivery.lng) continue;
 
-      const distanceKm = calculateDistance(
-        originLat!,
-        originLng!,
-        delivery.lat,
-        delivery.lng,
-      );
-      const distanceMiles = Math.round(kmToMiles(distanceKm) * 100) / 100;
-      const fee = calculateDeliveryFee(distanceMiles, tiers);
-      totalFee += fee;
+      // Resolve pharmacyId for this stop
+      let stopPharmacyId: number | null = delivery.pharmacyId ?? null;
 
-      lineItems.push({
-        stopId: stop.id,
-        deliveryId: delivery.id,
-        addressText: delivery.addressText,
-        customerName: delivery.customerName,
-        distanceMiles,
-        fee,
-        stopStatus: stop.status,
-      });
+      if (!stopPharmacyId) {
+        // Fallback: look up via delivery_orders
+        const orders = await storage.getDeliveryOrdersByRoute(routeId);
+        const matchingOrder = orders.find((o) =>
+          o.normalizedAddressHash && delivery.normalizedAddressHash
+            ? o.normalizedAddressHash === delivery.normalizedAddressHash
+            : o.addressText?.toLowerCase().trim() ===
+              delivery.addressText?.toLowerCase().trim(),
+        );
+        stopPharmacyId = matchingOrder?.pharmacyId ?? null;
+      }
+
+      if (!stopPharmacyId) {
+        console.warn(
+          `[Billing] Could not resolve pharmacy for stop ${stop.id} on route ${routeId} — skipping`,
+        );
+        continue;
+      }
+
+      if (!pharmacyStops.has(stopPharmacyId)) {
+        pharmacyStops.set(stopPharmacyId, []);
+      }
+      pharmacyStops.get(stopPharmacyId)!.push({ stop, delivery });
     }
 
-    const totalFeeRounded = Math.round(totalFee * 100) / 100;
+    if (pharmacyStops.size === 0) {
+      console.warn(
+        `[Billing] Route ${routeId} has no billable completed stops`,
+      );
+      return [];
+    }
 
-    const invoice = await storage.createInvoiceWithItems(
-      {
-        routeId,
+    const generatedInvoices: any[] = [];
+
+    for (const [pharmacyId, stopDeliveries] of pharmacyStops) {
+      // Idempotency: skip if this pharmacy already has an invoice for this route
+      const existing = await storage.getInvoiceByPharmacyAndRoute(
         pharmacyId,
-        pharmacyName: pharmacy?.name || `Pharmacy #${pharmacyId}`,
-        driverName: driver?.name || null,
-        routeName: route.name || `Route #${routeId}`,
-        totalDeliveries: lineItems.length,
-        totalFee: totalFeeRounded,
-        completedAt: route.completedAt || new Date(),
-        status: "generated",
-      },
-      lineItems,
-    );
+        routeId,
+      );
+      if (existing) {
+        console.log(
+          `[Billing] Invoice already exists for pharmacy ${pharmacyId} / route ${routeId} — skipping`,
+        );
+        generatedInvoices.push(existing);
+        continue;
+      }
 
-    console.log(
-      `[Billing] Invoice #${invoice.id} generated for route ${routeId}: $${totalFeeRounded} (${lineItems.length} stops)`,
-    );
-    return invoice;
+      const pharmacy = await storage.getPharmacy(pharmacyId);
+      if (!pharmacy || !pharmacy.lat || !pharmacy.lng) {
+        console.warn(
+          `[Billing] Pharmacy ${pharmacyId} missing coordinates — skipping`,
+        );
+        continue;
+      }
+
+      const lineItems: any[] = [];
+      let totalFee = 0;
+
+      for (const { stop, delivery } of stopDeliveries) {
+        const distanceKm = calculateDistance(
+          pharmacy.lat,
+          pharmacy.lng,
+          delivery.lat,
+          delivery.lng,
+        );
+        const distanceMiles = Math.round(kmToMiles(distanceKm) * 100) / 100;
+        const fee = calculateDeliveryFee(distanceMiles, tiers);
+        totalFee += fee;
+
+        lineItems.push({
+          stopId: stop.id,
+          deliveryId: delivery.id,
+          pharmacyId,
+          addressText: delivery.addressText,
+          customerName: delivery.customerName,
+          distanceMiles,
+          fee,
+          stopStatus: stop.status,
+        });
+      }
+
+      const totalFeeRounded = Math.round(totalFee * 100) / 100;
+
+      const invoice = await storage.createInvoiceWithItems(
+        {
+          routeId,
+          pharmacyId,
+          pharmacyName: pharmacy.name,
+          driverName: driver?.name || null,
+          routeName: route.name || `Route #${routeId}`,
+          totalDeliveries: lineItems.length,
+          totalFee: totalFeeRounded,
+          completedAt: route.completedAt || new Date(),
+          status: "generated",
+        },
+        lineItems,
+      );
+
+      console.log(
+        `[Billing] Invoice #${invoice.id} for pharmacy "${pharmacy.name}" / route ${routeId}: $${totalFeeRounded} (${lineItems.length} stops)`,
+      );
+      generatedInvoices.push(invoice);
+    }
+
+    return generatedInvoices;
   }
+
+  // Keep old single-pharmacy function as a named alias for the manual endpoint
+  async function generateInvoiceForRoute(routeId: number) {
+    const results = await generateInvoicesForRoute(routeId);
+    return results[0] ?? null;
+  }
+  // Don't duplicate
+  // Old generateInvoiceForRoute function (single-pharmacy) was replaced with generateInvoicesForRoute
+  //   const existing = await storage.getInvoicesByRouteId(routeId);
+  //   if (existing) return existing;
+
+  //   const route = await storage.getRoute(routeId);
+  //   if (!route) return null;
+
+  //   let pharmacyId = null;
+  //   if (route.batchId) {
+  //     const batch = await storage.getBatch(route.batchId);
+  //     pharmacyId = batch?.pharmacyId ?? null;
+  //   }
+  //   if (!pharmacyId) {
+  //     const stops = await storage.getRouteStops(routeId);
+  //     for (const stop of stops) {
+  //       if (stop.deliveryId) {
+  //         const delivery = await storage.getDelivery(stop.deliveryId);
+  //         if (delivery?.pharmacyId) {
+  //           pharmacyId = delivery.pharmacyId;
+  //           break;
+  //         }
+  //       }
+  //     }
+  //   }
+  //   if (!pharmacyId) {
+  //     const deliveryOrdersForRoute =
+  //       await storage.getDeliveryOrdersByRoute(routeId);
+  //     if (deliveryOrdersForRoute.length > 0) {
+  //       pharmacyId = deliveryOrdersForRoute[0].pharmacyId;
+  //     }
+  //   }
+  //   if (!pharmacyId) {
+  //     console.warn(
+  //       `[Billing] Route ${routeId} has no pharmacy — skipping invoice`,
+  //     );
+  //     return null;
+  //   }
+
+  //   const pharmacy = await storage.getPharmacy(pharmacyId);
+  //   let originLat = pharmacy?.lat;
+  //   let originLng = pharmacy?.lng;
+  //   if (!originLat || !originLng) {
+  //     if (route.startLat && route.startLng) {
+  //       originLat = route.startLat;
+  //       originLng = route.startLng;
+  //       console.log(
+  //         `[Billing] Pharmacy ${pharmacyId} has no coords — using route start point as origin`,
+  //       );
+  //     } else {
+  //       console.warn(
+  //         `[Billing] Route ${routeId} has no pharmacy coords or route start — skipping invoice`,
+  //       );
+  //       return null;
+  //     }
+  //   }
+
+  //   const stops = await storage.getRouteStops(routeId);
+  //   const driver = route.driverId
+  //     ? await storage.getDriver(route.driverId)
+  //     : null;
+  //   const tiers = await storage.getBillingTiers();
+
+  //   const lineItems: any[] = [];
+  //   let totalFee = 0;
+
+  //   for (const stop of stops) {
+  //     if (!stop.deliveryId) continue;
+  //     const delivery = await storage.getDelivery(stop.deliveryId);
+  //     if (!delivery || !delivery.lat || !delivery.lng) continue;
+
+  //     const distanceKm = calculateDistance(
+  //       originLat!,
+  //       originLng!,
+  //       delivery.lat,
+  //       delivery.lng,
+  //     );
+  //     const distanceMiles = Math.round(kmToMiles(distanceKm) * 100) / 100;
+  //     const fee = calculateDeliveryFee(distanceMiles, tiers);
+  //     totalFee += fee;
+
+  //     lineItems.push({
+  //       stopId: stop.id,
+  //       deliveryId: delivery.id,
+  //       addressText: delivery.addressText,
+  //       customerName: delivery.customerName,
+  //       distanceMiles,
+  //       fee,
+  //       stopStatus: stop.status,
+  //     });
+  //   }
+
+  //   const totalFeeRounded = Math.round(totalFee * 100) / 100;
+
+  //   const invoice = await storage.createInvoiceWithItems(
+  //     {
+  //       routeId,
+  //       pharmacyId,
+  //       pharmacyName: pharmacy?.name || `Pharmacy #${pharmacyId}`,
+  //       driverName: driver?.name || null,
+  //       routeName: route.name || `Route #${routeId}`,
+  //       totalDeliveries: lineItems.length,
+  //       totalFee: totalFeeRounded,
+  //       completedAt: route.completedAt || new Date(),
+  //       status: "generated",
+  //     },
+  //     lineItems,
+  //   );
+
+  //   console.log(
+  //     `[Billing] Invoice #${invoice.id} generated for route ${routeId}: $${totalFeeRounded} (${lineItems.length} stops)`,
+  //   );
+  //   return invoice;
+  // }
 
   // Delivery Zone endpoints (admin only for global view)
   app.get("/api/zones", requireAdmin, async (req, res) => {
@@ -4279,13 +4448,22 @@ export async function registerRoutes(
               const driver = route.driverId
                 ? await storage.getDriver(route.driverId)
                 : null;
-              routeInfo = {
-                routeId: route.id,
-                routeName: route.name,
-                routeStatus: route.status,
-                driverName: driver?.name || null,
-                completedAt: routeStop.actualArrival,
-              };
+              // Pharmacy users see delivery/driver status but not cross-pharmacy route identifiers
+              routeInfo = ctx.isAdmin
+                ? {
+                    routeId: route.id,
+                    routeName: route.name,
+                    routeStatus: route.status,
+                    driverName: driver?.name || null,
+                    completedAt: routeStop.actualArrival,
+                  }
+                : {
+                    routeId: null,
+                    routeName: null,
+                    routeStatus: route.status,
+                    driverName: driver?.name || null,
+                    completedAt: routeStop.actualArrival,
+                  };
             }
           }
 
