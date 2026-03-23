@@ -241,6 +241,7 @@ export interface IStorage {
     status: string,
   ): Promise<DeliveryOrder | undefined>;
   cancelDeliveryOrdersByBatch(batchId: number): Promise<void>;
+  cancelAllEligibleOrdersForPharmacy(pharmacyId: number): Promise<number>;
   updateDeliveryOrderDeliveryIdentifier(
     id: number,
     deliveryIdentifier: string,
@@ -1655,6 +1656,20 @@ export class DatabaseStorage implements IStorage {
       .where(eq(deliveryOrders.id, id))
       .returning();
     return result[0];
+  }
+
+  async cancelAllEligibleOrdersForPharmacy(pharmacyId: number): Promise<number> {
+    const result = await db
+      .update(deliveryOrders)
+      .set({ deliveryStatus: "CANCELLED" })
+      .where(
+        and(
+          eq(deliveryOrders.pharmacyId, pharmacyId),
+          eq(deliveryOrders.deliveryStatus, "ROUTE_ELIGIBLE"),
+        ),
+      )
+      .returning({ id: deliveryOrders.id });
+    return result.length;
   }
 
   async getDeliveryOrderUploads(

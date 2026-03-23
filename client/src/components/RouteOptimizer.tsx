@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X, QrCode, ScanLine, Check } from "lucide-react";
+import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X, QrCode, ScanLine, Check, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -71,8 +71,27 @@ export default function RouteOptimizer({
   const [manualRxInput, setManualRxInput] = useState("");
   const [lastScannedRx, setLastScannedRx] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [confirmCancelAll, setConfirmCancelAll] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const queryClient = useQueryClient();
+
+  const cancelAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/delivery-orders/cancel-all-eligible", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to cancel orders");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
+      setSelectedDeliveryIds(new Set());
+      setConfirmCancelAll(false);
+    },
+  });
 
   const { data: zones = [] } = useQuery<DeliveryZone[]>({
     queryKey: ["/api/zones"],
@@ -652,7 +671,7 @@ export default function RouteOptimizer({
                 <MapPin className="h-5 w-5 text-blue-400" />
                 Route-Eligible Orders ({eligibleOrders.length} RXs, {addressGroups.length} stops)
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
@@ -672,6 +691,38 @@ export default function RouteOptimizer({
                     <X className="h-4 w-4 mr-1" />
                     Clear ({selectedDeliveryIds.size})
                   </Button>
+                )}
+                {eligibleOrders.length > 0 && (
+                  confirmCancelAll ? (
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        onClick={() => cancelAllMutation.mutate()}
+                        disabled={cancelAllMutation.isPending}
+                        className="bg-red-600 hover:bg-red-700 text-white"
+                      >
+                        {cancelAllMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Cancel All"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setConfirmCancelAll(false)}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                      >
+                        Keep
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setConfirmCancelAll(true)}
+                      className="border-red-800 text-red-400 hover:bg-red-900/30"
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Cancel All Pending
+                    </Button>
+                  )
                 )}
               </div>
             </CardTitle>

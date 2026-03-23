@@ -1109,8 +1109,8 @@ export async function registerRoutes(
         }
       }
 
-      // Also cancel associated delivery_orders when batch is cancelled
-      if (status === "cancelled") {
+      // Also cancel associated delivery_orders when batch is cancelled or completed
+      if (status === "cancelled" || status === "complete") {
         await storage.cancelDeliveryOrdersByBatch(batchId);
       }
 
@@ -1697,6 +1697,32 @@ export async function registerRoutes(
       res.status(500).json({ error: "Failed to fetch eligible orders" });
     }
   });
+
+  // Cancel all ROUTE_ELIGIBLE orders for the current pharmacy (admin or pharmacy-scoped)
+  app.post(
+    "/api/delivery-orders/cancel-all-eligible",
+    requireStaff,
+    async (req, res) => {
+      try {
+        const session = req.session as any;
+        const pharmacyId =
+          session?.user?.role === "admin"
+            ? parseInt(req.body.pharmacyId)
+            : session?.user?.pharmacyId;
+
+        if (!pharmacyId) {
+          return res.status(400).json({ error: "pharmacyId required" });
+        }
+
+        const count =
+          await storage.cancelAllEligibleOrdersForPharmacy(pharmacyId);
+        res.json({ cancelled: count, message: `${count} pending orders cancelled` });
+      } catch (error) {
+        console.error("Cancel all eligible orders error:", error);
+        res.status(500).json({ error: "Failed to cancel orders" });
+      }
+    },
+  );
 
   app.get("/api/delivery-orders/:id", requireStaff, async (req, res) => {
     try {
