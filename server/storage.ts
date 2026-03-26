@@ -242,6 +242,7 @@ export interface IStorage {
   ): Promise<DeliveryOrder | undefined>;
   cancelDeliveryOrdersByBatch(batchId: number): Promise<void>;
   cancelAllEligibleOrdersForPharmacy(pharmacyId: number): Promise<number>;
+  getActiveBatchForPharmacy(pharmacyId: number): Promise<DeliveryBatch | undefined>;
   updateDeliveryOrderDeliveryIdentifier(
     id: number,
     deliveryIdentifier: string,
@@ -1415,12 +1416,37 @@ export class DatabaseStorage implements IStorage {
   async reactivateDeliveryOrder(
     id: number,
   ): Promise<DeliveryOrder | undefined> {
+    // Try to find an active batch this order has previously appeared in
+    const uploadHistory = await db
+      .select({ batchId: deliveryOrderUploads.batchId })
+      .from(deliveryOrderUploads)
+      .where(eq(deliveryOrderUploads.deliveryOrderId, id));
+
+    let resolvedBatchId: number | null = null;
+    if (uploadHistory.length > 0) {
+      const batchIds = uploadHistory.map((u) => u.batchId);
+      const activeBatch = await db
+        .select({ id: deliveryBatches.id })
+        .from(deliveryBatches)
+        .where(
+          and(
+            inArray(deliveryBatches.id, batchIds),
+            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
+          ),
+        )
+        .orderBy(desc(deliveryBatches.id))
+        .limit(1);
+      if (activeBatch.length > 0) {
+        resolvedBatchId = activeBatch[0].id;
+      }
+    }
+
     const result = await db
       .update(deliveryOrders)
       .set({
         deliveryStatus: "ROUTE_ELIGIBLE",
         routeId: null,
-        batchId: null,
+        batchId: resolvedBatchId,
         scannedAt: new Date(),
         lastSeenAt: new Date(),
       })
@@ -1655,6 +1681,23 @@ export class DatabaseStorage implements IStorage {
       .set({ routeId })
       .where(eq(deliveryOrders.id, id))
       .returning();
+    return result[0];
+  }
+
+  async getActiveBatchForPharmacy(
+    pharmacyId: number,
+  ): Promise<DeliveryBatch | undefined> {
+    const result = await db
+      .select()
+      .from(deliveryBatches)
+      .where(
+        and(
+          eq(deliveryBatches.pharmacyId, pharmacyId),
+          notInArray(deliveryBatches.status, ["cancelled", "complete"]),
+        ),
+      )
+      .orderBy(desc(deliveryBatches.id))
+      .limit(1);
     return result[0];
   }
 

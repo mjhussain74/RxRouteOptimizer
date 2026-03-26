@@ -1606,6 +1606,10 @@ export async function registerRoutes(
         );
       }
 
+      // Attach to the current active batch for this pharmacy (if one exists)
+      const activeBatch = await storage.getActiveBatchForPharmacy(pharmacyId);
+      const manualBatchId = activeBatch?.id ?? null;
+
       // If geocoding succeeded, set ROUTE_ELIGIBLE; otherwise IMPORTED (needs geocoding later)
       const { order } = await storage.upsertDeliveryOrder(
         {
@@ -1628,7 +1632,7 @@ export async function registerRoutes(
           lastSeenAt: new Date(),
           uploadCount: 1,
         },
-        null,
+        manualBatchId,
         "manual-entry",
       );
 
