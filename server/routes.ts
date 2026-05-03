@@ -4,6 +4,7 @@ import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
 import nodemailer from "nodemailer";
 import Papa from "papaparse";
+import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import {
   normalizeAddress,
@@ -68,6 +69,40 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ message: "Authentication required" });
   }
   next();
+}
+
+// ── HIPAA: Rate limiting for auth endpoints ───────────────────────────────────
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many login attempts. Try again in 15 minutes." },
+  keyGenerator: (req) => req.ip ?? "unknown",
+});
+
+// ── HIPAA: Password strength validation ──────────────────────────────────────
+function validatePasswordStrength(password: string): string | null {
+  if (password.length < 8) return "Password must be at least 8 characters";
+  if (!/[A-Z]/.test(password)) return "Password must contain at least one uppercase letter";
+  if (!/[a-z]/.test(password)) return "Password must contain at least one lowercase letter";
+  if (!/[0-9]/.test(password)) return "Password must contain at least one number";
+  return null;
+}
+
+// ── HIPAA: Audit log helper ───────────────────────────────────────────────────
+function auditLog(req: Request, action: string, resourceType?: string, resourceId?: string) {
+  const user = req.session?.user;
+  storage.createAuditLog({
+    userId: user?.id ?? null,
+    username: user?.username ?? null,
+    role: user?.role ?? null,
+    action,
+    resourceType: resourceType ?? null,
+    resourceId: resourceId ?? null,
+    ipAddress: req.ip ?? null,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
 }
 
 // Require staff (admin or dispatcher) - blocks drivers
@@ -275,7 +310,7 @@ async function geocodeAddress(
     }
 
     const encodedAddress = encodeURIComponent(address);
-    console.log(`🔄 Geocoding address: ${address}`);
+    console.log(`🔄 Geocoding address: [redacted]`);
 
     const response = await fetch(
       `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${apiKey}`,
@@ -283,18 +318,13 @@ async function geocodeAddress(
     const data = await response.json();
 
     if (data.error_message) {
-      console.error(
-        `❌ Geocoding API error for "${address}":`,
-        data.error_message,
-      );
+      console.error(`❌ Geocoding API error for [redacted]:`, data.error_message);
       return null;
     }
 
     if (data.results && data.results.length > 0) {
       const location = data.results[0].geometry.location;
-      console.log(
-        `✅ Successfully geocoded "${address}" to [${location.lat}, ${location.lng}]`,
-      );
+      console.log(`✅ Successfully geocoded [redacted] to [${location.lat}, ${location.lng}]`);
       return {
         lat: location.lat,
         lng: location.lng,
@@ -552,9 +582,10 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
+  const allowedOrigin = process.env.ALLOWED_ORIGIN || (process.env.NODE_ENV === 'production' ? false : "*");
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: "*",
+      origin: allowedOrigin,
       methods: ["GET", "POST"],
     },
     path: "/socket.io",
@@ -603,8 +634,8 @@ export async function registerRoutes(
   // Start background upload processor
   startBackgroundProcessor();
 
-  // Storage endpoint - serve files from object storage
-  app.get("/api/storage/*", async (req, res) => {
+  // Storage endpoint - serve files from object storage (PHI: requires auth)
+  app.get("/api/storage/*", requireAuth, async (req, res) => {
     try {
       const filename = (req.params as Record<string, string>)[0];
       if (!filename) {
@@ -629,7 +660,7 @@ export async function registerRoutes(
       const contentType = contentTypes[ext || ""] || "application/octet-stream";
 
       res.setHeader("Content-Type", contentType);
-      res.setHeader("Cache-Control", "public, max-age=31536000");
+      res.setHeader("Cache-Control", "no-store, no-cache, private");
       res.send(data);
     } catch (error) {
       console.error("Storage download error:", error);
@@ -654,7 +685,7 @@ export async function registerRoutes(
   );
 
   // Authentication endpoints
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", loginLimiter, async (req, res) => {
     try {
       const { username, password } = req.body;
 
@@ -703,7 +734,7 @@ export async function registerRoutes(
   });
 
   // Driver login endpoint
-  app.post("/api/auth/driver-login", async (req, res) => {
+  app.post("/api/auth/driver-login", loginLimiter, async (req, res) => {
     try {
       const { username, password } = req.body;
 
@@ -773,6 +804,9 @@ export async function registerRoutes(
           .json({ message: "Username and password are required" });
       }
 
+      const pwError = validatePasswordStrength(password);
+      if (pwError) return res.status(400).json({ message: pwError });
+
       // Check if username already exists
       const existingUser = await storage.getUserByUsername(username);
       if (existingUser) {
@@ -816,6 +850,9 @@ export async function registerRoutes(
           .status(400)
           .json({ message: "Username and password are required" });
       }
+
+      const pwError = validatePasswordStrength(password);
+      if (pwError) return res.status(400).json({ message: pwError });
 
       const user = await storage.createUser({
         username,
@@ -1017,11 +1054,8 @@ export async function registerRoutes(
           .json({ error: "Username and password are required" });
       }
 
-      if (password.length < 4) {
-        return res
-          .status(400)
-          .json({ error: "Password must be at least 4 characters" });
-      }
+      const pwError = validatePasswordStrength(password);
+      if (pwError) return res.status(400).json({ error: pwError });
 
       const driver = await storage.setDriverCredentials(
         driverId,
@@ -1535,6 +1569,8 @@ export async function registerRoutes(
       const session = req.session as any;
       const pharmacyId = session?.user?.pharmacyId;
 
+      auditLog(req, "LIST", "delivery_orders");
+
       if (session?.user?.role === "admin") {
         const orders = await storage.getAllDeliveryOrders();
         return res.json(orders);
@@ -1730,6 +1766,7 @@ export async function registerRoutes(
 
   app.get("/api/delivery-orders/:id", requireStaff, async (req, res) => {
     try {
+      auditLog(req, "VIEW", "delivery_order", req.params.id);
       const order = await storage.getDeliveryOrder(parseInt(req.params.id));
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
@@ -4420,6 +4457,8 @@ export async function registerRoutes(
     try {
       const ctx = getPharmacyContext(req.session);
       if (!ctx) return res.status(401).json({ error: "Not authenticated" });
+
+      auditLog(req, "EXPORT_REPORT", "delivery_orders");
 
       const pharmacyId = req.query.pharmacyId
         ? parseInt(req.query.pharmacyId as string)

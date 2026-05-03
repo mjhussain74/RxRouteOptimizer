@@ -34,6 +34,7 @@ import {
   billingTiers,
   invoices,
   invoiceItems,
+  auditLogs,
   type User,
   type InsertUser,
   type Driver,
@@ -1884,6 +1885,23 @@ export class DatabaseStorage implements IStorage {
       .where(eq(invoices.id, invoiceId))
       .returning();
     return updated ?? null;
+  }
+
+  async createAuditLog(entry: {
+    userId?: number | null;
+    username?: string | null;
+    role?: string | null;
+    action: string;
+    resourceType?: string | null;
+    resourceId?: string | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  }) {
+    try {
+      await db.insert(auditLogs).values(entry);
+    } catch {
+      // Fire-and-forget: never let audit log failure break a request
+    }
   }
 }
 
