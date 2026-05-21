@@ -1980,35 +1980,50 @@ export class DatabaseStorage implements IStorage {
       .where(and(...conditions))
       .orderBy(desc(deliveryOrders.lastSeenAt));
 
-    const groupMap = new Map<string, AddressFrequencyGroup>();
+    // Two-pass: first collect rows and trip dates per address hash.
+    // A "trip" = one distinct batchId delivered to an address.
+    // Orders with no batchId each count as their own trip.
+    const groupMap = new Map<
+      string,
+      { data: AddressFrequencyGroup; tripDates: Map<string, Date> }
+    >();
 
     for (const row of rows) {
       const hash = row.normalizedAddressHash!;
       if (!groupMap.has(hash)) {
         groupMap.set(hash, {
-          normalizedAddressHash: hash,
-          addressText: row.addressText,
-          streetAddress: row.streetAddress ?? null,
-          city: row.city ?? null,
-          state: row.state ?? null,
-          zipCode: row.zipCode ?? null,
-          lat: row.lat ?? null,
-          lng: row.lng ?? null,
-          customerNames: [],
-          totalCount: 0,
-          monthCount: 0,
-          weekCount: 0,
-          lastDeliveryDate: row.lastSeenAt.toISOString(),
-          orders: [],
+          data: {
+            normalizedAddressHash: hash,
+            addressText: row.addressText,
+            streetAddress: row.streetAddress ?? null,
+            city: row.city ?? null,
+            state: row.state ?? null,
+            zipCode: row.zipCode ?? null,
+            lat: row.lat ?? null,
+            lng: row.lng ?? null,
+            customerNames: [],
+            totalCount: 0,
+            monthCount: 0,
+            weekCount: 0,
+            lastDeliveryDate: row.lastSeenAt.toISOString(),
+            orders: [],
+          },
+          tripDates: new Map(),
         });
       }
 
-      const group = groupMap.get(hash)!;
-      group.totalCount++;
+      const entry = groupMap.get(hash)!;
+      const { data: group, tripDates } = entry;
 
+      // Track latest date per trip key
+      const tripKey =
+        row.batchId != null ? `b${row.batchId}` : `r${row.id}`;
       const seenAt = new Date(row.lastSeenAt);
-      if (seenAt >= monthStart) group.monthCount++;
-      if (seenAt >= weekStart) group.weekCount++;
+      const existingDate = tripDates.get(tripKey);
+      if (!existingDate || seenAt > existingDate) {
+        tripDates.set(tripKey, seenAt);
+      }
+
       if (seenAt > new Date(group.lastDeliveryDate)) {
         group.lastDeliveryDate = row.lastSeenAt.toISOString();
       }
@@ -2031,13 +2046,23 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
-    return Array.from(groupMap.values()).sort((a, b) => {
-      if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
-      return (
-        new Date(b.lastDeliveryDate).getTime() -
-        new Date(a.lastDeliveryDate).getTime()
-      );
-    });
+    // Second pass: compute trip counts from the collected trip dates
+    for (const { data: group, tripDates } of groupMap.values()) {
+      const allTripDates = [...tripDates.values()];
+      group.totalCount = allTripDates.length;
+      group.monthCount = allTripDates.filter((d) => d >= monthStart).length;
+      group.weekCount = allTripDates.filter((d) => d >= weekStart).length;
+    }
+
+    return Array.from(groupMap.values())
+      .map((e) => e.data)
+      .sort((a, b) => {
+        if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
+        return (
+          new Date(b.lastDeliveryDate).getTime() -
+          new Date(a.lastDeliveryDate).getTime()
+        );
+      });
   }
 }
 

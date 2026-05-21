@@ -195,8 +195,8 @@ export default function AddressAnalytics() {
       <div>
         <h2 className="text-2xl font-bold text-white mb-2">Address Analytics</h2>
         <p className="text-slate-400">
-          See how often each patient address receives deliveries and identify
-          consolidation opportunities.
+          See how many delivery trips have been made to each patient address.
+          Multiple scripts in the same batch run count as one trip.
         </p>
       </div>
 
@@ -287,7 +287,7 @@ export default function AddressAnalytics() {
                 <AlertTriangle className="h-4 w-4 text-amber-400" />
                 <span className="text-amber-300 text-sm font-medium">
                   {flaggedCount} address{flaggedCount !== 1 ? "es" : ""} with 2+
-                  deliveries this month
+                  trips this month
                 </span>
               </div>
             )}
@@ -330,7 +330,7 @@ export default function AddressAnalytics() {
                     </div>
                   )}
                   <div className="text-sm mt-1">
-                    {mapAddress.totalCount} total deliveries
+                    {mapAddress.totalCount} delivery trip{mapAddress.totalCount !== 1 ? "s" : ""}
                   </div>
                 </Popup>
               </Marker>
@@ -389,7 +389,7 @@ export default function AddressAnalytics() {
                       className="px-4 py-3 text-slate-400 text-xs font-medium cursor-pointer hover:text-white text-right"
                       onClick={() => toggleSort("total")}
                     >
-                      Total
+                      Trips
                       <SortIcon col="total" />
                     </th>
                     <th
@@ -545,7 +545,7 @@ export default function AddressAnalytics() {
                             <td />
                             <td colSpan={7} className="px-6 py-3">
                               <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
-                                Individual Deliveries ({group.orders.length})
+                                Scripts in period ({group.orders.length})
                               </p>
                               <div className="space-y-1.5 max-h-48 overflow-y-auto">
                                 {group.orders.map((order) => (
