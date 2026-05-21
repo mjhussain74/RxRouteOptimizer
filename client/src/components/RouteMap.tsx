@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MapPin, Truck, CheckCircle, Clock, Send, User, Navigation, XCircle, Trash2 } from "lucide-react";
+import { MapPin, Truck, CheckCircle, Clock, Send, User, Navigation, XCircle, Trash2, Radio } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { useDriverLocations } from "../hooks/useDriverLocations";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -21,6 +22,26 @@ const createNumberedIcon = (number: number, color: string) => {
     html: `<div style="background-color: ${color}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${number}</div>`,
     iconSize: [28, 28],
     iconAnchor: [14, 14],
+  });
+};
+
+const INACTIVE_MS = 10 * 60 * 1000; // 10 minutes
+
+function timeAgo(date: Date): string {
+  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins === 1) return "1 min ago";
+  return `${mins} min ago`;
+}
+
+const createDriverIcon = (active: boolean) => {
+  const bg = active ? "#f97316" : "#6b7280";
+  const border = active ? "white" : "#9ca3af";
+  return L.divIcon({
+    className: "custom-div-icon",
+    html: `<div style="background-color:${bg};width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;border:3px solid ${border};box-shadow:0 2px 6px rgba(0,0,0,0.4);font-size:17px;" title="Driver">🚗</div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
   });
 };
 
@@ -60,6 +81,16 @@ export default function RouteMap({
 }: RouteMapProps) {
   const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
   const queryClient = useQueryClient();
+
+  // Live driver locations via Socket.IO, seeded from REST data
+  const driverLocations = useDriverLocations(drivers);
+
+  // Tick every 30s so "last seen X min ago" text stays current
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const { data: routeData } = useQuery({
     queryKey: [`/api/routes/${selectedRouteId}`],
@@ -206,6 +237,46 @@ export default function RouteMap({
             </CardContent>
           </Card>
 
+          {/* Live driver tracking status panel */}
+          {driverLocations.size > 0 && (
+            <Card className="bg-slate-800/50 border-slate-700">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-white flex items-center gap-2 text-sm">
+                  <Radio className="h-4 w-4 text-orange-400 animate-pulse" />
+                  Live Driver Tracking
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 max-h-40 overflow-y-auto">
+                {Array.from(driverLocations.values()).map((loc) => {
+                  const active =
+                    Date.now() - loc.updatedAt.getTime() < INACTIVE_MS;
+                  return (
+                    <div
+                      key={loc.driverId}
+                      className="flex items-center justify-between bg-slate-900/40 rounded-lg px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                            active ? "bg-orange-400" : "bg-slate-500"
+                          }`}
+                        />
+                        <span className="text-white text-sm">{loc.name}</span>
+                      </div>
+                      <span
+                        className={`text-xs ${
+                          active ? "text-orange-400" : "text-slate-500"
+                        }`}
+                      >
+                        {timeAgo(loc.updatedAt)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+
           {selectedRouteId && route && (
             <Card className="bg-slate-800/50 border-slate-700">
               <CardHeader>
@@ -342,6 +413,32 @@ export default function RouteMap({
                     opacity={0.8}
                   />
                 )}
+
+                {/* Live driver pins */}
+                {Array.from(driverLocations.values()).map((loc) => {
+                  const active =
+                    Date.now() - loc.updatedAt.getTime() < INACTIVE_MS;
+                  return (
+                    <Marker
+                      key={`driver-${loc.driverId}`}
+                      position={[loc.lat, loc.lng]}
+                      icon={createDriverIcon(active)}
+                      zIndexOffset={1000}
+                    >
+                      <Popup>
+                        <div className="font-medium">{loc.name}</div>
+                        <div
+                          className={`text-sm ${active ? "text-orange-600" : "text-gray-400"}`}
+                        >
+                          {active ? "🟢 Active" : "⚫ Inactive"}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          Last seen {timeAgo(loc.updatedAt)}
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })}
               </MapContainer>
             </div>
           </Card>
