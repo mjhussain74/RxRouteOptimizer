@@ -296,6 +296,40 @@ export interface IStorage {
     items: Omit<InsertInvoiceItem, "invoiceId">[],
   ): Promise<any>;
   updateInvoiceStatus(invoiceId: number, status: string): Promise<any | null>;
+
+  // Analytics methods
+  getAddressFrequency(
+    pharmacyId: number | null,
+    from: Date,
+    to: Date,
+  ): Promise<AddressFrequencyGroup[]>;
+}
+
+export interface AddressFrequencyOrderDetail {
+  id: number;
+  rxNumber: string;
+  batchId: number | null;
+  fillDate: string | null;
+  deliveryStatus: string;
+  lastSeenAt: string;
+  customerName: string | null;
+}
+
+export interface AddressFrequencyGroup {
+  normalizedAddressHash: string;
+  addressText: string;
+  streetAddress: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  lat: number | null;
+  lng: number | null;
+  customerNames: string[];
+  totalCount: number;
+  monthCount: number;
+  weekCount: number;
+  lastDeliveryDate: string;
+  orders: AddressFrequencyOrderDetail[];
 }
 
 export type SafeUser = Omit<User, "password">;
@@ -1902,6 +1936,108 @@ export class DatabaseStorage implements IStorage {
     } catch {
       // Fire-and-forget: never let audit log failure break a request
     }
+  }
+
+  async getAddressFrequency(
+    pharmacyId: number | null,
+    from: Date,
+    to: Date,
+  ): Promise<AddressFrequencyGroup[]> {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+
+    const conditions = [
+      isNotNull(deliveryOrders.normalizedAddressHash),
+      drizzleSql`${deliveryOrders.lastSeenAt} >= ${from}`,
+      drizzleSql`${deliveryOrders.lastSeenAt} <= ${to}`,
+    ];
+    if (pharmacyId !== null) {
+      conditions.push(eq(deliveryOrders.pharmacyId, pharmacyId));
+    }
+
+    const rows = await db
+      .select({
+        id: deliveryOrders.id,
+        rxNumber: deliveryOrders.rxNumber,
+        batchId: deliveryOrders.batchId,
+        fillDate: deliveryOrders.fillDate,
+        deliveryStatus: deliveryOrders.deliveryStatus,
+        addressText: deliveryOrders.addressText,
+        streetAddress: deliveryOrders.streetAddress,
+        city: deliveryOrders.city,
+        state: deliveryOrders.state,
+        zipCode: deliveryOrders.zipCode,
+        normalizedAddressHash: deliveryOrders.normalizedAddressHash,
+        lat: deliveryOrders.lat,
+        lng: deliveryOrders.lng,
+        customerName: deliveryOrders.customerName,
+        lastSeenAt: deliveryOrders.lastSeenAt,
+      })
+      .from(deliveryOrders)
+      .where(and(...conditions))
+      .orderBy(desc(deliveryOrders.lastSeenAt));
+
+    const groupMap = new Map<string, AddressFrequencyGroup>();
+
+    for (const row of rows) {
+      const hash = row.normalizedAddressHash!;
+      if (!groupMap.has(hash)) {
+        groupMap.set(hash, {
+          normalizedAddressHash: hash,
+          addressText: row.addressText,
+          streetAddress: row.streetAddress ?? null,
+          city: row.city ?? null,
+          state: row.state ?? null,
+          zipCode: row.zipCode ?? null,
+          lat: row.lat ?? null,
+          lng: row.lng ?? null,
+          customerNames: [],
+          totalCount: 0,
+          monthCount: 0,
+          weekCount: 0,
+          lastDeliveryDate: row.lastSeenAt.toISOString(),
+          orders: [],
+        });
+      }
+
+      const group = groupMap.get(hash)!;
+      group.totalCount++;
+
+      const seenAt = new Date(row.lastSeenAt);
+      if (seenAt >= monthStart) group.monthCount++;
+      if (seenAt >= weekStart) group.weekCount++;
+      if (seenAt > new Date(group.lastDeliveryDate)) {
+        group.lastDeliveryDate = row.lastSeenAt.toISOString();
+      }
+
+      if (row.lat != null) group.lat = row.lat;
+      if (row.lng != null) group.lng = row.lng;
+
+      if (row.customerName && !group.customerNames.includes(row.customerName)) {
+        group.customerNames.push(row.customerName);
+      }
+
+      group.orders.push({
+        id: row.id,
+        rxNumber: row.rxNumber,
+        batchId: row.batchId ?? null,
+        fillDate: row.fillDate ?? null,
+        deliveryStatus: row.deliveryStatus,
+        lastSeenAt: row.lastSeenAt.toISOString(),
+        customerName: row.customerName ?? null,
+      });
+    }
+
+    return Array.from(groupMap.values()).sort((a, b) => {
+      if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
+      return (
+        new Date(b.lastDeliveryDate).getTime() -
+        new Date(a.lastDeliveryDate).getTime()
+      );
+    });
   }
 }
 

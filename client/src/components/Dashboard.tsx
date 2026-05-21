@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, MapPin, Truck, Route, Users, ChevronRight, Clock, Navigation, Building2, Map, FileText } from "lucide-react";
+import { Upload, MapPin, Truck, Route, Users, ChevronRight, Clock, Navigation, Building2, Map, FileText, BarChart3 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -12,12 +12,13 @@ import DriverManager from "./DriverManager";
 import OrderManagement from "./OrderManagement";
 import ZoneManager from "./ZoneManager";
 import ReportGenerator from "./ReportGenerator";
+import AddressAnalytics from "./AddressAnalytics";
 
 interface DashboardProps {
   onOpenDriverView: (driverId: number) => void;
 }
 
-type TabType = "orders" | "optimize" | "routes" | "drivers" | "zones" | "reports";
+type TabType = "orders" | "optimize" | "routes" | "drivers" | "zones" | "reports" | "analytics";
 
 export default function Dashboard({ onOpenDriverView }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("orders");
@@ -42,6 +43,7 @@ export default function Dashboard({ onOpenDriverView }: DashboardProps) {
     { id: "routes" as TabType, label: "View Routes", icon: MapPin },
     { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
     { id: "drivers" as TabType, label: "Drivers", icon: Users },
+    { id: "analytics" as TabType, label: "Address Analytics", icon: BarChart3 },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
   ];
 
@@ -138,6 +140,8 @@ export default function Dashboard({ onOpenDriverView }: DashboardProps) {
             onOpenDriverView={onOpenDriverView}
           />
         )}
+
+        {activeTab === "analytics" && <AddressAnalytics />}
 
         {activeTab === "reports" && (
           <ReportGenerator />

@@ -4453,6 +4453,53 @@ export async function registerRoutes(
   });
 
   // Order-level reporting endpoint - returns deliveries with proof data for pharmacy-scoped reporting
+  // ── Address Frequency Analytics ──────────────────────────────────────────────
+  app.get(
+    "/api/analytics/address-frequency",
+    requirePharmacyScope,
+    async (req, res) => {
+      try {
+        const ctx = getPharmacyContext(req.session);
+        if (!ctx) return res.status(401).json({ error: "Not authenticated" });
+
+        // Date range defaults: last 30 days
+        const now = new Date();
+        const defaultFrom = new Date(now);
+        defaultFrom.setDate(now.getDate() - 30);
+
+        const from = req.query.from
+          ? new Date(req.query.from as string)
+          : defaultFrom;
+        const to = req.query.to ? new Date(req.query.to as string) : now;
+
+        if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+          return res.status(400).json({ error: "Invalid date range" });
+        }
+
+        // Admin can supply ?pharmacyId= to filter; non-admin is always scoped
+        let targetPharmacyId: number | null;
+        if (ctx.isAdmin) {
+          targetPharmacyId = req.query.pharmacyId
+            ? parseInt(req.query.pharmacyId as string)
+            : null;
+        } else {
+          targetPharmacyId = ctx.pharmacyId;
+        }
+
+        const groups = await storage.getAddressFrequency(
+          targetPharmacyId,
+          from,
+          to,
+        );
+
+        res.json({ groups, from: from.toISOString(), to: to.toISOString() });
+      } catch (err) {
+        console.error("[analytics] address-frequency error:", err);
+        res.status(500).json({ error: "Failed to load analytics" });
+      }
+    },
+  );
+
   app.get("/api/reports/orders", requirePharmacyScope, async (req, res) => {
     try {
       const ctx = getPharmacyContext(req.session);
