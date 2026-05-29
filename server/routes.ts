@@ -338,6 +338,31 @@ async function geocodeAddress(
   }
 }
 
+// Nominatim (OpenStreetMap) geocoder — free, no billing required.
+// Used as a fallback for map navigation searches (zip codes, city names).
+async function geocodeWithNominatim(
+  query: string,
+): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=us`;
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "RxRouteOptimizer/1.0 (pharmacy-delivery-management)",
+        "Accept-Language": "en",
+      },
+    });
+    if (!response.ok) return null;
+    const results = await response.json();
+    if (results.length === 0) return null;
+    const { lat, lon } = results[0];
+    console.log(`✅ Nominatim geocoded "${query}" to [${lat}, ${lon}]`);
+    return { lat: parseFloat(lat), lng: parseFloat(lon) };
+  } catch (error) {
+    console.error("❌ Nominatim geocoding error:", error);
+    return null;
+  }
+}
+
 function calculateDistance(
   lat1: number,
   lon1: number,
@@ -2152,7 +2177,13 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Address required" });
       }
 
-      const geocoded = await geocodeAddress(address);
+      // Try Google first; fall back to Nominatim (free) if billing is disabled
+      let geocoded = await geocodeAddress(address);
+      if (!geocoded) {
+        console.log(`🔄 Falling back to Nominatim for map search: [redacted]`);
+        geocoded = await geocodeWithNominatim(address);
+      }
+
       if (!geocoded) {
         return res.status(400).json({ error: "Could not geocode address" });
       }
