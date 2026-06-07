@@ -4,6 +4,7 @@ import { queryClient } from "./lib/queryClient";
 import "@fontsource/inter";
 import { useAuthStore } from "./lib/authStore";
 import Login from "./components/Login";
+import PrivacyPolicy from "./components/PrivacyPolicy";
 import { Loader2 } from "lucide-react";
 
 const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
@@ -112,6 +113,10 @@ function App() {
       </Suspense>
     );
   };
+
+  if (window.location.pathname === "/privacy-policy") {
+    return <PrivacyPolicy />;
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
