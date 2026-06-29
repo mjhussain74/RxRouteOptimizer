@@ -2182,59 +2182,81 @@ export async function registerRoutes(
         : null;
       const stops = await storage.getRouteStops(route.id);
 
-      // Build detailed stops with delivery proofs
-      const detailedStops = await Promise.all(
-        stops.map(async (stop) => {
-          const delivery = stop.deliveryId
-            ? await storage.getDelivery(stop.deliveryId)
-            : null;
-          const prescriptions = delivery
-            ? await storage.getPrescriptionsByDelivery(delivery.id)
-            : [];
-          const proof = await storage.getDeliveryProof(stop.id);
+      // Bulk-fetch all related data in 3 queries instead of N×3 concurrent requests
+      const stopIds = stops.map((s) => s.id);
+      const deliveryIds = stops
+        .map((s) => s.deliveryId)
+        .filter((id): id is number => id !== null && id !== undefined);
 
-          return {
-            id: stop.id,
-            sequence: stop.sequence,
-            status: stop.status,
-            priority: stop.priority,
-            packageScanned: stop.packageScanned,
-            eta: stop.eta,
-            actualArrival: stop.actualArrival,
-            delivery: delivery
-              ? {
-                  id: delivery.id,
-                  deliveryIdentifier: delivery.deliveryIdentifier,
-                  addressText: delivery.addressText,
-                  streetAddress: delivery.streetAddress,
-                  city: delivery.city,
-                  state: delivery.state,
-                  zipCode: delivery.zipCode,
-                  customerName: delivery.customerName,
-                  customerPhone: delivery.customerPhone,
-                  status: delivery.status,
-                }
-              : null,
-            prescriptions: prescriptions.map((p) => ({
-              id: p.id,
-              rxNumber: p.rxNumber,
-              patientName: p.patientName,
-              verified: stop.packageScanned || false,
-            })),
-            proof: proof
-              ? {
-                  hasSignature: !!(proof.signature || proof.signatureUrl),
-                  hasPhoto: !!(proof.picture || proof.pictureUrl),
-                  signatureData: proof.signature || proof.signatureUrl,
-                  photoData: proof.picture || proof.pictureUrl,
-                  notes: proof.notes,
-                  timestamp: proof.createdAt,
-                  barcode: proof.barcode,
-                }
-              : null,
-          };
-        }),
+      const [allDeliveries, allPrescriptions, allProofs] = await Promise.all([
+        storage.getDeliveriesByIds(deliveryIds),
+        storage.getPrescriptionsByDeliveryIds(deliveryIds),
+        storage.getDeliveryProofsByStopIds(stopIds),
+      ]);
+
+      const deliveryMap = new Map(allDeliveries.map((d) => [d.id, d]));
+      const prescriptionsByDelivery = new Map<number, typeof allPrescriptions>();
+      for (const p of allPrescriptions) {
+        const list = prescriptionsByDelivery.get(p.deliveryId) ?? [];
+        list.push(p);
+        prescriptionsByDelivery.set(p.deliveryId, list);
+      }
+      const proofByStop = new Map(
+        allProofs
+          .filter((p) => p.stopId !== null)
+          .map((p) => [p.stopId as number, p]),
       );
+
+      const detailedStops = stops.map((stop) => {
+        const delivery = stop.deliveryId
+          ? (deliveryMap.get(stop.deliveryId) ?? null)
+          : null;
+        const stopPrescriptions = delivery
+          ? (prescriptionsByDelivery.get(delivery.id) ?? [])
+          : [];
+        const proof = proofByStop.get(stop.id) ?? null;
+
+        return {
+          id: stop.id,
+          sequence: stop.sequence,
+          status: stop.status,
+          priority: stop.priority,
+          packageScanned: stop.packageScanned,
+          eta: stop.eta,
+          actualArrival: stop.actualArrival,
+          delivery: delivery
+            ? {
+                id: delivery.id,
+                deliveryIdentifier: delivery.deliveryIdentifier,
+                addressText: delivery.addressText,
+                streetAddress: delivery.streetAddress,
+                city: delivery.city,
+                state: delivery.state,
+                zipCode: delivery.zipCode,
+                customerName: delivery.customerName,
+                customerPhone: delivery.customerPhone,
+                status: delivery.status,
+              }
+            : null,
+          prescriptions: stopPrescriptions.map((p) => ({
+            id: p.id,
+            rxNumber: p.rxNumber,
+            patientName: p.patientName,
+            verified: stop.packageScanned || false,
+          })),
+          proof: proof
+            ? {
+                hasSignature: !!(proof.signature || proof.signatureUrl),
+                hasPhoto: !!(proof.picture || proof.pictureUrl),
+                signatureData: proof.signature || proof.signatureUrl,
+                photoData: proof.picture || proof.pictureUrl,
+                notes: proof.notes,
+                timestamp: proof.createdAt,
+                barcode: proof.barcode,
+              }
+            : null,
+        };
+      });
 
       // Calculate summary stats
       const completedStops = detailedStops.filter(
@@ -4348,53 +4370,97 @@ export async function registerRoutes(
         }
       }
 
-      // Enrich each delivery with prescriptions and proof data
-      const ordersWithDetails = await Promise.all(
-        allDeliveries.map(async (delivery) => {
-          const prescriptions = await storage.getPrescriptionsByDelivery(
-            delivery.id,
-          );
+      // Bulk-fetch all related data instead of N×4 concurrent Neon HTTP requests
+      const deliveryIds = allDeliveries.map((d) => d.id);
 
-          // Find route stop for this delivery to get proof
-          const routeStop = await storage.getRouteStopByDeliveryId(delivery.id);
-          let proof = null;
-          let routeInfo = null;
+      const allRouteStops = await storage.getRouteStopsByDeliveryIds(deliveryIds);
+      const stopIds = allRouteStops.map((s) => s.id);
+      const routeIds = [
+        ...new Set(
+          allRouteStops
+            .map((s) => s.routeId)
+            .filter((id): id is number => id !== null && id !== undefined),
+        ),
+      ];
 
-          if (routeStop) {
-            proof = await storage.getDeliveryProof(routeStop.id);
-            const route = await storage.getRoute(routeStop.routeId!);
-            if (route) {
-              const driver = route.driverId
-                ? await storage.getDriver(route.driverId)
-                : null;
-              routeInfo = {
-                routeId: route.id,
-                routeName: route.name,
-                routeStatus: route.status,
-                driverName: driver?.name || null,
-                completedAt: routeStop.actualArrival,
-              };
-            }
-          }
+      const [allPrescriptions, allProofs, allRoutes] = await Promise.all([
+        storage.getPrescriptionsByDeliveryIds(deliveryIds),
+        storage.getDeliveryProofsByStopIds(stopIds),
+        storage.getRoutesByIds(routeIds),
+      ]);
 
-          return {
-            ...delivery,
-            prescriptions,
-            proof: proof
-              ? {
-                  hasSignature: !!(proof.signature || proof.signatureUrl),
-                  hasPhoto: !!(proof.picture || proof.pictureUrl),
-                  signatureData: proof.signature || proof.signatureUrl,
-                  photoData: proof.picture || proof.pictureUrl,
-                  notes: proof.notes,
-                  barcode: proof.barcode,
-                  timestamp: proof.createdAt,
-                }
-              : null,
-            route: routeInfo,
-          };
-        }),
+      const driverIds = [
+        ...new Set(
+          allRoutes
+            .map((r) => r.driverId)
+            .filter((id): id is number => id !== null && id !== undefined),
+        ),
+      ];
+      const allDrivers = await storage.getDriversByIds(driverIds);
+
+      // Build lookup maps
+      const stopByDelivery = new Map(
+        allRouteStops
+          .filter((s) => s.deliveryId !== null)
+          .map((s) => [s.deliveryId as number, s]),
       );
+      const prescriptionsByDelivery = new Map<number, typeof allPrescriptions>();
+      for (const p of allPrescriptions) {
+        const list = prescriptionsByDelivery.get(p.deliveryId) ?? [];
+        list.push(p);
+        prescriptionsByDelivery.set(p.deliveryId, list);
+      }
+      const proofByStop = new Map(
+        allProofs
+          .filter((p) => p.stopId !== null)
+          .map((p) => [p.stopId as number, p]),
+      );
+      const routeMap = new Map(allRoutes.map((r) => [r.id, r]));
+      const driverMap = new Map(allDrivers.map((d) => [d.id, d]));
+
+      const ordersWithDetails = allDeliveries.map((delivery) => {
+        const deliveryPrescriptions =
+          prescriptionsByDelivery.get(delivery.id) ?? [];
+        const routeStop = stopByDelivery.get(delivery.id) ?? null;
+        let proof = null;
+        let routeInfo = null;
+
+        if (routeStop) {
+          proof = proofByStop.get(routeStop.id) ?? null;
+          const route = routeStop.routeId
+            ? (routeMap.get(routeStop.routeId) ?? null)
+            : null;
+          if (route) {
+            const driver = route.driverId
+              ? (driverMap.get(route.driverId) ?? null)
+              : null;
+            routeInfo = {
+              routeId: route.id,
+              routeName: route.name,
+              routeStatus: route.status,
+              driverName: driver?.name || null,
+              completedAt: routeStop.actualArrival,
+            };
+          }
+        }
+
+        return {
+          ...delivery,
+          prescriptions: deliveryPrescriptions,
+          proof: proof
+            ? {
+                hasSignature: !!(proof.signature || proof.signatureUrl),
+                hasPhoto: !!(proof.picture || proof.pictureUrl),
+                signatureData: proof.signature || proof.signatureUrl,
+                photoData: proof.picture || proof.pictureUrl,
+                notes: proof.notes,
+                barcode: proof.barcode,
+                timestamp: proof.createdAt,
+              }
+            : null,
+          route: routeInfo,
+        };
+      });
 
       console.log(
         `[Orders Report API] User ${ctx.username}, returning ${ordersWithDetails.length} orders`,

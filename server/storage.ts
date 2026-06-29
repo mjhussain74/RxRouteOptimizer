@@ -200,6 +200,14 @@ export interface IStorage {
   ): Promise<DeliveryProof | undefined>;
   getDeliveryProofById(id: number): Promise<DeliveryProof | undefined>;
 
+  // Bulk query methods (avoid N+1 concurrent HTTP requests to Neon)
+  getDeliveriesByIds(ids: number[]): Promise<Delivery[]>;
+  getPrescriptionsByDeliveryIds(deliveryIds: number[]): Promise<Prescription[]>;
+  getDeliveryProofsByStopIds(stopIds: number[]): Promise<DeliveryProof[]>;
+  getRouteStopsByDeliveryIds(deliveryIds: number[]): Promise<RouteStop[]>;
+  getRoutesByIds(ids: number[]): Promise<Route[]>;
+  getDriversByIds(ids: number[]): Promise<Driver[]>;
+
   createOcrLog(log: InsertOcrLog): Promise<OcrLog>;
   getOcrLogs(deliveryId: number): Promise<OcrLog[]>;
 
@@ -1792,6 +1800,36 @@ export class DatabaseStorage implements IStorage {
       .where(eq(invoices.id, invoiceId))
       .returning();
     return updated ?? null;
+  }
+
+  async getDeliveriesByIds(ids: number[]): Promise<Delivery[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(deliveries).where(inArray(deliveries.id, ids));
+  }
+
+  async getPrescriptionsByDeliveryIds(deliveryIds: number[]): Promise<Prescription[]> {
+    if (deliveryIds.length === 0) return [];
+    return db.select().from(prescriptions).where(inArray(prescriptions.deliveryId, deliveryIds));
+  }
+
+  async getDeliveryProofsByStopIds(stopIds: number[]): Promise<DeliveryProof[]> {
+    if (stopIds.length === 0) return [];
+    return db.select().from(deliveryProofs).where(inArray(deliveryProofs.stopId, stopIds));
+  }
+
+  async getRouteStopsByDeliveryIds(deliveryIds: number[]): Promise<RouteStop[]> {
+    if (deliveryIds.length === 0) return [];
+    return db.select().from(routeStops).where(inArray(routeStops.deliveryId, deliveryIds));
+  }
+
+  async getRoutesByIds(ids: number[]): Promise<Route[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(routes).where(inArray(routes.id, ids));
+  }
+
+  async getDriversByIds(ids: number[]): Promise<Driver[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(drivers).where(inArray(drivers.id, ids));
   }
 }
 
