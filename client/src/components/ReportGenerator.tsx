@@ -187,9 +187,15 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
     enabled: !!selectedBatchId,
   });
 
-  const { data: routeReportData } = useQuery<RouteReportData>({
+  const { data: routeReportData, isLoading: routeReportLoading, isError: routeReportError } = useQuery<RouteReportData>({
     queryKey: [`/api/routes/${selectedRouteId}/report`],
     enabled: !!selectedRouteId && reportType === "route-details",
+    queryFn: async () => {
+      const res = await fetch(`/api/routes/${selectedRouteId}/report`, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    retry: 1,
   });
 
   const getDriverName = (driverId: number | null) => {
@@ -1150,9 +1156,17 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                 <div className="px-4 py-12 text-center text-slate-400">
                   Please select a route to view detailed delivery information
                 </div>
+              ) : routeReportLoading ? (
+                <div className="px-4 py-12 text-center text-slate-400">
+                  <div className="animate-pulse">Loading route details...</div>
+                </div>
+              ) : routeReportError ? (
+                <div className="px-4 py-12 text-center text-red-400">
+                  Failed to load route details. Please try selecting the route again.
+                </div>
               ) : !routeReportData ? (
                 <div className="px-4 py-12 text-center text-slate-400">
-                  Loading route details...
+                  No data available for this route.
                 </div>
               ) : (
                 <div className="p-4 space-y-4">
