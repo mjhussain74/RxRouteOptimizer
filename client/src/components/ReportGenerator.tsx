@@ -146,7 +146,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [selectedPharmacyId, setSelectedPharmacyId] = useState<number | null>(null);
-  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("open");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
   const [reportType, setReportType] = useState<"orders" | "routes" | "route-details" | "deliveries" | "prescriptions">("orders");
   const [proofDialog, setProofDialog] = useState<{ open: boolean; type: 'signature' | 'photo'; data: string | null }>({ open: false, type: 'signature', data: null });
   const [pdfGenerating, setPdfGenerating] = useState(false);
