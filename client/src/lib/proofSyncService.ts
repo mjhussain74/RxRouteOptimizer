@@ -18,6 +18,64 @@ export interface SyncStatus {
   lastError: string | null;
 }
 
+// Structured error codes returned from the server
+export type ProofErrorCode =
+  | 'BARCODE_MISMATCH'
+  | 'SESSION_EXPIRED'
+  | 'ROUTE_NOT_FOUND'
+  | 'STOP_NOT_FOUND'
+  | 'NETWORK_ERROR'
+  | 'SERVER_ERROR'
+  | 'UNKNOWN';
+
+export interface ProofUploadError {
+  code: ProofErrorCode;
+  message: string;
+}
+
+export function classifyProofError(error: unknown, status?: number): ProofUploadError {
+  if (!navigator.onLine) {
+    return {
+      code: 'NETWORK_ERROR',
+      message: "Could not reach server — your proof is saved locally and will upload automatically when reconnected",
+    };
+  }
+
+  if (status === 401 || status === 403) {
+    return {
+      code: 'SESSION_EXPIRED',
+      message: "Session expired — please log in again",
+    };
+  }
+
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes('barcode') || msg.includes('mismatch')) {
+      return {
+        code: 'BARCODE_MISMATCH',
+        message: "Barcode doesn't match this delivery — please re-scan",
+      };
+    }
+    if (msg.includes('route') && msg.includes('not found')) {
+      return { code: 'ROUTE_NOT_FOUND', message: "Route not found — please refresh and try again" };
+    }
+    if (msg.includes('stop') && msg.includes('not found')) {
+      return { code: 'STOP_NOT_FOUND', message: "Delivery stop not found — please refresh and try again" };
+    }
+    if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch')) {
+      return {
+        code: 'NETWORK_ERROR',
+        message: "Could not reach server — your proof is saved locally and will upload automatically when reconnected",
+      };
+    }
+  }
+
+  return {
+    code: 'SERVER_ERROR',
+    message: "Could not reach server — your proof is saved locally and will upload automatically when reconnected",
+  };
+}
+
 let syncStatus: SyncStatus = {
   isOnline: navigator.onLine,
   isSyncing: false,
@@ -76,8 +134,11 @@ async function uploadProof(proof: LocalProof): Promise<boolean> {
     );
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `Upload failed: ${response.status}`);
+      let errorData: any = {};
+      try { errorData = await response.json(); } catch {}
+      // Use the structured code from server if available
+      const errorMsg = errorData.error || `Upload failed: ${response.status}`;
+      throw Object.assign(new Error(errorMsg), { status: response.status, code: errorData.code });
     }
 
     await deleteProof(proof.id);
@@ -85,7 +146,8 @@ async function uploadProof(proof: LocalProof): Promise<boolean> {
     return true;
   } catch (error: any) {
     console.error('❌ Failed to upload proof:', proof.id, error);
-    await updateProofStatus(proof.id, 'failed', error.message);
+    const classified = classifyProofError(error, error?.status);
+    await updateProofStatus(proof.id, 'failed', classified.message);
     return false;
   }
 }

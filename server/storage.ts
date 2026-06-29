@@ -34,7 +34,6 @@ import {
   billingTiers,
   invoices,
   invoiceItems,
-  auditLogs,
   type User,
   type InsertUser,
   type Driver,
@@ -242,8 +241,6 @@ export interface IStorage {
     status: string,
   ): Promise<DeliveryOrder | undefined>;
   cancelDeliveryOrdersByBatch(batchId: number): Promise<void>;
-  cancelAllEligibleOrdersForPharmacy(pharmacyId: number): Promise<number>;
-  getActiveBatchForPharmacy(pharmacyId: number): Promise<DeliveryBatch | undefined>;
   updateDeliveryOrderDeliveryIdentifier(
     id: number,
     deliveryIdentifier: string,
@@ -280,56 +277,6 @@ export interface IStorage {
     targetDeliveryId: number,
     sourceDeliveryIds: number[],
   ): Promise<Delivery | undefined>;
-
-  // Billing methods
-  getBillingTiers(): Promise<any[]>;
-  updateBillingTiers(tiers: InsertBillingTier[]): Promise<any[]>;
-  getInvoices(pharmacyId?: number): Promise<any[]>;
-  getInvoiceByRouteId(routeId: number): Promise<any | null>;
-  getInvoiceByPharmacyAndRoute(
-    pharmacyId: number,
-    routeId: number,
-  ): Promise<any | null>;
-  getInvoiceWithItems(invoiceId: number): Promise<any | null>;
-  createInvoiceWithItems(
-    invoiceData: InsertInvoice,
-    items: Omit<InsertInvoiceItem, "invoiceId">[],
-  ): Promise<any>;
-  updateInvoiceStatus(invoiceId: number, status: string): Promise<any | null>;
-
-  // Analytics methods
-  getAddressFrequency(
-    pharmacyId: number | null,
-    from: Date,
-    to: Date,
-  ): Promise<AddressFrequencyGroup[]>;
-}
-
-export interface AddressFrequencyOrderDetail {
-  id: number;
-  rxNumber: string;
-  batchId: number | null;
-  fillDate: string | null;
-  deliveryStatus: string;
-  lastSeenAt: string;
-  customerName: string | null;
-}
-
-export interface AddressFrequencyGroup {
-  normalizedAddressHash: string;
-  addressText: string;
-  streetAddress: string | null;
-  city: string | null;
-  state: string | null;
-  zipCode: string | null;
-  lat: number | null;
-  lng: number | null;
-  customerNames: string[];
-  totalCount: number;
-  monthCount: number;
-  weekCount: number;
-  lastDeliveryDate: string;
-  orders: AddressFrequencyOrderDetail[];
 }
 
 export type SafeUser = Omit<User, "password">;
@@ -1290,9 +1237,11 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Restore non-delivered orders back to ROUTE_ELIGIBLE so dispatchers can
+    // immediately re-route them without any manual intervention.
     await db
       .update(deliveryOrders)
-      .set({ deliveryStatus: "CANCELLED" })
+      .set({ deliveryStatus: "ROUTE_ELIGIBLE", routeId: null })
       .where(
         and(
           eq(deliveryOrders.routeId, routeId),
@@ -1393,11 +1342,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(deliveryOrders.pharmacyId, pharmacyId),
-          notInArray(deliveryOrders.deliveryStatus, [
-            "CANCELLED",
-            "DELIVERED",
-            "ROUTED",
-          ]),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
           or(
             isNull(deliveryOrders.batchId),
             notInArray(deliveryBatches.status, ["cancelled", "complete"]),
@@ -1423,11 +1368,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           inArray(deliveryOrders.id, orderIds),
-          notInArray(deliveryOrders.deliveryStatus, [
-            "CANCELLED",
-            "DELIVERED",
-            "ROUTED",
-          ]),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
         ),
       )
       .orderBy(desc(deliveryOrders.lastSeenAt));
@@ -1451,37 +1392,12 @@ export class DatabaseStorage implements IStorage {
   async reactivateDeliveryOrder(
     id: number,
   ): Promise<DeliveryOrder | undefined> {
-    // Try to find an active batch this order has previously appeared in
-    const uploadHistory = await db
-      .select({ batchId: deliveryOrderUploads.batchId })
-      .from(deliveryOrderUploads)
-      .where(eq(deliveryOrderUploads.deliveryOrderId, id));
-
-    let resolvedBatchId: number | null = null;
-    if (uploadHistory.length > 0) {
-      const batchIds = uploadHistory.map((u) => u.batchId);
-      const activeBatch = await db
-        .select({ id: deliveryBatches.id })
-        .from(deliveryBatches)
-        .where(
-          and(
-            inArray(deliveryBatches.id, batchIds),
-            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
-          ),
-        )
-        .orderBy(desc(deliveryBatches.id))
-        .limit(1);
-      if (activeBatch.length > 0) {
-        resolvedBatchId = activeBatch[0].id;
-      }
-    }
-
     const result = await db
       .update(deliveryOrders)
       .set({
         deliveryStatus: "ROUTE_ELIGIBLE",
         routeId: null,
-        batchId: resolvedBatchId,
+        batchId: null,
         scannedAt: new Date(),
         lastSeenAt: new Date(),
       })
@@ -1719,37 +1635,6 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getActiveBatchForPharmacy(
-    pharmacyId: number,
-  ): Promise<DeliveryBatch | undefined> {
-    const result = await db
-      .select()
-      .from(deliveryBatches)
-      .where(
-        and(
-          eq(deliveryBatches.pharmacyId, pharmacyId),
-          notInArray(deliveryBatches.status, ["cancelled", "complete"]),
-        ),
-      )
-      .orderBy(desc(deliveryBatches.id))
-      .limit(1);
-    return result[0];
-  }
-
-  async cancelAllEligibleOrdersForPharmacy(pharmacyId: number): Promise<number> {
-    const result = await db
-      .update(deliveryOrders)
-      .set({ deliveryStatus: "CANCELLED" })
-      .where(
-        and(
-          eq(deliveryOrders.pharmacyId, pharmacyId),
-          eq(deliveryOrders.deliveryStatus, "ROUTE_ELIGIBLE"),
-        ),
-      )
-      .returning({ id: deliveryOrders.id });
-    return result.length;
-  }
-
   async getDeliveryOrderUploads(
     orderId: number,
   ): Promise<DeliveryOrderUpload[]> {
@@ -1786,11 +1671,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
       .where(
         and(
-          notInArray(deliveryOrders.deliveryStatus, [
-            "CANCELLED",
-            "DELIVERED",
-            "ROUTED",
-          ]),
+          notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
           or(
             isNull(deliveryOrders.batchId),
             notInArray(deliveryBatches.status, ["cancelled", "complete"]),
@@ -1826,7 +1707,7 @@ export class DatabaseStorage implements IStorage {
         .where(eq(routeStops.id, activeStops[i].id));
     }
   }
-
+  
   // ============================================================
   // ADD TO: server/storage.ts
   // ============================================================
@@ -1870,17 +1751,6 @@ export class DatabaseStorage implements IStorage {
     return rows[0] ?? null;
   }
 
-  async getInvoiceByPharmacyAndRoute(pharmacyId: number, routeId: number) {
-    const rows = await db
-      .select()
-      .from(invoices)
-      .where(
-        and(eq(invoices.pharmacyId, pharmacyId), eq(invoices.routeId, routeId)),
-      )
-      .limit(1);
-    return rows[0] ?? null;
-  }
-
   async getInvoiceWithItems(invoiceId: number) {
     const rows = await db
       .select()
@@ -1899,7 +1769,10 @@ export class DatabaseStorage implements IStorage {
     invoiceData: InsertInvoice,
     items: Omit<InsertInvoiceItem, "invoiceId">[],
   ) {
-    const [invoice] = await db.insert(invoices).values(invoiceData).returning();
+    const [invoice] = await db
+      .insert(invoices)
+      .values(invoiceData)
+      .returning();
     if (items.length > 0) {
       await db
         .insert(invoiceItems)
@@ -1919,150 +1792,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(invoices.id, invoiceId))
       .returning();
     return updated ?? null;
-  }
-
-  async createAuditLog(entry: {
-    userId?: number | null;
-    username?: string | null;
-    role?: string | null;
-    action: string;
-    resourceType?: string | null;
-    resourceId?: string | null;
-    ipAddress?: string | null;
-    userAgent?: string | null;
-  }) {
-    try {
-      await db.insert(auditLogs).values(entry);
-    } catch {
-      // Fire-and-forget: never let audit log failure break a request
-    }
-  }
-
-  async getAddressFrequency(
-    pharmacyId: number | null,
-    from: Date,
-    to: Date,
-  ): Promise<AddressFrequencyGroup[]> {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-
-    const conditions = [
-      isNotNull(deliveryOrders.normalizedAddressHash),
-      drizzleSql`${deliveryOrders.lastSeenAt} >= ${from}`,
-      drizzleSql`${deliveryOrders.lastSeenAt} <= ${to}`,
-    ];
-    if (pharmacyId !== null) {
-      conditions.push(eq(deliveryOrders.pharmacyId, pharmacyId));
-    }
-
-    const rows = await db
-      .select({
-        id: deliveryOrders.id,
-        rxNumber: deliveryOrders.rxNumber,
-        batchId: deliveryOrders.batchId,
-        fillDate: deliveryOrders.fillDate,
-        deliveryStatus: deliveryOrders.deliveryStatus,
-        addressText: deliveryOrders.addressText,
-        streetAddress: deliveryOrders.streetAddress,
-        city: deliveryOrders.city,
-        state: deliveryOrders.state,
-        zipCode: deliveryOrders.zipCode,
-        normalizedAddressHash: deliveryOrders.normalizedAddressHash,
-        lat: deliveryOrders.lat,
-        lng: deliveryOrders.lng,
-        customerName: deliveryOrders.customerName,
-        lastSeenAt: deliveryOrders.lastSeenAt,
-      })
-      .from(deliveryOrders)
-      .where(and(...conditions))
-      .orderBy(desc(deliveryOrders.lastSeenAt));
-
-    // Two-pass: first collect rows and trip dates per address hash.
-    // A "trip" = one distinct batchId delivered to an address.
-    // Orders with no batchId each count as their own trip.
-    const groupMap = new Map<
-      string,
-      { data: AddressFrequencyGroup; tripDates: Map<string, Date> }
-    >();
-
-    for (const row of rows) {
-      const hash = row.normalizedAddressHash!;
-      if (!groupMap.has(hash)) {
-        groupMap.set(hash, {
-          data: {
-            normalizedAddressHash: hash,
-            addressText: row.addressText,
-            streetAddress: row.streetAddress ?? null,
-            city: row.city ?? null,
-            state: row.state ?? null,
-            zipCode: row.zipCode ?? null,
-            lat: row.lat ?? null,
-            lng: row.lng ?? null,
-            customerNames: [],
-            totalCount: 0,
-            monthCount: 0,
-            weekCount: 0,
-            lastDeliveryDate: row.lastSeenAt.toISOString(),
-            orders: [],
-          },
-          tripDates: new Map(),
-        });
-      }
-
-      const entry = groupMap.get(hash)!;
-      const { data: group, tripDates } = entry;
-
-      // Track latest date per trip key
-      const tripKey =
-        row.batchId != null ? `b${row.batchId}` : `r${row.id}`;
-      const seenAt = new Date(row.lastSeenAt);
-      const existingDate = tripDates.get(tripKey);
-      if (!existingDate || seenAt > existingDate) {
-        tripDates.set(tripKey, seenAt);
-      }
-
-      if (seenAt > new Date(group.lastDeliveryDate)) {
-        group.lastDeliveryDate = row.lastSeenAt.toISOString();
-      }
-
-      if (row.lat != null) group.lat = row.lat;
-      if (row.lng != null) group.lng = row.lng;
-
-      if (row.customerName && !group.customerNames.includes(row.customerName)) {
-        group.customerNames.push(row.customerName);
-      }
-
-      group.orders.push({
-        id: row.id,
-        rxNumber: row.rxNumber,
-        batchId: row.batchId ?? null,
-        fillDate: row.fillDate ?? null,
-        deliveryStatus: row.deliveryStatus,
-        lastSeenAt: row.lastSeenAt.toISOString(),
-        customerName: row.customerName ?? null,
-      });
-    }
-
-    // Second pass: compute trip counts from the collected trip dates
-    for (const { data: group, tripDates } of groupMap.values()) {
-      const allTripDates = [...tripDates.values()];
-      group.totalCount = allTripDates.length;
-      group.monthCount = allTripDates.filter((d) => d >= monthStart).length;
-      group.weekCount = allTripDates.filter((d) => d >= weekStart).length;
-    }
-
-    return Array.from(groupMap.values())
-      .map((e) => e.data)
-      .sort((a, b) => {
-        if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
-        return (
-          new Date(b.lastDeliveryDate).getTime() -
-          new Date(a.lastDeliveryDate).getTime()
-        );
-      });
   }
 }
 

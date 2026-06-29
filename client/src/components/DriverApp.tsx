@@ -32,6 +32,7 @@ import {
   stopAutoSync,
   subscribeSyncStatus,
   forceSyncNow,
+  classifyProofError,
   SyncStatus,
 } from "../lib/proofSyncService";
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
@@ -76,6 +77,29 @@ const currentLocationIcon = L.divIcon({
   iconSize: [20, 20],
   iconAnchor: [10, 10],
 });
+
+// ── Image compression ─────────────────────────────────────────────────────────
+// Compress a base64 image to a max dimension of 800px at JPEG quality 0.72.
+// This prevents upload timeouts on slow connections and keeps IndexedDB lean.
+async function compressImage(dataUrl: string, maxDim = 800, quality = 0.72): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const ratio = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * ratio);
+      const h = Math.round(img.height * ratio);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(dataUrl); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => resolve(dataUrl); // fall back to original on failure
+    img.src = dataUrl;
+  });
+}
 
 interface MapCenterProps {
   center: [number, number];
@@ -126,6 +150,8 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
   >(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  // Human-readable, classified proof submission error (Phase 1 only)
+  const [proofErrorMessage, setProofErrorMessage] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
     isOnline: navigator.onLine,
     isSyncing: false,
@@ -271,9 +297,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
         }
 
         if (!barcodeValid && delivery) {
-          throw new Error(
-            "Scanned barcode does not match delivery ID or any prescription number",
-          );
+          // Throw with a recognisable prefix so the error display can be specific
+          const err = new Error("BARCODE_MISMATCH");
+          (err as any).code = "BARCODE_MISMATCH";
+          throw err;
         }
       }
 
@@ -320,7 +347,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         console.error("❌ Complete-local failed:", errorData);
-        throw new Error(errorData.error || "Failed to mark delivery complete");
+        const err = new Error(errorData.error || "Failed to mark delivery complete");
+        (err as any).status = response.status;
+        (err as any).code = errorData.code;
+        throw err;
       }
 
       return { ...(await response.json()), localProofId: localProof.id };
@@ -343,6 +373,14 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     },
     onError: (error) => {
       console.error("❌ Proof submission error:", error);
+      const anyErr = error as any;
+      // Barcode mismatch is caught client-side — show specific message
+      if (anyErr?.code === "BARCODE_MISMATCH") {
+        setProofErrorMessage("Barcode doesn't match this delivery — please re-scan");
+        return;
+      }
+      const classified = classifyProofError(error, anyErr?.status);
+      setProofErrorMessage(classified.message);
     },
   });
 
@@ -572,8 +610,10 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
-      setPicture(event.target?.result as string);
+    reader.onload = async (event) => {
+      const raw = event.target?.result as string;
+      const compressed = await compressImage(raw);
+      setPicture(compressed);
     };
     reader.readAsDataURL(file);
   };
@@ -659,6 +699,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
     newSocket.on("stop_status_update", (data: any) => {
       console.log("Stop status updated:", data);
       refetchRoute();
+    });
+
+    newSocket.on("stops_added", (data: any) => {
+      console.log("Stops added to route:", data);
+      if (activeRoute && data?.routeId === activeRoute.id) {
+        refetchRoute();
+      }
     });
 
     setSocket(newSocket);
@@ -814,7 +861,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                       ? "bg-blue-500/20 text-blue-400"
                       : "bg-yellow-500/20 text-yellow-400"
                 }`}
-                title={`${syncStatus.pendingCount} pending, ${syncStatus.failedCount} failed`}
+                title={
+                  syncStatus.isSyncing
+                    ? "Uploading proof photos…"
+                    : syncStatus.failedCount > 0
+                    ? "Sync failed — tap to retry"
+                    : `${syncStatus.pendingCount} proof${syncStatus.pendingCount !== 1 ? "s" : ""} pending upload — tap to sync`
+                }
               >
                 {syncStatus.isSyncing ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -823,7 +876,13 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                 ) : (
                   <CloudOff className="h-3 w-3" />
                 )}
-                <span>{syncStatus.pendingCount + syncStatus.failedCount}</span>
+                <span>
+                  {syncStatus.isSyncing
+                    ? "Syncing…"
+                    : syncStatus.failedCount > 0
+                    ? `Retry (${syncStatus.failedCount})`
+                    : syncStatus.pendingCount}
+                </span>
               </button>
             )}
             <button
@@ -1095,6 +1154,7 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                         setShowProofModal(true);
                         setScannedBarcode(null); // Reset scanned barcode when opening modal
                         setIsScanning(false);
+                        setProofErrorMessage(null);
                       }}
                       className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3"
                     >
@@ -1438,11 +1498,19 @@ export default function DriverApp({ driverId, onBack }: DriverAppProps) {
                     </div>
 
                     <div className="flex flex-col gap-2">
-                      {submitProofMutation.isError && (
-                        <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-3 text-red-400 text-sm">
-                          {submitProofMutation.error instanceof Error
-                            ? submitProofMutation.error.message
-                            : "Failed to submit proof"}
+                      {proofErrorMessage && (
+                        <div className={`border rounded-lg p-3 text-sm flex items-start gap-2 ${
+                          proofErrorMessage.includes("Barcode")
+                            ? "bg-orange-500/20 border-orange-500/50 text-orange-300"
+                            : proofErrorMessage.includes("Session")
+                            ? "bg-yellow-500/20 border-yellow-500/50 text-yellow-300"
+                            : "bg-blue-500/20 border-blue-500/50 text-blue-300"
+                        }`}>
+                          <span className="mt-0.5 flex-shrink-0">
+                            {proofErrorMessage.includes("Barcode") ? "⚠️" :
+                             proofErrorMessage.includes("Session") ? "🔐" : "📶"}
+                          </span>
+                          <span>{proofErrorMessage}</span>
                         </div>
                       )}
                       <div className="flex gap-2">
