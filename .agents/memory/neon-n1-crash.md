@@ -4,13 +4,20 @@ description: drizzle-orm/neon-http crashes with null.map when too many concurren
 ---
 
 ## Rule
-Never use `Promise.all(items.map(async item => db.select()...))` with large arrays against the `neon-http` driver. It fires hundreds of concurrent HTTP requests which causes Neon to return null, crashing Drizzle's `processQueryResult` with `TypeError: Cannot read properties of null (reading 'map')`.
+Do NOT use `drizzle-orm/neon-http` with the `neon()` HTTP client. It crashes with `TypeError: Cannot read properties of null (reading 'map')` in `processQueryResult` even for single bulk `inArray` queries — the HTTP driver is unreliable for server-side use.
 
-**Why:** The Neon serverless HTTP driver (`drizzle-orm/neon-http` + `@neondatabase/serverless`) is stateless — each query is a separate HTTP call. Under high concurrency (300+ simultaneous calls), Neon returns null responses instead of throwing, and Drizzle's `processQueryResult` doesn't guard against null.
+**Why:** The Neon serverless HTTP driver (`drizzle-orm/neon-http`) is designed for edge/serverless environments. On a persistent Node.js server it can return null responses for valid queries, crashing Drizzle internally. Switching to `drizzle-orm/neon-serverless` with a WebSocket `Pool` resolves this completely.
 
-**How to apply:** Whenever enriching a list of rows with related data, use bulk `inArray` queries then assemble in memory:
-1. Collect all IDs from the primary result set
-2. Fire 1 bulk query per related table using `inArray(table.foreignKey, ids)`
-3. Build `Map` lookups and assemble the enriched objects synchronously
+**Fix applied (use this pattern):**
+```typescript
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
+neonConfig.webSocketConstructor = ws;
+const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+export const db = drizzle(pool);
+```
 
-The bulk methods added to `storage.ts` for this pattern: `getDeliveriesByIds`, `getPrescriptionsByDeliveryIds`, `getDeliveryProofsByStopIds`, `getRouteStopsByDeliveryIds`, `getRoutesByIds`, `getDriversByIds`.
+The `ws` package is already installed. All files importing `db` from `storage.ts` (including `uploadQueue.ts`) benefit automatically — no other changes needed.
+
+Also added bulk methods to `storage.ts` for efficient batch data fetching: `getDeliveriesByIds`, `getPrescriptionsByDeliveryIds`, `getDeliveryProofsByStopIds`, `getRouteStopsByDeliveryIds`, `getRoutesByIds`, `getDriversByIds`.

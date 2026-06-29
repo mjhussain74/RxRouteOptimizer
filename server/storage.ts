@@ -1,5 +1,7 @@
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
+neonConfig.webSocketConstructor = ws;
 import {
   eq,
   and,
@@ -68,8 +70,8 @@ import {
   type InsertInvoiceItem,
 } from "@shared/schema";
 
-const sql = neon(process.env.DATABASE_URL!);
-export const db = drizzle(sql);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+export const db = drizzle(pool);
 
 const SALT_ROUNDS = 10;
 
