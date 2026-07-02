@@ -140,6 +140,14 @@ export default function OrderManagement({
   const [newOrderCustomerName, setNewOrderCustomerName] = useState("");
   const [newOrderCustomerPhone, setNewOrderCustomerPhone] = useState("");
   const [newOrderNotes, setNewOrderNotes] = useState("");
+  // Inline error shown inside the Add Missing Prescription dialog itself
+  // so it doesn't bleed into the shared scan message banner
+  const [createOrderError, setCreateOrderError] = useState<string | null>(null);
+  // Tracks the auto-clear timeout for scanMessage so we can cancel it
+  // when a new message arrives — prevents old timeouts wiping newer messages
+  const scanMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -251,24 +259,25 @@ export default function OrderManagement({
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
 
       if (data.alreadyProcessed) {
-        setScanMessage({
+        setScanMessageWithTimer({
           text: data.message || "Already scanned",
           type: "warning",
         });
       } else {
-        setScanMessage({
+        setScanMessageWithTimer({
           text: data.message || "Scanned successfully - marked ROUTE_ELIGIBLE",
           type: "success",
         });
       }
-      setTimeout(() => setScanMessage(null), 4000);
     },
     onError: (error: Error) => {
       const scannedRx = lastScannedBarcodeRef.current.replace(/[^0-9]+$/, "");
       setNewOrderRx(scannedRx);
+      setCreateOrderError(null);
+      // Clear the "no order found" error banner before opening the dialog
+      // so it doesn't show behind/after the dialog and confuse the user
+      setScanMessageWithTimer(null);
       setShowAddOrderDialog(true);
-      setScanMessage({ text: error.message, type: "error" });
-      setTimeout(() => setScanMessage(null), 6000);
     },
   });
 
@@ -297,20 +306,18 @@ export default function OrderManagement({
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
-      setScanMessage({
+      setScanMessageWithTimer({
         text:
           data.message ||
           `${data.updatedCount} prescription(s) marked as route-eligible`,
         type: "success",
       });
-      setTimeout(() => setScanMessage(null), 4000);
     },
     onError: () => {
-      setScanMessage({
+      setScanMessageWithTimer({
         text: "Failed to confirm delivery group",
         type: "error",
       });
-      setTimeout(() => setScanMessage(null), 4000);
     },
   });
 
@@ -320,6 +327,23 @@ export default function OrderManagement({
     setNewOrderCustomerName("");
     setNewOrderCustomerPhone("");
     setNewOrderNotes("");
+    setCreateOrderError(null);
+  };
+
+  // Always cancel any pending auto-clear before setting a new scan message,
+  // so old timeouts don't overwrite newer messages or clear success toasts early
+  const setScanMessageWithTimer = (
+    msg: { text: string; type: "success" | "warning" | "error" } | null,
+    durationMs = 5000,
+  ) => {
+    if (scanMessageTimerRef.current) clearTimeout(scanMessageTimerRef.current);
+    setScanMessage(msg);
+    if (msg) {
+      scanMessageTimerRef.current = setTimeout(() => {
+        setScanMessage(null);
+        scanMessageTimerRef.current = null;
+      }, durationMs);
+    }
   };
 
   const createOrderMutation = useMutation({
@@ -353,18 +377,19 @@ export default function OrderManagement({
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
       setShowAddOrderDialog(false);
       resetNewOrderForm();
+      // Clear any lingering scan error banner before showing success
       const msg = data.geocodeWarning
-        ? `Order created for RX ${data.rxNumber} - ${data.geocodeWarning}`
-        : `Order created for RX ${data.rxNumber} - marked as ROUTE_ELIGIBLE`;
-      setScanMessage({
-        text: msg,
-        type: data.geocodeWarning ? "warning" : "success",
-      });
-      setTimeout(() => setScanMessage(null), 6000);
+        ? `Order created for RX ${data.rxNumber} — address needs correction before routing`
+        : `Order created for RX ${data.rxNumber} — marked as ROUTE_ELIGIBLE`;
+      setScanMessageWithTimer(
+        { text: msg, type: data.geocodeWarning ? "warning" : "success" },
+        6000,
+      );
     },
     onError: (error: Error) => {
-      setScanMessage({ text: error.message, type: "error" });
-      setTimeout(() => setScanMessage(null), 4000);
+      // Show error inside the dialog itself rather than the shared banner —
+      // this prevents it from being overwritten by the scan error timeout
+      setCreateOrderError(error.message);
     },
   });
 
@@ -1360,6 +1385,7 @@ export default function OrderManagement({
               <Button
                 onClick={() => {
                   if (!newOrderRx.trim() || !newOrderAddress.trim()) return;
+                  setCreateOrderError(null);
                   createOrderMutation.mutate({
                     rxNumber: newOrderRx.trim(),
                     addressText: newOrderAddress.trim(),
@@ -1376,9 +1402,15 @@ export default function OrderManagement({
                 className="bg-green-600 hover:bg-green-700"
               >
                 <Plus className="h-4 w-4 mr-1" />
-                Create Order
+                {createOrderMutation.isPending ? "Creating..." : "Create Order"}
               </Button>
             </div>
+            {createOrderError && (
+              <div className="mt-3 flex items-start gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>{createOrderError}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
