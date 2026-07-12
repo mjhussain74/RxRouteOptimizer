@@ -13,7 +13,11 @@ interface PharmacyDashboardProps {
 
 type TabType = "orders" | "reports";
 
-export default function PharmacyDashboard({ onLogout, pharmacyId, pharmacyName }: PharmacyDashboardProps) {
+export default function PharmacyDashboard({
+  onLogout,
+  pharmacyId,
+  pharmacyName,
+}: PharmacyDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("orders");
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
 
@@ -36,11 +40,15 @@ export default function PharmacyDashboard({ onLogout, pharmacyId, pharmacyName }
                 <Building2 className="h-6 w-6 text-blue-400" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">{pharmacyName || "Pharmacy Dashboard"}</h1>
-                <p className="text-xs text-slate-400">Delivery Management System</p>
+                <h1 className="text-xl font-bold text-white">
+                  {pharmacyName || "Pharmacy Dashboard"}
+                </h1>
+                <p className="text-xs text-slate-400">
+                  Delivery Management System
+                </p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <div className="text-sm font-medium text-white">
@@ -87,6 +95,7 @@ export default function PharmacyDashboard({ onLogout, pharmacyId, pharmacyName }
           <OrderManagement
             batchId={selectedBatchId}
             pharmacyId={pharmacyId}
+            isPharmacyUser={true}
             onBatchCreated={(batchId) => {
               setSelectedBatchId(batchId);
             }}
@@ -94,7 +103,10 @@ export default function PharmacyDashboard({ onLogout, pharmacyId, pharmacyName }
         )}
 
         {activeTab === "reports" && (
-          <ReportGenerator pharmacyId={pharmacyId || undefined} isAdmin={false} />
+          <ReportGenerator
+            pharmacyId={pharmacyId || undefined}
+            isAdmin={false}
+          />
         )}
       </main>
     </div>

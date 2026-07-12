@@ -9,8 +9,6 @@ import {
   FileText,
   LogOut,
   Shield,
-  DollarSign,
-  BarChart3,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import RouteOptimizer from "./RouteOptimizer";
@@ -19,8 +17,6 @@ import DriverManager from "./DriverManager";
 import OrderManagement from "./OrderManagement";
 import ZoneManager from "./ZoneManager";
 import ReportGenerator from "./ReportGenerator";
-import BillingManager from "./BillingManager";
-import AddressAnalytics from "./AddressAnalytics";
 
 interface PharmacyAdminDashboardProps {
   onOpenDriverView: (driverId: number) => void;
@@ -35,9 +31,7 @@ type TabType =
   | "routes"
   | "zones"
   | "drivers"
-  | "analytics"
-  | "reports"
-  | "billing";
+  | "reports";
 
 export default function PharmacyAdminDashboard({
   onOpenDriverView,
@@ -67,9 +61,7 @@ export default function PharmacyAdminDashboard({
     { id: "routes" as TabType, label: "View Routes", icon: MapPin },
     { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
     { id: "drivers" as TabType, label: "Drivers", icon: Users },
-    { id: "analytics" as TabType, label: "Address Analytics", icon: BarChart3 },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
-    { id: "billing" as TabType, label: "Billing", icon: DollarSign },
   ];
 
   return (
@@ -137,6 +129,7 @@ export default function PharmacyAdminDashboard({
         {activeTab === "orders" && (
           <OrderManagement
             batchId={selectedBatchId}
+            isPharmacyUser={true}
             onBatchCreated={(batchId) => {
               setSelectedBatchId(batchId);
               setActiveTab("optimize");
@@ -175,12 +168,7 @@ export default function PharmacyAdminDashboard({
           />
         )}
 
-        {activeTab === "analytics" && <AddressAnalytics />}
-
         {activeTab === "reports" && <ReportGenerator isAdmin={false} />}
-        {activeTab === "billing" && (
-          <BillingManager isPharmacyView={true} />
-        )}
       </main>
     </div>
   );
