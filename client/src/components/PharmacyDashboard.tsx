@@ -87,6 +87,7 @@ export default function PharmacyDashboard({ onLogout, pharmacyId, pharmacyName }
           <OrderManagement
             batchId={selectedBatchId}
             pharmacyId={pharmacyId}
+            isPharmacyUser={true}
             onBatchCreated={(batchId) => {
               setSelectedBatchId(batchId);
             }}

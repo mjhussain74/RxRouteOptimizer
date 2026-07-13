@@ -1,3 +1,7 @@
+// uncomment the following 2 imports and comment out drizzle and neon imports in the following lines
+// import { Pool } from "pg";
+// import { drizzle } from "drizzle-orm/node-postgres";
+
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
 import {
@@ -67,6 +71,10 @@ import {
   type InsertInvoice,
   type InsertInvoiceItem,
 } from "@shared/schema";
+
+// Comment out the 2 lines that declare the const sql and export the drizzle(sql). uncommnet the 2 lines for pool and drizzle(pool)
+// const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// export const db = drizzle(pool);
 
 const sql = neon(process.env.DATABASE_URL!);
 export const db = drizzle(sql);

@@ -63,6 +63,7 @@ interface OrderManagementProps {
   pharmacyId?: number | null;
   onBatchCreated?: (batchId: number) => void;
   onBatchSelected?: (batchId: number | null) => void;
+  isPharmacyUser?: boolean; // when true, shows the manual Add Order button
 }
 
 const STATUS_COLORS: Record<
@@ -101,6 +102,7 @@ export default function OrderManagement({
   pharmacyId,
   onBatchCreated,
   onBatchSelected,
+  isPharmacyUser = false,
 }: OrderManagementProps) {
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(
     batchId || null,
@@ -136,10 +138,17 @@ export default function OrderManagement({
     selectedIds: Set<number>;
   } | null>(null);
   const [newOrderRx, setNewOrderRx] = useState("");
+  const [newOrderFillDate, setNewOrderFillDate] = useState("");
   const [newOrderAddress, setNewOrderAddress] = useState("");
   const [newOrderCustomerName, setNewOrderCustomerName] = useState("");
   const [newOrderCustomerPhone, setNewOrderCustomerPhone] = useState("");
   const [newOrderNotes, setNewOrderNotes] = useState("");
+  // Inline error shown inside the Add Missing Prescription dialog itself
+  // so it doesn't bleed into the shared scan message banner
+  const [createOrderError, setCreateOrderError] = useState<string | null>(null);
+  // Tracks the auto-clear timeout for scanMessage so we can cancel it
+  // when a new message arrives — prevents old timeouts wiping newer messages
+  const scanMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: batches = [] } = useQuery<any[]>({
     queryKey: ["/api/batches"],
@@ -251,24 +260,25 @@ export default function OrderManagement({
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
 
       if (data.alreadyProcessed) {
-        setScanMessage({
+        setScanMessageWithTimer({
           text: data.message || "Already scanned",
           type: "warning",
         });
       } else {
-        setScanMessage({
+        setScanMessageWithTimer({
           text: data.message || "Scanned successfully - marked ROUTE_ELIGIBLE",
           type: "success",
         });
       }
-      setTimeout(() => setScanMessage(null), 4000);
     },
     onError: (error: Error) => {
       const scannedRx = lastScannedBarcodeRef.current.replace(/[^0-9]+$/, "");
       setNewOrderRx(scannedRx);
+      setCreateOrderError(null);
+      // Clear the "no order found" error banner before opening the dialog
+      // so it doesn't show behind/after the dialog and confuse the user
+      setScanMessageWithTimer(null);
       setShowAddOrderDialog(true);
-      setScanMessage({ text: error.message, type: "error" });
-      setTimeout(() => setScanMessage(null), 6000);
     },
   });
 
@@ -297,38 +307,57 @@ export default function OrderManagement({
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
-      setScanMessage({
+      setScanMessageWithTimer({
         text:
           data.message ||
           `${data.updatedCount} prescription(s) marked as route-eligible`,
         type: "success",
       });
-      setTimeout(() => setScanMessage(null), 4000);
     },
     onError: () => {
-      setScanMessage({
+      setScanMessageWithTimer({
         text: "Failed to confirm delivery group",
         type: "error",
       });
-      setTimeout(() => setScanMessage(null), 4000);
     },
   });
 
   const resetNewOrderForm = () => {
     setNewOrderRx("");
+    setNewOrderFillDate("");
     setNewOrderAddress("");
     setNewOrderCustomerName("");
     setNewOrderCustomerPhone("");
     setNewOrderNotes("");
+    setCreateOrderError(null);
+  };
+
+  // Always cancel any pending auto-clear before setting a new scan message,
+  // so old timeouts don't overwrite newer messages or clear success toasts early
+  const setScanMessageWithTimer = (
+    msg: { text: string; type: "success" | "warning" | "error" } | null,
+    durationMs = 5000,
+  ) => {
+    if (scanMessageTimerRef.current) clearTimeout(scanMessageTimerRef.current);
+    setScanMessage(msg);
+    if (msg) {
+      scanMessageTimerRef.current = setTimeout(() => {
+        setScanMessage(null);
+        scanMessageTimerRef.current = null;
+      }, durationMs);
+    }
   };
 
   const createOrderMutation = useMutation({
     mutationFn: async (data: {
       rxNumber: string;
+      fillDate?: string | null;
       addressText: string;
       customerName: string;
       customerPhone: string;
       notes: string;
+      pharmacyId?: number | null;
+      batchId?: number | null;
     }) => {
       const response = await fetch("/api/delivery-orders", {
         method: "POST",
@@ -353,18 +382,19 @@ export default function OrderManagement({
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
       setShowAddOrderDialog(false);
       resetNewOrderForm();
+      // Clear any lingering scan error banner before showing success
       const msg = data.geocodeWarning
-        ? `Order created for RX ${data.rxNumber} - ${data.geocodeWarning}`
-        : `Order created for RX ${data.rxNumber} - marked as ROUTE_ELIGIBLE`;
-      setScanMessage({
-        text: msg,
-        type: data.geocodeWarning ? "warning" : "success",
-      });
-      setTimeout(() => setScanMessage(null), 6000);
+        ? `Order created for RX ${data.rxNumber} — address needs correction before routing`
+        : `Order created for RX ${data.rxNumber} — marked as ROUTE_ELIGIBLE`;
+      setScanMessageWithTimer(
+        { text: msg, type: data.geocodeWarning ? "warning" : "success" },
+        6000,
+      );
     },
     onError: (error: Error) => {
-      setScanMessage({ text: error.message, type: "error" });
-      setTimeout(() => setScanMessage(null), 4000);
+      // Show error inside the dialog itself rather than the shared banner —
+      // this prevents it from being overwritten by the scan error timeout
+      setCreateOrderError(error.message);
     },
   });
 
@@ -799,6 +829,26 @@ export default function OrderManagement({
           </p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
+          {/* Manual add button — pharmacy users only */}
+          {isPharmacyUser && (
+            <Button
+              onClick={() => {
+                setNewOrderRx("");
+                setNewOrderFillDate("");
+                setNewOrderAddress("");
+                setNewOrderCustomerName("");
+                setNewOrderCustomerPhone("");
+                setNewOrderNotes("");
+                setCreateOrderError(null);
+                setShowAddOrderDialog(true);
+              }}
+              size="sm"
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add Order
+            </Button>
+          )}
           <div className="flex items-center gap-2">
             <Input
               ref={barcodeInputRef}
@@ -1287,21 +1337,23 @@ export default function OrderManagement({
       {showAddOrderDialog && (
         <div
           className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-          onClick={() => setShowAddOrderDialog(false)}
+          onClick={() => { setShowAddOrderDialog(false); resetNewOrderForm(); }}
         >
           <div
-            className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md"
+            className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-bold text-white mb-1">
-              Add Missing Prescription
+              {newOrderRx ? "Add Missing Prescription" : "Add Delivery Order"}
             </h3>
             <p className="text-slate-400 text-sm mb-4">
-              This RX was not found in the system. Create a new order for it.
+              {newOrderRx
+                ? "This RX was not found in the system. Create a new order for it."
+                : "Manually add a prescription delivery order. Useful for sending out older prescriptions not in the current batch."}
             </p>
             <div className="space-y-3">
               <div>
-                <Label className="text-slate-300">RX Number</Label>
+                <Label className="text-slate-300">RX Number <span className="text-red-400">*</span></Label>
                 <Input
                   value={newOrderRx}
                   onChange={(e) => setNewOrderRx(e.target.value)}
@@ -1310,7 +1362,17 @@ export default function OrderManagement({
                 />
               </div>
               <div>
-                <Label className="text-slate-300">Address</Label>
+                <Label className="text-slate-300">Fill Date <span className="text-slate-500">(optional)</span></Label>
+                <Input
+                  type="date"
+                  value={newOrderFillDate}
+                  onChange={(e) => setNewOrderFillDate(e.target.value)}
+                  className="bg-slate-900/50 border-slate-600 text-white"
+                />
+                <p className="text-slate-500 text-xs mt-1">When the prescription was filled — useful for tracking older refills</p>
+              </div>
+              <div>
+                <Label className="text-slate-300">Address <span className="text-red-400">*</span></Label>
                 <Input
                   value={newOrderAddress}
                   onChange={(e) => setNewOrderAddress(e.target.value)}
@@ -1360,12 +1422,19 @@ export default function OrderManagement({
               <Button
                 onClick={() => {
                   if (!newOrderRx.trim() || !newOrderAddress.trim()) return;
+                  setCreateOrderError(null);
                   createOrderMutation.mutate({
                     rxNumber: newOrderRx.trim(),
+                    fillDate: newOrderFillDate || null,
                     addressText: newOrderAddress.trim(),
                     customerName: newOrderCustomerName.trim(),
                     customerPhone: newOrderCustomerPhone.trim(),
                     notes: newOrderNotes.trim(),
+                    // Pass pharmacyId and batchId so the backend can resolve
+                    // the correct pharmacy when the logged-in user is an admin
+                    // (admins have no pharmacyId on their session)
+                    pharmacyId: pharmacyId ?? null,
+                    batchId: activeBatchId ?? null,
                   });
                 }}
                 disabled={
@@ -1376,9 +1445,15 @@ export default function OrderManagement({
                 className="bg-green-600 hover:bg-green-700"
               >
                 <Plus className="h-4 w-4 mr-1" />
-                Create Order
+                {createOrderMutation.isPending ? "Creating..." : "Create Order"}
               </Button>
             </div>
+            {createOrderError && (
+              <div className="mt-3 flex items-start gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>{createOrderError}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,0 +1,5 @@
+🚀 Starting background upload processor
+✅ Object Storage initialized successfully
+7:56:22 AM [express] serving on port 5000
+7:56:23 AM [express] GET /api/auth/me 401 in 1ms :: {"message":"Not authenticated"}
+7:56:23 AM [express] GET /api/auth/needs-setup 304 in 76ms :: {"needsSetup":false}

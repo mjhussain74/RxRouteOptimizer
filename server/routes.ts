@@ -1554,16 +1554,36 @@ export async function registerRoutes(
   app.post("/api/delivery-orders", requireStaff, async (req, res) => {
     try {
       const session = req.session as any;
-      const pharmacyId = session?.user?.pharmacyId;
+      const isAdmin = session?.user?.role === "admin";
+      const sessionPharmacyId = session?.user?.pharmacyId;
+
+      const { rxNumber, addressText, customerName, customerPhone, notes, fillDate, pharmacyId: bodyPharmacyId } = req.body;
+
+      // Resolve pharmacyId:
+      // - Pharmacy staff: use their session pharmacyId
+      // - Admin: must pass pharmacyId in request body (the frontend sends
+      //   the currently selected batch's pharmacyId), OR we look it up
+      //   from the currently selected batch if batchId is provided
+      let pharmacyId = sessionPharmacyId;
+
+      if (isAdmin) {
+        if (bodyPharmacyId) {
+          pharmacyId = Number(bodyPharmacyId);
+        } else if (req.body.batchId) {
+          const batch = await storage.getBatch(Number(req.body.batchId));
+          pharmacyId = batch?.pharmacyId ?? null;
+        }
+      }
 
       if (!pharmacyId) {
         return res
           .status(400)
-          .json({ error: "No pharmacy associated with your account" });
+          .json({
+            error: isAdmin
+              ? "Please select a batch first so the system knows which pharmacy this order belongs to."
+              : "No pharmacy associated with your account",
+          });
       }
-
-      const { rxNumber, addressText, customerName, customerPhone, notes } =
-        req.body;
       if (!rxNumber || !addressText) {
         return res
           .status(400)
@@ -1610,7 +1630,7 @@ export async function registerRoutes(
         {
           rxNumber,
           pharmacyId,
-          fillDate: null,
+          fillDate: fillDate || null,
           deliveryStatus: hasGeocode ? "ROUTE_ELIGIBLE" : "IMPORTED",
           addressText: normalizedData?.fullAddress || addressText,
           streetAddress: normalizedData?.streetAddress || null,
@@ -1782,22 +1802,72 @@ export async function registerRoutes(
           });
         }
 
-        // Strip trailing non-numeric characters from barcode
-        const cleanBarcode = barcode.replace(/[^0-9]+$/, "");
+        // Normalize the scanned barcode — handles BOTH directions of R suffix mismatch:
+        //
+        // Case A: Label has trailing R, CSV doesn't
+        //   Scanned: "156129R" → cleanBarcode = "156129"
+        //   CSV stored: "156129"   ← cleanBarcode matches ✓
+        //
+        // Case B: CSV has trailing R, label doesn't (current situation)
+        //   Scanned: "156129" → cleanBarcode = "156129"
+        //   CSV stored: "156129R" ← neither clean nor raw matches
+        //   Solution: also try cleanBarcode + "R" as a third candidate
+        //
+        // Case C: Both match exactly (no R involved)
+        //   Scanned: "172605" → cleanBarcode = "172605"
+        //   CSV stored: "172605"  ← cleanBarcode matches ✓
 
-        // Search across all pharmacy orders if admin, or scoped to pharmacy
+        const normalizeBarcode = (b: string): string =>
+          b.trim()
+           .replace(/[Rr]$/, "")        // strip trailing R/r (refill suffix)
+           .replace(/^[Rr](?=\d)/, "")  // strip leading R/r only when followed by digit
+           .replace(/[^0-9]+$/, "")     // strip any remaining trailing non-numeric chars
+           .trim();
+
+        const rawBarcode    = barcode.trim();
+        const cleanBarcode  = normalizeBarcode(rawBarcode) || rawBarcode;
+        const refillBarcode = cleanBarcode + "R"; // Case B: CSV has R, label doesn't
+
+        // Helper — tries all three variants and returns the first match
+        const findOrderByAnyVariant = async (pid: number) => {
+          // 1. Stripped version (most common — label has R, CSV doesn't)
+          let found = await storage.findDeliveryOrderByRx(pid, cleanBarcode);
+          if (found) return found;
+          // 2. Raw scanned value (exact match, no transformation needed)
+          if (rawBarcode !== cleanBarcode) {
+            found = await storage.findDeliveryOrderByRx(pid, rawBarcode);
+            if (found) return found;
+          }
+          // 3. Stripped + "R" (CSV has R suffix, scanned label doesn't)
+          found = await storage.findDeliveryOrderByRx(pid, refillBarcode);
+          return found ?? null;
+        };
+
+        // Search scoped to pharmacy, or across all for admin
         let order;
         if (pharmacyId) {
-          order = await storage.findDeliveryOrderByRx(pharmacyId, cleanBarcode);
-          if (!order) {
-            order = await storage.findDeliveryOrderByRx(pharmacyId, barcode);
-          }
+          order = await findOrderByAnyVariant(pharmacyId);
+        } else if (session?.user?.role === "admin") {
+          const allOrders = await storage.getAllDeliveryOrders();
+          order = allOrders.find(
+            (o: any) =>
+              o.rxNumber === cleanBarcode ||
+              o.rxNumber === rawBarcode ||
+              o.rxNumber === refillBarcode,
+          ) ?? null;
         }
 
         if (!order) {
+          // Show all variants tried so pharmacy staff can understand the mismatch
+          const variantsTried = [cleanBarcode];
+          if (rawBarcode !== cleanBarcode) variantsTried.push(rawBarcode);
+          if (refillBarcode !== rawBarcode) variantsTried.push(refillBarcode);
+          const triedStr = variantsTried.length > 1
+            ? `${variantsTried[0]} (also tried: ${variantsTried.slice(1).join(", ")})`
+            : variantsTried[0];
           return res
             .status(404)
-            .json({ error: `No order found for RX: ${cleanBarcode}` });
+            .json({ error: `No order found for RX: ${triedStr}` });
         }
 
         if (

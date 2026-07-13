@@ -109,6 +109,7 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
         {activeTab === "orders" && (
           <OrderManagement
             batchId={selectedBatchId}
+            isPharmacyUser={true}
             onBatchCreated={(batchId) => {
               setSelectedBatchId(batchId);
               setActiveTab("optimize");
