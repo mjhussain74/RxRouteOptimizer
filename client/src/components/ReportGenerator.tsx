@@ -58,6 +58,7 @@ interface RouteReportData {
     estimatedDuration: number;
     createdAt: string;
     dispatchedAt: string | null;
+    activatedAt: string | null;
     completedAt: string | null;
   };
   driver: {
@@ -145,7 +146,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [selectedPharmacyId, setSelectedPharmacyId] = useState<number | null>(null);
-  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("open");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
   const [reportType, setReportType] = useState<"orders" | "routes" | "route-details" | "deliveries" | "prescriptions">("orders");
   const [proofDialog, setProofDialog] = useState<{ open: boolean; type: 'signature' | 'photo'; data: string | null }>({ open: false, type: 'signature', data: null });
   const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -186,9 +187,15 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
     enabled: !!selectedBatchId,
   });
 
-  const { data: routeReportData } = useQuery<RouteReportData>({
+  const { data: routeReportData, isLoading: routeReportLoading, isError: routeReportError } = useQuery<RouteReportData>({
     queryKey: [`/api/routes/${selectedRouteId}/report`],
     enabled: !!selectedRouteId && reportType === "route-details",
+    queryFn: async () => {
+      const res = await fetch(`/api/routes/${selectedRouteId}/report`, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    retry: 1,
   });
 
   const getDriverName = (driverId: number | null) => {
@@ -293,10 +300,21 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
       y += 6;
       doc.text(`Status: ${routeReportData.route.status.toUpperCase()}`, margin, y);
       y += 6;
-      if (routeReportData.route.completedAt) {
-        doc.text(`Completed: ${new Date(routeReportData.route.completedAt).toLocaleString()}`, margin, y);
+      if (routeReportData.route.dispatchedAt) {
+        doc.text(`Dispatched: ${new Date(routeReportData.route.dispatchedAt).toLocaleString()}`, margin, y);
         y += 6;
       }
+      if (routeReportData.route.activatedAt) {
+        doc.text(`Activated:  ${new Date(routeReportData.route.activatedAt).toLocaleString()}`, margin, y);
+        y += 6;
+      }
+      if (routeReportData.route.completedAt) {
+        doc.text(`Completed:  ${new Date(routeReportData.route.completedAt).toLocaleString()}`, margin, y);
+        y += 6;
+      }
+      const pdfDuration = formatDuration(routeStartTs(routeReportData.route), routeReportData.route.completedAt);
+      doc.text(`Duration:   ${pdfDuration}`, margin, y);
+      y += 6;
       doc.setTextColor(0, 0, 0);
 
       y += 4;
@@ -538,7 +556,8 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
         if (y > 270) { doc.addPage(); y = 20; }
         const driverName = getDriverName(route.driverId);
         const status = route.completedAt ? "Completed" : route.status;
-        doc.text(`${index + 1}. ${route.name}  ·  ${driverName}  ·  ${status}`, margin, y);
+        const duration = formatDuration(routeStartTs(route), route.completedAt);
+        doc.text(`${index + 1}. ${route.name}  ·  ${driverName}  ·  ${status}  ·  ${duration}`, margin, y);
         y += 6;
       });
     } else if (reportType === "deliveries" && selectedBatchData) {
@@ -582,7 +601,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
     const now = new Date();
     
     if (reportType === "routes") {
-      const headers = ["Route Name", "Driver", "Status", "Distance (km)", "Duration (min)", "Created At", "Dispatched At", "Completed At"];
+      const headers = ["Route Name", "Driver", "Status", "Distance (km)", "Est. Duration (min)", "Actual Duration", "Created At", "Dispatched At", "Activated At", "Completed At"];
       
       const rows = filteredRoutes.map((route: any) => {
         return [
@@ -591,9 +610,11 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
           route.status,
           route.estimatedDistance?.toFixed(2) || "0",
           route.estimatedDuration || "0",
-          route.createdAt ? new Date(route.createdAt).toLocaleDateString() : "",
-          route.dispatchedAt ? new Date(route.dispatchedAt).toLocaleDateString() : "",
-          route.completedAt ? new Date(route.completedAt).toLocaleDateString() : "",
+          formatDuration(routeStartTs(route), route.completedAt),
+          route.createdAt ? new Date(route.createdAt).toLocaleString() : "",
+          route.dispatchedAt ? new Date(route.dispatchedAt).toLocaleString() : "",
+          route.activatedAt ? new Date(route.activatedAt).toLocaleString() : "",
+          route.completedAt ? new Date(route.completedAt).toLocaleString() : "",
         ];
       });
       
@@ -627,6 +648,10 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
         `Route: ${routeReportData.route.name}`,
         `Driver: ${routeReportData.driver?.name || "Unassigned"}`,
         `Status: ${routeReportData.route.status}`,
+        `Dispatched: ${routeReportData.route.dispatchedAt ? new Date(routeReportData.route.dispatchedAt).toLocaleString() : "—"}`,
+        `Activated: ${routeReportData.route.activatedAt ? new Date(routeReportData.route.activatedAt).toLocaleString() : "—"}`,
+        `Completed: ${routeReportData.route.completedAt ? new Date(routeReportData.route.completedAt).toLocaleString() : "—"}`,
+        `Duration: ${formatDuration(routeStartTs(routeReportData.route), routeReportData.route.completedAt)}`,
         "",
         headers.join(","),
         ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
@@ -688,6 +713,22 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
   const openProofDialog = (type: 'signature' | 'photo', data: string | null) => {
     setProofDialog({ open: true, type, data });
   };
+
+  /** Format milliseconds as "Xh Ym". Returns "In progress" when end is null. */
+  const formatDuration = (startIso: string | null | undefined, endIso: string | null | undefined): string => {
+    if (!startIso) return "—";
+    if (!endIso) return "In progress";
+    const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
+    if (ms <= 0) return "—";
+    const totalMins = Math.round(ms / 60000);
+    const h = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  /** Pick the best start timestamp for a route: activatedAt → dispatchedAt → createdAt */
+  const routeStartTs = (route: any): string | null =>
+    route.activatedAt ?? route.dispatchedAt ?? route.createdAt ?? null;
 
   return (
     <div className="space-y-6">
@@ -1038,6 +1079,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Driver</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Status</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Distance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Duration</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Created</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">Actions</th>
                     </tr>
@@ -1045,7 +1087,7 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                   <tbody className="divide-y divide-slate-700">
                     {filteredRoutes.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                           No routes found
                         </td>
                       </tr>
@@ -1072,6 +1114,16 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                             </td>
                             <td className="px-4 py-3 text-sm text-slate-300">
                               {route.estimatedDistance?.toFixed(1) || 0} km
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {(() => {
+                                const d = formatDuration(routeStartTs(route), route.completedAt);
+                                return (
+                                  <span className={d === "In progress" ? "text-yellow-400" : "text-slate-300"}>
+                                    {d}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-4 py-3 text-sm text-slate-400">
                               {route.createdAt ? new Date(route.createdAt).toLocaleDateString() : "-"}
@@ -1104,13 +1156,21 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                 <div className="px-4 py-12 text-center text-slate-400">
                   Please select a route to view detailed delivery information
                 </div>
+              ) : routeReportLoading ? (
+                <div className="px-4 py-12 text-center text-slate-400">
+                  <div className="animate-pulse">Loading route details...</div>
+                </div>
+              ) : routeReportError ? (
+                <div className="px-4 py-12 text-center text-red-400">
+                  Failed to load route details. Please try selecting the route again.
+                </div>
               ) : !routeReportData ? (
                 <div className="px-4 py-12 text-center text-slate-400">
-                  Loading route details...
+                  No data available for this route.
                 </div>
               ) : (
                 <div className="p-4 space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2">
                     <div className="bg-slate-700/50 rounded-lg p-3">
                       <p className="text-xs text-slate-400">Driver</p>
                       <p className="text-white font-medium">{routeReportData.driver?.name || "Unassigned"}</p>
@@ -1126,6 +1186,42 @@ export default function ReportGenerator({ pharmacyId, isAdmin }: ReportGenerator
                     <div className="bg-slate-700/50 rounded-lg p-3">
                       <p className="text-xs text-slate-400">Rx Verified</p>
                       <p className="text-white font-medium">{routeReportData.summary.verifiedPrescriptions}/{routeReportData.summary.totalPrescriptions}</p>
+                    </div>
+                  </div>
+
+                  {/* Timestamps + duration row */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div className="bg-slate-700/50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400">Dispatched</p>
+                      <p className="text-white text-sm">
+                        {routeReportData.route.dispatchedAt
+                          ? new Date(routeReportData.route.dispatchedAt).toLocaleString()
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="bg-slate-700/50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400">Activated</p>
+                      <p className="text-white text-sm">
+                        {routeReportData.route.activatedAt
+                          ? new Date(routeReportData.route.activatedAt).toLocaleString()
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="bg-slate-700/50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400">Completed</p>
+                      <p className="text-white text-sm">
+                        {routeReportData.route.completedAt
+                          ? new Date(routeReportData.route.completedAt).toLocaleString()
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="bg-slate-700/50 rounded-lg p-3">
+                      <p className="text-xs text-slate-400">Total Duration</p>
+                      <p className={`font-semibold text-sm ${
+                        routeReportData.route.completedAt ? "text-green-400" : "text-yellow-400"
+                      }`}>
+                        {formatDuration(routeStartTs(routeReportData.route), routeReportData.route.completedAt)}
+                      </p>
                     </div>
                   </div>
                   

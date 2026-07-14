@@ -1,0 +1,2 @@
+- [Neon HTTP N+1 query crash](neon-n1-crash.md) — firing 300+ concurrent Drizzle queries via Promise.all against neon-http driver crashes with `processQueryResult null.map`; fix with bulk inArray queries.
+- [Upload queue cold-start error](upload-queue-coldstart.md) — startup ❌ Queue processing error is a Neon cold-start race, pre-existing, not caused by app logic changes.

@@ -1,9 +1,13 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MapPin, Truck, CheckCircle, Clock, Send, User, Navigation, XCircle, Trash2 } from "lucide-react";
+import {
+  MapPin, Truck, CheckCircle, Clock, Send, User, Navigation,
+  XCircle, Trash2, PlusCircle, Search, Loader2, AlertCircle,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Input } from "./ui/input";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -59,11 +63,36 @@ export default function RouteMap({
   onOpenDriverView,
 }: RouteMapProps) {
   const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
+  // Add Stops modal state
+  const [showAddStops, setShowAddStops] = useState(false);
+  const [addStopsSearch, setAddStopsSearch] = useState("");
+  const [addStopsPharmacyFilter, setAddStopsPharmacyFilter] = useState<string>("");
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set());
+  const [addStopsError, setAddStopsError] = useState<string | null>(null);
+
   const queryClient = useQueryClient();
 
   const { data: routeData } = useQuery({
     queryKey: [`/api/routes/${selectedRouteId}`],
     enabled: !!selectedRouteId,
+  });
+
+  // Eligible orders for the Add Stops modal
+  const { data: eligibleOrders = [], isLoading: ordersLoading } = useQuery<any[]>({
+    queryKey: ["/api/delivery-orders/eligible"],
+    enabled: showAddStops,
+    queryFn: async () => {
+      const res = await fetch("/api/delivery-orders/eligible", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch eligible orders");
+      return res.json();
+    },
+  });
+
+  // Pharmacies for admin filter (best-effort, won't fail if not admin)
+  const { data: pharmacies = [] } = useQuery<any[]>({
+    queryKey: ["/api/pharmacies"],
+    enabled: showAddStops,
+    retry: false,
   });
 
   const assignMutation = useMutation({
@@ -114,6 +143,8 @@ export default function RouteMap({
       queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
       queryClient.invalidateQueries({ queryKey: [`/api/routes/${selectedRouteId}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/deliveries/active"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
     },
   });
 
@@ -136,6 +167,38 @@ export default function RouteMap({
     },
   });
 
+  const addStopsMutation = useMutation({
+    mutationFn: async ({ routeId, orderIds }: { routeId: number; orderIds: number[] }) => {
+      const response = await fetch(`/api/routes/${routeId}/stops`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderIds }),
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to add stops");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/routes/${selectedRouteId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      setShowAddStops(false);
+      setSelectedOrderIds(new Set());
+      setAddStopsSearch("");
+      setAddStopsPharmacyFilter("");
+      setAddStopsError(null);
+      if (data.failed > 0) {
+        setAddStopsError(`${data.added} stop${data.added !== 1 ? "s" : ""} added. ${data.failed} could not be added (not geocoded or already routed).`);
+      }
+    },
+    onError: (err: Error) => {
+      setAddStopsError(err.message);
+    },
+  });
+
   const route = (routeData as any)?.route;
   const stops = (routeData as any)?.stops || [];
 
@@ -152,6 +215,27 @@ export default function RouteMap({
       routePath.push([stop.delivery.lat, stop.delivery.lng]);
     }
   });
+
+  // Decide if the Add Stops button should be visible
+  const canAddStops = route && ["dispatched", "active", "assigned", "optimized", "pending"].includes(route.status);
+
+  // Filter eligible orders for the modal
+  const filteredOrders = eligibleOrders.filter((o: any) => {
+    const matchesSearch = !addStopsSearch ||
+      o.addressText?.toLowerCase().includes(addStopsSearch.toLowerCase()) ||
+      o.customerName?.toLowerCase().includes(addStopsSearch.toLowerCase()) ||
+      o.rxNumber?.toLowerCase().includes(addStopsSearch.toLowerCase());
+    const matchesPharmacy = !addStopsPharmacyFilter ||
+      String(o.pharmacyId) === addStopsPharmacyFilter;
+    return matchesSearch && matchesPharmacy;
+  });
+
+  const toggleOrder = (id: number) => {
+    const next = new Set(selectedOrderIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedOrderIds(next);
+  };
 
   return (
     <div className="space-y-6">
@@ -192,6 +276,7 @@ export default function RouteMap({
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
                         r.status === "dispatched" ? "bg-green-500/20 text-green-400" :
                         r.status === "assigned" ? "bg-yellow-500/20 text-yellow-400" :
+                        r.status === "active" ? "bg-teal-500/20 text-teal-400" :
                         "bg-slate-700 text-slate-400"
                       }`}>
                         {r.status}
@@ -249,7 +334,7 @@ export default function RouteMap({
                   </Button>
                 )}
 
-                {route.driverId && route.status !== "dispatched" && (
+                {route.driverId && route.status !== "dispatched" && route.status !== "active" && (
                   <Button
                     onClick={() => dispatchMutation.mutate(selectedRouteId)}
                     disabled={dispatchMutation.isPending}
@@ -260,7 +345,7 @@ export default function RouteMap({
                   </Button>
                 )}
 
-                {route.status === "dispatched" && route.driverId && (
+                {(route.status === "dispatched" || route.status === "active") && route.driverId && (
                   <Button
                     onClick={() => onOpenDriverView(route.driverId)}
                     className="w-full bg-blue-500 hover:bg-blue-600"
@@ -270,10 +355,27 @@ export default function RouteMap({
                   </Button>
                 )}
 
-                {["pending", "optimized", "assigned", "dispatched"].includes(route.status) && (
+                {/* Add Stops button — shown for any non-terminal route */}
+                {canAddStops && (
                   <Button
                     onClick={() => {
-                      if (confirm("Are you sure you want to cancel this route? All pending deliveries will be released back to the pool.")) {
+                      setShowAddStops(true);
+                      setAddStopsError(null);
+                      setSelectedOrderIds(new Set());
+                      setAddStopsSearch("");
+                    }}
+                    variant="outline"
+                    className="w-full border-teal-600 text-teal-400 hover:bg-teal-500/10"
+                  >
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Add Stops to Route
+                  </Button>
+                )}
+
+                {["pending", "optimized", "assigned", "dispatched", "active"].includes(route.status) && (
+                  <Button
+                    onClick={() => {
+                      if (confirm("Cancel this route? All pending deliveries will return to the eligible pool and can be re-routed immediately.")) {
                         cancelMutation.mutate(selectedRouteId!);
                       }
                     }}
@@ -400,6 +502,144 @@ export default function RouteMap({
           )}
         </div>
       </div>
+
+      {/* ── Add Stops Modal ───────────────────────────────────────────────── */}
+      {showAddStops && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-xl flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+              <div>
+                <h3 className="text-white font-semibold text-lg">Add Stops to Route</h3>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Select route-eligible orders to append to <span className="text-white">{route?.name}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowAddStops(false); setAddStopsError(null); }}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Filters */}
+            <div className="px-5 py-3 border-b border-slate-700 space-y-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Search address, customer, or RX…"
+                  value={addStopsSearch}
+                  onChange={(e) => setAddStopsSearch(e.target.value)}
+                  className="pl-9 bg-slate-900/60 border-slate-600 text-white placeholder:text-slate-500 h-8 text-sm"
+                />
+              </div>
+              {(pharmacies as any[]).length > 0 && (
+                <select
+                  value={addStopsPharmacyFilter}
+                  onChange={(e) => setAddStopsPharmacyFilter(e.target.value)}
+                  className="w-full bg-slate-900/60 border border-slate-600 text-white rounded-md px-3 py-1.5 text-sm"
+                >
+                  <option value="">All Pharmacies</option>
+                  {(pharmacies as any[]).map((p: any) => (
+                    <option key={p.id} value={String(p.id)}>{p.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Order list */}
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2 min-h-0">
+              {ordersLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+                </div>
+              ) : filteredOrders.length === 0 ? (
+                <div className="text-center py-10 text-slate-400 text-sm">
+                  {eligibleOrders.length === 0
+                    ? "No route-eligible orders available."
+                    : "No orders match your search."}
+                </div>
+              ) : (
+                filteredOrders.map((order: any) => {
+                  const selected = selectedOrderIds.has(order.id);
+                  return (
+                    <label
+                      key={order.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selected
+                          ? "bg-teal-500/10 border-teal-500/40"
+                          : "bg-slate-700/30 border-slate-600/50 hover:border-slate-500"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleOrder(order.id)}
+                        className="mt-1 w-4 h-4 accent-teal-500 flex-shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate">
+                          {order.addressText}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {order.customerName && (
+                            <span className="text-slate-400 text-xs">{order.customerName}</span>
+                          )}
+                          <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">
+                            {order.rxNumber}
+                          </span>
+                          {!order.lat || !order.lng ? (
+                            <span className="text-xs text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded">
+                              No coords
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 border-t border-slate-700 space-y-3">
+              {addStopsError && (
+                <div className="flex items-start gap-2 text-amber-300 text-xs bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                  <span>{addStopsError}</span>
+                </div>
+              )}
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => { setShowAddStops(false); setAddStopsError(null); }}
+                  className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-700"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (selectedOrderIds.size === 0) return;
+                    addStopsMutation.mutate({
+                      routeId: selectedRouteId!,
+                      orderIds: Array.from(selectedOrderIds),
+                    });
+                  }}
+                  disabled={selectedOrderIds.size === 0 || addStopsMutation.isPending}
+                  className="flex-1 bg-teal-600 hover:bg-teal-700 text-white"
+                >
+                  {addStopsMutation.isPending ? (
+                    <><Loader2 className="h-4 w-4 animate-spin mr-2" />Adding…</>
+                  ) : (
+                    <><PlusCircle className="h-4 w-4 mr-2" />Add {selectedOrderIds.size > 0 ? `${selectedOrderIds.size} Stop${selectedOrderIds.size !== 1 ? "s" : ""}` : "Stops"}</>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

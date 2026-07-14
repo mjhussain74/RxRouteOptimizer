@@ -32,19 +32,33 @@ if (isProduction) {
   app.set('trust proxy', 1);
 }
 
+if (!process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET env var is required — refusing to start without it");
+}
+
+const SESSION_MAX_AGE = 30 * 60 * 1000; // 30-minute inactivity timeout
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'route-optimizer-secret-key',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   store: sessionStore,
   cookie: {
     secure: isProduction,
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000,
+    maxAge: SESSION_MAX_AGE,
     sameSite: isProduction ? 'none' : 'lax'
   },
   proxy: isProduction
 }));
+
+// Sliding session — reset expiry on every authenticated request
+app.use((req, _res, next) => {
+  if (req.session?.user && req.session.cookie) {
+    req.session.cookie.maxAge = SESSION_MAX_AGE;
+  }
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -68,11 +82,23 @@ app.use((req, res, next) => {
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
 
+  // Paths that return PHI — suppress response body from logs
+  const PHI_PATHS = [
+    '/api/delivery-orders',
+    '/api/batches',
+    '/api/prescriptions',
+    '/api/reports',
+    '/api/routes',
+    '/api/deliveries',
+    '/api/storage',
+  ];
+
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      const isPHIPath = PHI_PATHS.some(p => path.startsWith(p));
+      if (!isPHIPath && capturedJsonResponse) {
         const jsonStr = JSON.stringify(capturedJsonResponse);
         logLine += ` :: ${jsonStr.length > 2000 ? jsonStr.substring(0, 2000) + '...[truncated]' : jsonStr}`;
       }

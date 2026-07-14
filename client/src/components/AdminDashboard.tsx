@@ -13,6 +13,7 @@ import {
   LogOut,
   Shield,
   DollarSign,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import RouteOptimizer from "./RouteOptimizer";
@@ -24,6 +25,7 @@ import ReportGenerator from "./ReportGenerator";
 import PharmacyManager from "./PharmacyManager";
 import BillingManager from "./BillingManager";
 import UserManager from "./UserManager";
+import AddressAnalytics from "./AddressAnalytics";
 
 interface AdminDashboardProps {
   onOpenDriverView: (driverId: number) => void;
@@ -37,6 +39,7 @@ type TabType =
   | "drivers"
   | "zones"
   | "reports"
+  | "analytics"
   | "pharmacies"
   | "users"
   | "billing";
@@ -71,6 +74,7 @@ export default function AdminDashboard({
     { id: "routes" as TabType, label: "View Routes", icon: MapPin },
     { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
     { id: "drivers" as TabType, label: "Drivers", icon: Users },
+    { id: "analytics" as TabType, label: "Address Analytics", icon: BarChart3 },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
     { id: "pharmacies" as TabType, label: "Pharmacies", icon: Building2 },
     { id: "users" as TabType, label: "Users", icon: Settings },
@@ -179,6 +183,8 @@ export default function AdminDashboard({
             onOpenDriverView={onOpenDriverView}
           />
         )}
+
+        {activeTab === "analytics" && <AddressAnalytics />}
 
         {activeTab === "reports" && <ReportGenerator isAdmin={true} />}
 
