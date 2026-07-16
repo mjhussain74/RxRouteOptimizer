@@ -636,6 +636,35 @@ export async function registerRoutes(
     }
   });
 
+  // Diagnostic endpoint — check what's actually stored for a proof record
+  // Usage: GET /api/proofs/debug/:stopId (pass the route stop ID)
+  app.get("/api/proofs/debug/:stopId", requireStaff, async (req, res) => {
+    try {
+      const stopId = parseInt(req.params.stopId);
+      const proof = await storage.getDeliveryProof(stopId);
+      if (!proof) return res.status(404).json({ error: "No proof for this stop" });
+      res.json({
+        id: proof.id,
+        stopId: proof.stopId,
+        hasSignatureInDB: !!proof.signature,
+        signatureLength: proof.signature?.length ?? 0,
+        hasSignatureUrl: !!proof.signatureUrl,
+        signatureUrl: proof.signatureUrl ?? null,
+        hasPictureInDB: !!proof.picture,
+        pictureLength: proof.picture?.length ?? 0,
+        hasPictureUrl: !!proof.pictureUrl,
+        pictureUrl: proof.pictureUrl ?? null,
+        uploadStatus: proof.uploadStatus,
+        notes: proof.notes,
+        barcode: proof.barcode,
+        localProofId: proof.localProofId,
+        createdAt: proof.createdAt,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Upload status endpoint
   app.get(
     "/api/proofs/:proofId/upload-status",
@@ -2293,13 +2322,19 @@ export async function registerRoutes(
             })),
             proof: proof
               ? {
+                  // Check all storage locations: base64 in DB column first,
+                  // then object storage URL as fallback
                   hasSignature: !!(proof.signature || proof.signatureUrl),
                   hasPhoto: !!(proof.picture || proof.pictureUrl),
-                  signatureData: proof.signature || proof.signatureUrl,
-                  photoData: proof.picture || proof.pictureUrl,
+                  // Prefer the DB-stored base64 so the report renders inline
+                  // without a separate fetch; fall back to the object storage
+                  // URL if the base64 was cleared after upload
+                  signatureData: proof.signature || proof.signatureUrl || null,
+                  photoData: proof.picture || proof.pictureUrl || null,
                   notes: proof.notes,
                   timestamp: proof.createdAt,
                   barcode: proof.barcode,
+                  uploadStatus: proof.uploadStatus,
                 }
               : null,
           };
@@ -2961,28 +2996,32 @@ export async function registerRoutes(
           console.log(
             `📝 Updating existing proof ${existingProof.id} with uploaded images`,
           );
+          // Always store base64 directly in the database column.
+          // If object storage (R2) is also available, queue an upload in
+          // parallel so the image gets moved to object storage later —
+          // but the report can always read from the database column as a
+          // fallback. This prevents the report from showing no signature
+          // when object storage upload is delayed or fails.
           proof = await storage.updateDeliveryProof(existingProof.id, {
-            signature: useObjectStorage
-              ? null
-              : signature || existingProof.signature,
-            picture: useObjectStorage ? null : picture || existingProof.picture,
+            signature: signature || existingProof.signature || null,
+            picture: picture || existingProof.picture || null,
             notes: notes || existingProof.notes,
             barcode: barcode || existingProof.barcode,
-            uploadStatus:
-              useObjectStorage && hasUploads ? "pending" : "completed",
+            uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed",
           });
         } else {
           const stop = await storage.getRouteStop(stopId);
           proof = await storage.createDeliveryProof({
             stopId,
             deliveryId: stop?.deliveryId || null,
-            signature: useObjectStorage ? null : signature || null,
-            picture: useObjectStorage ? null : picture || null,
+            // Same approach — always store base64 in DB, queue for object
+            // storage in parallel if available
+            signature: signature || null,
+            picture: picture || null,
             notes: notes || null,
             barcode: barcode || null,
             localProofId: localProofId || null,
-            uploadStatus:
-              useObjectStorage && hasUploads ? "pending" : "completed",
+            uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed",
           });
         }
 

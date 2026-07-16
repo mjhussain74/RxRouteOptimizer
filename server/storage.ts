@@ -1,16 +1,7 @@
-<<<<<<< HEAD
-// uncomment the following 2 imports and comment out drizzle and neon imports in the following lines
-// import { Pool } from "pg";
-// import { drizzle } from "drizzle-orm/node-postgres";
-
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
-=======
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
 neonConfig.webSocketConstructor = ws;
->>>>>>> 58937e42962cdbf92d2e931f1824abaf2bea2f6d
 import {
   eq,
   and,
@@ -79,17 +70,8 @@ import {
   type InsertInvoiceItem,
 } from "@shared/schema";
 
-<<<<<<< HEAD
-// Comment out the 2 lines that declare the const sql and export the drizzle(sql). uncommnet the 2 lines for pool and drizzle(pool)
-// const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-// export const db = drizzle(pool);
-
-const sql = neon(process.env.DATABASE_URL!);
-export const db = drizzle(sql);
-=======
 const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
 export const db = drizzle(pool);
->>>>>>> 58937e42962cdbf92d2e931f1824abaf2bea2f6d
 
 const SALT_ROUNDS = 10;
 

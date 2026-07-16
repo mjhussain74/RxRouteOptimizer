@@ -1,17 +1,15 @@
 // ── Storage backend: Cloudflare R2 via @aws-sdk/client-s3 ────────────────────
-// Replaces @replit/object-storage.
-// Required environment variables (add to Oracle Cloud / your .env):
-//   R2_ENDPOINT      = https://ACCOUNT_ID.r2.cloudflarestorage.com
-//   R2_ACCESS_KEY_ID = your R2 access key id
+// Required environment variables:
+//   R2_ENDPOINT          = https://ACCOUNT_ID.r2.cloudflarestorage.com
+//   R2_ACCESS_KEY_ID     = your R2 access key id
 //   R2_SECRET_ACCESS_KEY = your R2 secret access key
-//   R2_BUCKET_NAME   = pharmacy-delivery-proofs  (or whatever you named it)
-//   R2_PUBLIC_URL    = https://pub-XXXX.r2.dev  (your bucket's public URL)
-//                      OR your custom domain if you've set one up
+//   R2_BUCKET_NAME       = pharmacy-delivery-proofs
 // ─────────────────────────────────────────────────────────────────────────────
 import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  ListBucketsCommand,
 } from "@aws-sdk/client-s3";
 import { db } from "./storage";
 import { uploadQueue, deliveryProofs, deliveries } from "@shared/schema";
@@ -24,15 +22,14 @@ let objectStorageAvailable = false;
 const BUCKET = process.env.R2_BUCKET_NAME ?? "";
 
 async function initializeClient(): Promise<void> {
-  const endpoint      = process.env.R2_ENDPOINT;
-  const accessKeyId   = process.env.R2_ACCESS_KEY_ID;
-  const secretKey     = process.env.R2_SECRET_ACCESS_KEY;
+  const endpoint    = process.env.R2_ENDPOINT;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretKey   = process.env.R2_SECRET_ACCESS_KEY;
 
   if (!endpoint || !accessKeyId || !secretKey || !BUCKET) {
     console.log(
-      "⚠️  R2 not configured (missing R2_ENDPOINT / R2_ACCESS_KEY_ID / " +
-      "R2_SECRET_ACCESS_KEY / R2_BUCKET_NAME). " +
-      "Proof images will be stored as base64 in the database instead.",
+      "⚠️  R2 not configured — proof images stored as base64 in database. " +
+      "Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME to enable R2.",
     );
     objectStorageAvailable = false;
     s3 = null;
@@ -40,15 +37,24 @@ async function initializeClient(): Promise<void> {
   }
 
   try {
-    s3 = new S3Client({
-      region: "auto",           // R2 always uses "auto"
+    const client = new S3Client({
+      region: "auto",
       endpoint,
       credentials: { accessKeyId, secretAccessKey: secretKey },
     });
+
+    // Verify credentials actually work by making a lightweight API call.
+    // This catches misconfigured keys at startup rather than at first delivery.
+    await client.send(new ListBucketsCommand({}));
+
+    s3 = client;
     objectStorageAvailable = true;
-    console.log("✅ Cloudflare R2 storage initialised successfully");
-  } catch (error) {
-    console.error("❌ R2 initialisation failed:", error);
+    console.log(`✅ Cloudflare R2 storage initialised — bucket: ${BUCKET}`);
+  } catch (error: any) {
+    console.error(
+      "❌ R2 initialisation failed — falling back to database storage:",
+      error?.message ?? error,
+    );
     objectStorageAvailable = false;
     s3 = null;
   }
@@ -70,7 +76,7 @@ interface QueueItem {
   maxRetries: number;
 }
 
-// ── Queue management (unchanged from original) ────────────────────────────────
+// ── Queue management ──────────────────────────────────────────────────────────
 
 let isProcessing = false;
 let processingInterval: NodeJS.Timeout | null = null;
@@ -80,7 +86,7 @@ export async function addToUploadQueue(
   type: "signature" | "picture",
   data: string,
 ): Promise<void> {
-  console.log(`📤 Adding ${type} to upload queue for proof ${proofId}`);
+  console.log(`📤 Queuing ${type} upload for proof ${proofId}`);
 
   await db.insert(uploadQueue).values({
     proofId,
@@ -110,13 +116,15 @@ export async function startBackgroundProcessor(): Promise<void> {
   }
 
   if (objectStorageAvailable) {
+    // Process every 10 seconds. Each tick handles up to 5 items so a
+    // signature + photo pair for one delivery uploads in a single tick.
     processingInterval = setInterval(() => {
       triggerProcessing();
     }, 10000);
 
     triggerProcessing();
   } else {
-    console.log("ℹ️  Background processor disabled — using database storage fallback");
+    console.log("ℹ️  Background processor disabled — using database storage");
   }
 }
 
@@ -133,6 +141,8 @@ async function processQueue(): Promise<void> {
   isProcessing = true;
 
   try {
+    // Process up to 5 items per tick (was 1 — this was causing signature +
+    // photo for one delivery to take 20+ seconds across two separate intervals)
     const pendingItems = await db
       .select()
       .from(uploadQueue)
@@ -145,7 +155,7 @@ async function processQueue(): Promise<void> {
           ),
         ),
       )
-      .limit(1);
+      .limit(5);
 
     if (pendingItems.length === 0) {
       isProcessing = false;
@@ -164,7 +174,7 @@ async function processQueue(): Promise<void> {
   }
 }
 
-// ── Core upload logic — only this function changed from the original ───────────
+// ── Core upload logic ─────────────────────────────────────────────────────────
 
 async function processUploadItem(item: QueueItem): Promise<void> {
   const { id, proofId, type, data, retryCount } = item;
@@ -183,14 +193,14 @@ async function processUploadItem(item: QueueItem): Promise<void> {
       throw new Error("R2 storage client not initialised");
     }
 
-    // Resolve a human-readable folder name from the delivery identifier
+    // Resolve folder name from the delivery identifier
     const proofResult = await db
       .select()
       .from(deliveryProofs)
       .where(eq(deliveryProofs.id, proofId));
     const proof = proofResult[0];
 
-    let folderName = `proof_${proofId}`; // safe fallback
+    let folderName = `proof_${proofId}`;
     if (proof?.deliveryId) {
       const deliveryResult = await db
         .select()
@@ -204,8 +214,6 @@ async function processUploadItem(item: QueueItem): Promise<void> {
       }
     }
 
-    console.log(`📁 Using folder name: ${folderName} for proof ${proofId}`);
-
     // Strip data-URL prefix → raw base64 → Buffer
     const base64Data = data.replace(/^data:image\/\w+;base64,/, "");
     const buffer = Buffer.from(base64Data, "base64");
@@ -213,23 +221,23 @@ async function processUploadItem(item: QueueItem): Promise<void> {
     const timestamp = Date.now();
     const key = `proofs/${folderName}/${type}_${timestamp}.png`;
 
-    // ── Upload to R2 ─────────────────────────────────────────────────────────
     await s3.send(
       new PutObjectCommand({
         Bucket: BUCKET,
         Key: key,
         Body: buffer,
         ContentType: "image/png",
-        // Prevent browsers / CDNs from caching PHI
         CacheControl: "no-store, no-cache, must-revalidate, private",
       }),
     );
 
-    // Build the URL that routes.ts will store in the database.
-    // Your /api/storage/* endpoint reads this key and streams the file back,
-    // so we keep the same internal URL pattern as before.
     const storageUrl = `/api/storage/${key}`;
 
+    // Store the R2 URL. We intentionally do NOT clear the base64 from the
+    // signature/picture columns here — the report endpoint reads those columns
+    // first so it can render signatures inline without a separate fetch.
+    // The base64 can be cleared manually via a DB maintenance job once you're
+    // confident R2 is stable and all reports have been generated.
     const updateField =
       type === "signature"
         ? { signatureUrl: storageUrl }
@@ -240,9 +248,12 @@ async function processUploadItem(item: QueueItem): Promise<void> {
       .set(updateField)
       .where(eq(deliveryProofs.id, proofId));
 
+    // Clear the base64 payload from the queue row after successful upload
+    // to prevent the upload_queue table from growing unboundedly.
+    // The image is now safely in R2 and the URL is stored in delivery_proofs.
     await db
       .update(uploadQueue)
-      .set({ status: "completed", processedAt: new Date() })
+      .set({ status: "completed", processedAt: new Date(), data: "" })
       .where(eq(uploadQueue.id, id));
 
     console.log(`✅ Upload completed for ${type} proof ${proofId}: ${key}`);
@@ -273,7 +284,7 @@ async function processUploadItem(item: QueueItem): Promise<void> {
   }
 }
 
-// ── Status helpers (unchanged) ────────────────────────────────────────────────
+// ── Status helpers ────────────────────────────────────────────────────────────
 
 async function checkAndUpdateProofStatus(proofId: number): Promise<void> {
   const pendingUploads = await db
@@ -327,9 +338,9 @@ export async function getUploadStatus(proofId: number): Promise<{
   const failedCount    = items.filter((i: any) => i.status === "failed").length;
 
   let status = "completed";
-  if (pendingCount > 0)                          status = "uploading";
+  if (pendingCount > 0)                             status = "uploading";
   else if (failedCount > 0 && completedCount === 0) status = "failed";
-  else if (failedCount > 0)                      status = "partial";
+  else if (failedCount > 0)                         status = "partial";
 
   return { status, pendingCount, completedCount, failedCount };
 }
@@ -352,7 +363,7 @@ export async function retryFailedUploads(proofId?: number): Promise<number> {
   return result.length;
 }
 
-// ── Download from R2 (replaces client.downloadAsBytes) ───────────────────────
+// ── Download from R2 ──────────────────────────────────────────────────────────
 
 export async function downloadFromStorage(filename: string): Promise<Buffer | null> {
   try {
@@ -370,7 +381,6 @@ export async function downloadFromStorage(filename: string): Promise<Buffer | nu
       return null;
     }
 
-    // response.Body is a ReadableStream in Node 18+ — collect it into a Buffer
     const chunks: Uint8Array[] = [];
     for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
       chunks.push(chunk);
@@ -378,7 +388,6 @@ export async function downloadFromStorage(filename: string): Promise<Buffer | nu
     return Buffer.concat(chunks);
 
   } catch (error: any) {
-    // R2 returns a NoSuchKey error for missing files — log cleanly, don't throw
     if (error?.name === "NoSuchKey" || error?.$metadata?.httpStatusCode === 404) {
       console.warn(`File not found in R2: ${filename}`);
     } else {
