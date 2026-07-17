@@ -116,11 +116,14 @@ export async function startBackgroundProcessor(): Promise<void> {
   }
 
   if (objectStorageAvailable) {
-    // Process every 10 seconds. Each tick handles up to 5 items so a
-    // signature + photo pair for one delivery uploads in a single tick.
+    // Check every 60 seconds. Each tick processes up to 5 items so a full
+    // delivery (signature + photo) completes in one tick.
+    // 60s reduces Neon idle connection errors vs the previous 10s interval —
+    // Neon serverless drops connections after ~30s of inactivity, so hammering
+    // it every 10s when the queue is empty causes constant reconnection noise.
     processingInterval = setInterval(() => {
       triggerProcessing();
-    }, 10000);
+    }, 60000);
 
     triggerProcessing();
   } else {
@@ -141,8 +144,8 @@ async function processQueue(): Promise<void> {
   isProcessing = true;
 
   try {
-    // Process up to 5 items per tick (was 1 — this was causing signature +
-    // photo for one delivery to take 20+ seconds across two separate intervals)
+    // Process up to 5 items per tick (signature + photo for one delivery
+    // upload in a single tick rather than across two separate intervals)
     const pendingItems = await db
       .select()
       .from(uploadQueue)
@@ -167,8 +170,21 @@ async function processQueue(): Promise<void> {
     for (const item of pendingItems) {
       await processUploadItem(item as QueueItem);
     }
-  } catch (error) {
-    console.error("❌ Queue processing error:", error);
+  } catch (error: any) {
+    // Neon serverless drops idle connections — "Connection terminated unexpectedly"
+    // is a normal occurrence when the queue fires and the DB connection has gone
+    // cold. Log it quietly and let the next interval tick retry automatically.
+    const isConnectionDrop =
+      error?.message?.includes("Connection terminated") ||
+      error?.message?.includes("connection terminated") ||
+      error?.message?.includes("ECONNRESET") ||
+      error?.code === "ECONNRESET";
+
+    if (isConnectionDrop) {
+      console.log("ℹ️  Queue: DB connection dropped (Neon idle timeout) — will retry on next tick");
+    } else {
+      console.error("❌ Queue processing error:", error);
+    }
   } finally {
     isProcessing = false;
   }

@@ -28,37 +28,49 @@ const sessionStore = new MemoryStoreSession({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
+// Block common vulnerability scanner paths — bots probe for PHP, WordPress,
+// and other attack surfaces. Return 404 immediately rather than serving the
+// React app (which currently returns 200 for all unknown paths).
+app.use((req, res, next) => {
+  const blocked = [
+    ".php", ".asp", ".aspx", ".jsp", ".cgi",
+    "wp-admin", "wp-login", "phpunit", "eval-stdin",
+    "xmlrpc", ".env", ".git", "config.json", "setup.cgi",
+  ];
+  const path = req.path.toLowerCase();
+  if (blocked.some(pattern => path.includes(pattern))) {
+    return res.status(404).end();
+  }
+  next();
+});
+
 if (isProduction) {
-  app.set('trust proxy', 1);
+  // Oracle Cloud routes traffic through multiple proxy hops
+  // (Oracle Load Balancer → nginx → Node).
+  // Setting trust proxy to true lets Express correctly see:
+  //   - req.secure = true  (needed for Secure cookie flag)
+  //   - req.ip = real client IP (not the proxy IP)
+  // This is safe when nginx is the sole external entry point.
+  app.set('trust proxy', true);
 }
-
-if (!process.env.SESSION_SECRET) {
-  throw new Error("SESSION_SECRET env var is required — refusing to start without it");
-}
-
-const SESSION_MAX_AGE = 30 * 60 * 1000; // 30-minute inactivity timeout
 
 app.use(session({
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || 'route-optimizer-secret-key',
   resave: false,
   saveUninitialized: false,
   store: sessionStore,
   cookie: {
+    // secure: true sends the cookie only over HTTPS.
+    // sameSite 'lax' (not 'none') works for same-site requests behind a
+    // reverse proxy and avoids browsers silently dropping the cookie.
+    // Use 'none' only if your frontend and backend are on different domains.
     secure: isProduction,
     httpOnly: true,
-    maxAge: SESSION_MAX_AGE,
-    sameSite: isProduction ? 'none' : 'lax'
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: isProduction ? 'lax' : 'lax'
   },
   proxy: isProduction
 }));
-
-// Sliding session — reset expiry on every authenticated request
-app.use((req, _res, next) => {
-  if (req.session?.user && req.session.cookie) {
-    req.session.cookie.maxAge = SESSION_MAX_AGE;
-  }
-  next();
-});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -82,23 +94,11 @@ app.use((req, res, next) => {
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
 
-  // Paths that return PHI — suppress response body from logs
-  const PHI_PATHS = [
-    '/api/delivery-orders',
-    '/api/batches',
-    '/api/prescriptions',
-    '/api/reports',
-    '/api/routes',
-    '/api/deliveries',
-    '/api/storage',
-  ];
-
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      const isPHIPath = PHI_PATHS.some(p => path.startsWith(p));
-      if (!isPHIPath && capturedJsonResponse) {
+      if (capturedJsonResponse) {
         const jsonStr = JSON.stringify(capturedJsonResponse);
         logLine += ` :: ${jsonStr.length > 2000 ? jsonStr.substring(0, 2000) + '...[truncated]' : jsonStr}`;
       }
@@ -133,13 +133,14 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  
-  const listenOptions =
-    process.platform === "win32"
-      ? { port, host: "0.0.0.0" }
-      : { port, host: "0.0.0.0", reusePort: true };
-
-  httpServer.listen(listenOptions, () => {
-    log(`serving on port ${port}`);
-  });
+  httpServer.listen(
+    {
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    },
+    () => {
+      log(`serving on port ${port}`);
+    },
+  );
 })();
