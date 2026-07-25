@@ -219,11 +219,49 @@ export async function getFailedProofs(): Promise<LocalProof[]> {
 
 export async function retryFailedProofs(): Promise<void> {
   const failedProofs = await getFailedProofs();
-  const maxRetries = 3;
 
   for (const proof of failedProofs) {
-    if (proof.retryCount < maxRetries) {
-      await updateProofStatus(proof.id, 'pending');
-    }
+    // Always reset to pending regardless of retryCount — proofs must never
+    // be permanently lost. The retry counter is reset so the next sync attempt
+    // starts fresh. This handles cases where the failure was due to a temporary
+    // network issue, session expiry, or server downtime rather than bad data.
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const getRequest = store.get(proof.id);
+      getRequest.onsuccess = () => {
+        const p = getRequest.result as LocalProof;
+        if (!p) { resolve(); return; }
+        p.uploadStatus = 'pending';
+        p.retryCount = 0;
+        p.lastError = undefined;
+        const putRequest = store.put(p);
+        putRequest.onsuccess = () => resolve();
+        putRequest.onerror = () => reject(putRequest.error);
+      };
+      getRequest.onerror = () => reject(getRequest.error);
+    });
   }
+}
+
+// Manually force-retry a specific proof by ID (used by support/admin)
+export async function forceRetryProof(id: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const getRequest = store.get(id);
+    getRequest.onsuccess = () => {
+      const proof = getRequest.result as LocalProof;
+      if (!proof) { resolve(); return; }
+      proof.uploadStatus = 'pending';
+      proof.retryCount = 0;
+      proof.lastError = undefined;
+      const putRequest = store.put(proof);
+      putRequest.onsuccess = () => resolve();
+      putRequest.onerror = () => reject(putRequest.error);
+    };
+    getRequest.onerror = () => reject(getRequest.error);
+  });
 }

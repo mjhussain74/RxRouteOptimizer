@@ -9,7 +9,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
-  ListBucketsCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { db } from "./storage";
 import { uploadQueue, deliveryProofs, deliveries } from "@shared/schema";
@@ -45,7 +45,13 @@ async function initializeClient(): Promise<void> {
 
     // Verify credentials actually work by making a lightweight API call.
     // This catches misconfigured keys at startup rather than at first delivery.
-    await client.send(new ListBucketsCommand({}));
+    //await client.send(new ListBucketsCommand({}));
+    await client.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        MaxKeys: 1,
+      }),
+    );
 
     s3 = client;
     objectStorageAvailable = true;
