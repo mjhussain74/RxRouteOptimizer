@@ -55,7 +55,25 @@ async function updateCounts(): Promise<void> {
   }
 }
 
-async function uploadProof(proof: LocalProof): Promise<boolean> {
+// Classifies a proof upload error so the UI can show appropriate messaging.
+// Used by DriverApp.tsx to determine whether to show a session-expiry warning
+// vs a generic network error.
+export function classifyProofError(error: string | null | undefined): 'session' | 'network' | 'server' | 'unknown' {
+  if (!error) return 'unknown';
+  const msg = error.toLowerCase();
+  if (msg.includes('401') || msg.includes('session') || msg.includes('authentication') || msg.includes('unauthorized')) {
+    return 'session';
+  }
+  if (msg.includes('networkerror') || msg.includes('failed to fetch') || msg.includes('econnrefused') || msg.includes('timeout')) {
+    return 'network';
+  }
+  if (msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('server')) {
+    return 'server';
+  }
+  return 'unknown';
+}
+
+
   try {
     await updateProofStatus(proof.id, 'uploading');
     
