@@ -73,7 +73,7 @@ export function classifyProofError(error: string | null | undefined): 'session' 
   return 'unknown';
 }
 
-
+async function uploadProof(proof: LocalProof): Promise<boolean> {
   try {
     await updateProofStatus(proof.id, 'uploading');
     
