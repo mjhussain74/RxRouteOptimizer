@@ -2802,18 +2802,16 @@ export async function registerRoutes(
           ? await storage.getProofByLocalId(localProofId)
           : await storage.getDeliveryProof(stopId);
 
-        if (!existingProofCheck) {
-          await storage.createDeliveryProof({
-            stopId,
-            deliveryId: stop.deliveryId,
-            signature: null,
-            picture: null,
-            notes: notes || null,
-            barcode: barcode || null,
-            localProofId: localProofId || null,
-            uploadStatus: "pending",
-          });
-        }
+        const proof = existingProofCheck ?? await storage.createDeliveryProof({
+          stopId,
+          deliveryId: stop.deliveryId,
+          signature: null,
+          picture: null,
+          notes: notes || null,
+          barcode: barcode || null,
+          localProofId: localProofId || null,
+          uploadStatus: "pending",
+        });
 
         const completedStop = await storage.completeRouteStop(stopId);
 
