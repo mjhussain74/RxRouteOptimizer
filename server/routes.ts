@@ -636,35 +636,6 @@ export async function registerRoutes(
     }
   });
 
-  // Diagnostic endpoint — check what's actually stored for a proof record
-  // Usage: GET /api/proofs/debug/:stopId (pass the route stop ID)
-  app.get("/api/proofs/debug/:stopId", requireStaff, async (req, res) => {
-    try {
-      const stopId = parseInt(req.params.stopId);
-      const proof = await storage.getDeliveryProof(stopId);
-      if (!proof) return res.status(404).json({ error: "No proof for this stop" });
-      res.json({
-        id: proof.id,
-        stopId: proof.stopId,
-        hasSignatureInDB: !!proof.signature,
-        signatureLength: proof.signature?.length ?? 0,
-        hasSignatureUrl: !!proof.signatureUrl,
-        signatureUrl: proof.signatureUrl ?? null,
-        hasPictureInDB: !!proof.picture,
-        pictureLength: proof.picture?.length ?? 0,
-        hasPictureUrl: !!proof.pictureUrl,
-        pictureUrl: proof.pictureUrl ?? null,
-        uploadStatus: proof.uploadStatus,
-        notes: proof.notes,
-        barcode: proof.barcode,
-        localProofId: proof.localProofId,
-        createdAt: proof.createdAt,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // Upload status endpoint
   app.get(
     "/api/proofs/:proofId/upload-status",
@@ -1583,36 +1554,16 @@ export async function registerRoutes(
   app.post("/api/delivery-orders", requireStaff, async (req, res) => {
     try {
       const session = req.session as any;
-      const isAdmin = session?.user?.role === "admin";
-      const sessionPharmacyId = session?.user?.pharmacyId;
-
-      const { rxNumber, addressText, customerName, customerPhone, notes, fillDate, pharmacyId: bodyPharmacyId } = req.body;
-
-      // Resolve pharmacyId:
-      // - Pharmacy staff: use their session pharmacyId
-      // - Admin: must pass pharmacyId in request body (the frontend sends
-      //   the currently selected batch's pharmacyId), OR we look it up
-      //   from the currently selected batch if batchId is provided
-      let pharmacyId = sessionPharmacyId;
-
-      if (isAdmin) {
-        if (bodyPharmacyId) {
-          pharmacyId = Number(bodyPharmacyId);
-        } else if (req.body.batchId) {
-          const batch = await storage.getBatch(Number(req.body.batchId));
-          pharmacyId = batch?.pharmacyId ?? null;
-        }
-      }
+      const pharmacyId = session?.user?.pharmacyId;
 
       if (!pharmacyId) {
         return res
           .status(400)
-          .json({
-            error: isAdmin
-              ? "Please select a batch first so the system knows which pharmacy this order belongs to."
-              : "No pharmacy associated with your account",
-          });
+          .json({ error: "No pharmacy associated with your account" });
       }
+
+      const { rxNumber, addressText, customerName, customerPhone, notes } =
+        req.body;
       if (!rxNumber || !addressText) {
         return res
           .status(400)
@@ -1659,7 +1610,7 @@ export async function registerRoutes(
         {
           rxNumber,
           pharmacyId,
-          fillDate: fillDate || null,
+          fillDate: null,
           deliveryStatus: hasGeocode ? "ROUTE_ELIGIBLE" : "IMPORTED",
           addressText: normalizedData?.fullAddress || addressText,
           streetAddress: normalizedData?.streetAddress || null,
@@ -1831,72 +1782,22 @@ export async function registerRoutes(
           });
         }
 
-        // Normalize the scanned barcode — handles BOTH directions of R suffix mismatch:
-        //
-        // Case A: Label has trailing R, CSV doesn't
-        //   Scanned: "156129R" → cleanBarcode = "156129"
-        //   CSV stored: "156129"   ← cleanBarcode matches ✓
-        //
-        // Case B: CSV has trailing R, label doesn't (current situation)
-        //   Scanned: "156129" → cleanBarcode = "156129"
-        //   CSV stored: "156129R" ← neither clean nor raw matches
-        //   Solution: also try cleanBarcode + "R" as a third candidate
-        //
-        // Case C: Both match exactly (no R involved)
-        //   Scanned: "172605" → cleanBarcode = "172605"
-        //   CSV stored: "172605"  ← cleanBarcode matches ✓
+        // Strip trailing non-numeric characters from barcode
+        const cleanBarcode = barcode.replace(/[^0-9]+$/, "");
 
-        const normalizeBarcode = (b: string): string =>
-          b.trim()
-           .replace(/[Rr]$/, "")        // strip trailing R/r (refill suffix)
-           .replace(/^[Rr](?=\d)/, "")  // strip leading R/r only when followed by digit
-           .replace(/[^0-9]+$/, "")     // strip any remaining trailing non-numeric chars
-           .trim();
-
-        const rawBarcode    = barcode.trim();
-        const cleanBarcode  = normalizeBarcode(rawBarcode) || rawBarcode;
-        const refillBarcode = cleanBarcode + "R"; // Case B: CSV has R, label doesn't
-
-        // Helper — tries all three variants and returns the first match
-        const findOrderByAnyVariant = async (pid: number) => {
-          // 1. Stripped version (most common — label has R, CSV doesn't)
-          let found = await storage.findDeliveryOrderByRx(pid, cleanBarcode);
-          if (found) return found;
-          // 2. Raw scanned value (exact match, no transformation needed)
-          if (rawBarcode !== cleanBarcode) {
-            found = await storage.findDeliveryOrderByRx(pid, rawBarcode);
-            if (found) return found;
-          }
-          // 3. Stripped + "R" (CSV has R suffix, scanned label doesn't)
-          found = await storage.findDeliveryOrderByRx(pid, refillBarcode);
-          return found ?? null;
-        };
-
-        // Search scoped to pharmacy, or across all for admin
+        // Search across all pharmacy orders if admin, or scoped to pharmacy
         let order;
         if (pharmacyId) {
-          order = await findOrderByAnyVariant(pharmacyId);
-        } else if (session?.user?.role === "admin") {
-          const allOrders = await storage.getAllDeliveryOrders();
-          order = allOrders.find(
-            (o: any) =>
-              o.rxNumber === cleanBarcode ||
-              o.rxNumber === rawBarcode ||
-              o.rxNumber === refillBarcode,
-          ) ?? null;
+          order = await storage.findDeliveryOrderByRx(pharmacyId, cleanBarcode);
+          if (!order) {
+            order = await storage.findDeliveryOrderByRx(pharmacyId, barcode);
+          }
         }
 
         if (!order) {
-          // Show all variants tried so pharmacy staff can understand the mismatch
-          const variantsTried = [cleanBarcode];
-          if (rawBarcode !== cleanBarcode) variantsTried.push(rawBarcode);
-          if (refillBarcode !== rawBarcode) variantsTried.push(refillBarcode);
-          const triedStr = variantsTried.length > 1
-            ? `${variantsTried[0]} (also tried: ${variantsTried.slice(1).join(", ")})`
-            : variantsTried[0];
           return res
             .status(404)
-            .json({ error: `No order found for RX: ${triedStr}` });
+            .json({ error: `No order found for RX: ${cleanBarcode}` });
         }
 
         if (
@@ -1971,10 +1872,16 @@ export async function registerRoutes(
           });
         }
 
-        // ── Multiple RXs — return them for pharmacy staff to confirm ──────────
+        // ── Multiple RXs found at same address ───────────────────────────────
+        // Always mark the SCANNED package as ROUTE_ELIGIBLE immediately so it
+        // is never missed even if the pharmacy staff dismisses the group dialog.
+        if (order.deliveryStatus !== "ROUTE_ELIGIBLE" && order.deliveryStatus !== "ROUTED") {
+          await storage.updateDeliveryOrderStatus(order.id, "ROUTE_ELIGIBLE");
+        }
+
         return res.json({
           requiresConfirmation: true,
-          scannedOrder: order,
+          scannedOrder: { ...order, deliveryStatus: "ROUTE_ELIGIBLE" },
           groupedOrders,
           address: order.addressText,
           customerName: order.customerName,
@@ -2322,19 +2229,13 @@ export async function registerRoutes(
             })),
             proof: proof
               ? {
-                  // Check all storage locations: base64 in DB column first,
-                  // then object storage URL as fallback
                   hasSignature: !!(proof.signature || proof.signatureUrl),
                   hasPhoto: !!(proof.picture || proof.pictureUrl),
-                  // Prefer the DB-stored base64 so the report renders inline
-                  // without a separate fetch; fall back to the object storage
-                  // URL if the base64 was cleared after upload
-                  signatureData: proof.signature || proof.signatureUrl || null,
-                  photoData: proof.picture || proof.pictureUrl || null,
+                  signatureData: proof.signature || proof.signatureUrl,
+                  photoData: proof.picture || proof.pictureUrl,
                   notes: proof.notes,
                   timestamp: proof.createdAt,
                   barcode: proof.barcode,
-                  uploadStatus: proof.uploadStatus,
                 }
               : null,
           };
@@ -2895,16 +2796,24 @@ export async function registerRoutes(
           return res.status(404).json({ error: "Stop not found" });
         }
 
-        const proof = await storage.createDeliveryProof({
-          stopId,
-          deliveryId: stop.deliveryId,
-          signature: null,
-          picture: null,
-          notes: notes || null,
-          barcode: barcode || null,
-          localProofId: localProofId || null,
-          uploadStatus: "pending",
-        });
+        // Avoid duplicate proof records — check if one already exists
+        // for this stop/localProofId before creating a new one.
+        const existingProofCheck = localProofId
+          ? await storage.getProofByLocalId(localProofId)
+          : await storage.getDeliveryProof(stopId);
+
+        if (!existingProofCheck) {
+          await storage.createDeliveryProof({
+            stopId,
+            deliveryId: stop.deliveryId,
+            signature: null,
+            picture: null,
+            notes: notes || null,
+            barcode: barcode || null,
+            localProofId: localProofId || null,
+            uploadStatus: "pending",
+          });
+        }
 
         const completedStop = await storage.completeRouteStop(stopId);
 
@@ -2996,32 +2905,31 @@ export async function registerRoutes(
           console.log(
             `📝 Updating existing proof ${existingProof.id} with uploaded images`,
           );
-          // Always store base64 directly in the database column.
-          // If object storage (R2) is also available, queue an upload in
-          // parallel so the image gets moved to object storage later —
-          // but the report can always read from the database column as a
-          // fallback. This prevents the report from showing no signature
-          // when object storage upload is delayed or fails.
+          // Always store base64 in DB columns regardless of R2 availability.
+          // R2 upload runs in parallel via the queue. The report endpoint reads
+          // DB columns first so signatures/photos show immediately without
+          // waiting for R2 upload to complete.
           proof = await storage.updateDeliveryProof(existingProof.id, {
             signature: signature || existingProof.signature || null,
             picture: picture || existingProof.picture || null,
             notes: notes || existingProof.notes,
             barcode: barcode || existingProof.barcode,
-            uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed",
+            uploadStatus:
+              useObjectStorage && hasUploads ? "pending" : "completed",
           });
         } else {
           const stop = await storage.getRouteStop(stopId);
           proof = await storage.createDeliveryProof({
             stopId,
             deliveryId: stop?.deliveryId || null,
-            // Same approach — always store base64 in DB, queue for object
-            // storage in parallel if available
+            // Always store base64 directly — R2 upload queued separately below
             signature: signature || null,
             picture: picture || null,
             notes: notes || null,
             barcode: barcode || null,
             localProofId: localProofId || null,
-            uploadStatus: useObjectStorage && hasUploads ? "pending" : "completed",
+            uploadStatus:
+              useObjectStorage && hasUploads ? "pending" : "completed",
           });
         }
 
