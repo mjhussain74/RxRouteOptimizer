@@ -2790,6 +2790,7 @@ export async function registerRoutes(
         console.log(
           `📦 Local-first completion for stop ${stopId}, localProofId: ${localProofId}`,
         );
+        console.log(`📦 complete-local body keys: ${Object.keys(req.body).join(', ')}`);
 
         const stop = await storage.getRouteStop(stopId);
         if (!stop) {
@@ -2877,14 +2878,18 @@ export async function registerRoutes(
         const stopId = parseInt(req.params.stopId);
         const { signature, picture, notes, barcode, localProofId } = req.body;
 
+        // Log every /proof attempt so we can see it in pm2 regardless of outcome
+        console.log(`📝 /proof called: routeId=${routeId} stopId=${stopId} localProofId=${localProofId || 'none'} hasSignature=${!!signature} sigLen=${signature?.length ?? 0} hasPhoto=${!!picture} hasNotes=${!!notes}`);
+
         if (!(await checkRouteOwnership(routeId, req.session))) {
+          console.log(`📝 /proof REJECTED: access denied routeId=${routeId}`);
           return res.status(403).json({ error: "Access denied to this route" });
         }
 
-        if (!signature && !picture && !notes && !barcode) {
+        if (!signature && !picture && !notes && !barcode && !localProofId) {
           return res
             .status(400)
-            .json({ error: "Signature, picture, notes, or barcode required" });
+            .json({ error: "At least one of: signature, picture, notes, barcode, or localProofId is required" });
         }
 
         const hasUploads = !!(signature || picture);
