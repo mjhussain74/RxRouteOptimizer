@@ -146,6 +146,9 @@ export default function OrderManagement({
   // Inline error shown inside the Add Missing Prescription dialog itself
   // so it doesn't bleed into the shared scan message banner
   const [createOrderError, setCreateOrderError] = useState<string | null>(null);
+  // Tab shown in the order list — "eligible" shows only ROUTE_ELIGIBLE orders
+  // (post-scan confirmation view), "all" shows everything
+  const [orderListTab, setOrderListTab] = useState<"all" | "eligible">("eligible");
   // Tracks the auto-clear timeout for scanMessage so we can cancel it
   // when a new message arrives — prevents old timeouts wiping newer messages
   const scanMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,16 +272,27 @@ export default function OrderManagement({
           text: data.message || "Scanned successfully - marked ROUTE_ELIGIBLE",
           type: "success",
         });
+        // Switch to the Route Eligible tab so staff can immediately confirm
+        // the order was marked — no need to hunt through the full list
+        setOrderListTab("eligible");
       }
     },
     onError: (error: Error) => {
       const scannedRx = lastScannedBarcodeRef.current.replace(/[^0-9]+$/, "");
       setNewOrderRx(scannedRx);
       setCreateOrderError(null);
-      // Clear the "no order found" error banner before opening the dialog
-      // so it doesn't show behind/after the dialog and confuse the user
-      setScanMessageWithTimer(null);
-      setShowAddOrderDialog(true);
+
+      // Show a persistent error so staff clearly know this scan failed.
+      // Do NOT auto-open the Add Order dialog — staff must consciously
+      // decide to add it. Previously the dialog opened automatically which
+      // caused staff to dismiss it without realising the package was missing.
+      setScanMessageWithTimer(
+        {
+          text: `⚠️ No order found for RX: ${scannedRx}. Verify this prescription was uploaded. Use "Add Order" button to manually add it if needed.`,
+          type: "error",
+        },
+        15000,
+      );
     },
   });
 
@@ -347,6 +361,52 @@ export default function OrderManagement({
       }, durationMs);
     }
   };
+
+  // Fetch active routes for the "Add to Route" dialog
+  const { data: activeRoutes = [] } = useQuery<any[]>({
+    queryKey: ["/api/routes", "active"],
+    queryFn: async () => {
+      const res = await fetch("/api/routes", { credentials: "include" });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const list = data.routes || data || [];
+      return list.filter(
+        (r: any) => ["active", "dispatched", "pending"].includes(r.status)
+      );
+    },
+    enabled: !!addToRouteOrder,
+    refetchOnWindowFocus: false,
+  });
+
+  const addToRouteMutation = useMutation({
+    mutationFn: async ({ routeId, deliveryId }: { routeId: number; deliveryId: number }) => {
+      const res = await fetch(`/api/routes/${routeId}/stops`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryId }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to add to route" }));
+        throw new Error(err.error || "Failed to add to route");
+      }
+      return res.json();
+    },
+    onSuccess: (_, { routeId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/routes/${routeId}`] });
+      if (activeBatchId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/delivery-orders/by-batch/${activeBatchId}`] });
+      }
+      setAddToRouteOrder(null);
+      setAddToRouteId("");
+      setAddToRouteError(null);
+      setScanMessageWithTimer({ text: "Order added to route successfully", type: "success" });
+    },
+    onError: (err: Error) => {
+      setAddToRouteError(err.message);
+    },
+  });
 
   const createOrderMutation = useMutation({
     mutationFn: async (data: {
@@ -1266,6 +1326,22 @@ export default function OrderManagement({
                                 <span className="text-xs">Route Ready</span>
                               </Button>
                             )}
+                            {order.deliveryStatus === "ROUTE_ELIGIBLE" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setAddToRouteOrder(order);
+                                  setAddToRouteId("");
+                                  setAddToRouteError(null);
+                                }}
+                                className="h-8 px-2 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                                title="Add to an existing route"
+                              >
+                                <Plus className="h-4 w-4 mr-1" />
+                                <span className="text-xs">Add to Route</span>
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
@@ -1316,6 +1392,7 @@ export default function OrderManagement({
                   })}
                 </tbody>
               </table>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1641,6 +1718,82 @@ export default function OrderManagement({
                 className="border-slate-600 text-slate-300 hover:bg-slate-700"
               >
                 Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add to Existing Route Modal ─────────────────────────────────────── */}
+      {addToRouteOrder && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+          onClick={() => { setAddToRouteOrder(null); setAddToRouteId(""); setAddToRouteError(null); }}
+        >
+          <div
+            className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-white mb-1">Add to Existing Route</h3>
+            <p className="text-slate-400 text-sm mb-4">
+              Select an active route to add this order to as the last stop.
+            </p>
+
+            <div className="bg-slate-900/50 rounded-lg p-3 mb-4 border border-slate-700">
+              <p className="text-white text-sm font-medium">{addToRouteOrder.customerName}</p>
+              <p className="text-slate-400 text-xs">{addToRouteOrder.addressText}</p>
+              <p className="text-slate-500 text-xs mt-1">RX: {addToRouteOrder.rxNumber}</p>
+            </div>
+
+            <div className="mb-4">
+              <label className="text-slate-300 text-sm font-medium block mb-2">Select Route</label>
+              {activeRoutes.length === 0 ? (
+                <p className="text-slate-500 text-sm italic">
+                  No active routes found. Create a route first in the Route Optimizer tab.
+                </p>
+              ) : (
+                <select
+                  value={addToRouteId}
+                  onChange={(e) => setAddToRouteId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">-- Select a route --</option>
+                  {activeRoutes.map((route: any) => (
+                    <option key={route.id} value={route.id}>
+                      {route.name} ({route.status})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {addToRouteError && (
+              <div className="mb-4 text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                {addToRouteError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => { setAddToRouteOrder(null); setAddToRouteId(""); setAddToRouteError(null); }}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                disabled={addToRouteMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!addToRouteId || !addToRouteOrder) return;
+                  addToRouteMutation.mutate({
+                    routeId: parseInt(addToRouteId),
+                    deliveryId: addToRouteOrder.id,
+                  });
+                }}
+                disabled={!addToRouteId || addToRouteMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {addToRouteMutation.isPending ? "Adding..." : "Add to Route"}
               </Button>
             </div>
           </div>

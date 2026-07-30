@@ -1782,22 +1782,49 @@ export async function registerRoutes(
           });
         }
 
-        // Strip trailing non-numeric characters from barcode
-        const cleanBarcode = barcode.replace(/[^0-9]+$/, "");
+        // Normalize the barcode — handles BOTH directions of R suffix mismatch:
+        // Case A: Barcode has trailing R, CSV doesn't → strip R → find match
+        // Case B: CSV has trailing R, barcode doesn't → try stripped + "R"
+        // Case C: Exact match — no transformation needed
+        const rawBarcode   = barcode.trim();
+        const cleanBarcode = rawBarcode
+          .replace(/[Rr]$/, "")         // strip trailing R/r (refill suffix)
+          .replace(/^[Rr](?=\d)/, "")  // strip leading R/r if followed by digit
+          .replace(/[^0-9]+$/, "")      // strip any remaining trailing non-numeric
+          .trim() || rawBarcode;
+        const refillBarcode = cleanBarcode + "R"; // Case B: CSV has R, scan doesn't
+
+        // Try all three variants — whichever matches first wins
+        const findOrderVariants = async (pid: number) => {
+          let found = await storage.findDeliveryOrderByRx(pid, cleanBarcode);
+          if (found) return found;
+          if (rawBarcode !== cleanBarcode) {
+            found = await storage.findDeliveryOrderByRx(pid, rawBarcode);
+            if (found) return found;
+          }
+          found = await storage.findDeliveryOrderByRx(pid, refillBarcode);
+          return found ?? null;
+        };
 
         // Search across all pharmacy orders if admin, or scoped to pharmacy
         let order;
         if (pharmacyId) {
-          order = await storage.findDeliveryOrderByRx(pharmacyId, cleanBarcode);
-          if (!order) {
-            order = await storage.findDeliveryOrderByRx(pharmacyId, barcode);
-          }
+          order = await findOrderVariants(pharmacyId);
+        } else if (session?.user?.role === "admin") {
+          const allOrders = await storage.getAllDeliveryOrders();
+          order = allOrders.find(
+            (o: any) =>
+              o.rxNumber === cleanBarcode ||
+              o.rxNumber === rawBarcode ||
+              o.rxNumber === refillBarcode,
+          ) ?? null;
         }
 
         if (!order) {
+          const variantsTried = [...new Set([cleanBarcode, rawBarcode, refillBarcode])].join(", ");
           return res
             .status(404)
-            .json({ error: `No order found for RX: ${cleanBarcode}` });
+            .json({ error: `No order found for RX: ${rawBarcode} (tried: ${variantsTried})` });
         }
 
         if (
