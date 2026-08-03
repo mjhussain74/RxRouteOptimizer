@@ -547,6 +547,36 @@ function calculateTotalDistance(
   return total;
 }
 
+// Retry a database operation up to maxAttempts times on transient network errors.
+// Neon serverless can occasionally return ETIMEDOUT or "fetch failed" errors
+// that resolve immediately on retry.
+async function withDbRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  delayMs = 300,
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const isTransient =
+        err?.code === 'ETIMEDOUT' ||
+        err?.message?.includes('fetch failed') ||
+        err?.message?.includes('Error connecting to database') ||
+        err?.message?.includes('Connection terminated');
+      if (isTransient && attempt < maxAttempts) {
+        console.warn(`[DB] Transient error on attempt ${attempt}/${maxAttempts}: ${err?.message} — retrying in ${delayMs}ms`);
+        await new Promise(r => setTimeout(r, delayMs * attempt));
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express,
@@ -2629,9 +2659,22 @@ export async function registerRoutes(
         totalDistance,
         estimatedDuration,
       });
-    } catch (error) {
-      console.error("Optimization error:", error);
-      res.status(500).json({ error: "Failed to optimize route" });
+    } catch (error: any) {
+      const isConnectionDrop =
+        error?.message?.includes("Connection terminated") ||
+        error?.message?.includes("connection terminated") ||
+        error?.message?.includes("ECONNRESET") ||
+        error?.code === "ECONNRESET";
+
+      if (isConnectionDrop) {
+        console.error("Route optimization failed — Neon DB connection dropped:", error?.message);
+        return res.status(503).json({
+          error: "Database connection was interrupted. Please try again — this is usually a temporary issue.",
+        });
+      }
+
+      console.error("Route optimization error:", error?.message ?? error);
+      res.status(500).json({ error: `Failed to optimize route: ${error?.message ?? "Unknown error"}` });
     }
   });
 
@@ -4362,6 +4405,117 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Orders report error:", error);
       res.status(500).json({ error: "Failed to fetch orders report" });
+    }
+  });
+
+  // ── Address Frequency Analytics ────────────────────────────────────────────
+  // Returns delivery orders grouped by normalizedAddressHash, with counts for
+  // total deliveries, this calendar month, and this calendar week.
+  // Used by AddressAnalytics.tsx to identify frequently-visited addresses.
+  app.get("/api/analytics/address-frequency", requireStaff, async (req, res) => {
+    try {
+      const session = req.session as any;
+      const isAdmin = session?.user?.role === "admin";
+      const sessionPharmacyId = session?.user?.pharmacyId
+        ? Number(session.user.pharmacyId)
+        : null;
+
+      // Date range from query params (default: last 30 days)
+      const now = new Date();
+      const defaultFrom = new Date(now);
+      defaultFrom.setDate(now.getDate() - 30);
+
+      const fromStr = (req.query.from as string) || defaultFrom.toISOString().slice(0, 10);
+      const toStr   = (req.query.to   as string) || now.toISOString().slice(0, 10);
+      const pharmacyIdFilter = req.query.pharmacyId
+        ? Number(req.query.pharmacyId)
+        : null;
+
+      const fromDate = new Date(fromStr + "T00:00:00.000Z");
+      const toDate   = new Date(toStr   + "T23:59:59.999Z");
+
+      // Current month and week boundaries for the sub-counts
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const weekStart  = new Date(now);
+      weekStart.setDate(now.getDate() - now.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+
+      // Fetch all delivery orders in the date range
+      let orders = await withDbRetry(() => storage.getDeliveryOrdersInRange(fromDate, toDate));
+
+      // Scope to pharmacy
+      if (!isAdmin && sessionPharmacyId) {
+        orders = orders.filter((o: any) => o.pharmacyId === sessionPharmacyId);
+      } else if (isAdmin && pharmacyIdFilter) {
+        orders = orders.filter((o: any) => o.pharmacyId === pharmacyIdFilter);
+      }
+
+      // Group by normalizedAddressHash (fall back to addressText if hash missing)
+      const groupMap = new Map<string, any>();
+
+      for (const order of orders) {
+        const key = order.normalizedAddressHash || order.addressText;
+        if (!key) continue;
+
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            normalizedAddressHash: key,
+            addressText: order.addressText,
+            streetAddress: order.streetAddress ?? null,
+            city: order.city ?? null,
+            state: order.state ?? null,
+            zipCode: order.zipCode ?? null,
+            lat: order.lat ?? null,
+            lng: order.lng ?? null,
+            customerNames: new Set<string>(),
+            totalCount: 0,
+            monthCount: 0,
+            weekCount: 0,
+            lastDeliveryDate: order.lastSeenAt,
+            orders: [],
+          });
+        }
+
+        const group = groupMap.get(key)!;
+        group.totalCount++;
+
+        const seen = new Date(order.lastSeenAt);
+        if (seen >= monthStart) group.monthCount++;
+        if (seen >= weekStart)  group.weekCount++;
+        if (new Date(order.lastSeenAt) > new Date(group.lastDeliveryDate)) {
+          group.lastDeliveryDate = order.lastSeenAt;
+        }
+
+        if (order.customerName) group.customerNames.add(order.customerName);
+
+        group.orders.push({
+          id: order.id,
+          rxNumber: order.rxNumber,
+          batchId: order.batchId ?? null,
+          fillDate: order.fillDate ?? null,
+          deliveryStatus: order.deliveryStatus,
+          lastSeenAt: order.lastSeenAt,
+          customerName: order.customerName ?? null,
+        });
+      }
+
+      // Convert Sets to arrays and sort orders by date desc
+      const groups = Array.from(groupMap.values()).map((g) => ({
+        ...g,
+        customerNames: Array.from(g.customerNames),
+        orders: g.orders.sort(
+          (a: any, b: any) =>
+            new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime(),
+        ),
+      }));
+
+      // Sort by totalCount desc by default
+      groups.sort((a, b) => b.totalCount - a.totalCount);
+
+      res.json({ groups });
+    } catch (err: any) {
+      console.error("Address analytics error:", err?.message ?? err);
+      res.status(500).json({ error: "Failed to load address analytics" });
     }
   });
 

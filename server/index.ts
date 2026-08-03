@@ -1,4 +1,3 @@
-import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import MemoryStore from "memorystore";
@@ -6,11 +5,43 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err.stack || err.message || err);
+// ── Global error handlers ─────────────────────────────────────────────────────
+// Neon serverless drops idle TCP connections which surfaces as an uncaught
+// "Connection terminated unexpectedly" error from the pg driver's socket
+// event emitter. Without this handler the process crashes and pm2 has to
+// restart it — during which all in-flight requests fail (e.g. route generation).
+//
+// We catch it here, log it, and let the process continue. The next DB query
+// will automatically get a fresh connection from the pool.
+process.on('uncaughtException', (err: Error) => {
+  const isNeonDrop =
+    err.message?.includes('Connection terminated unexpectedly') ||
+    err.message?.includes('connection terminated') ||
+    err.message?.includes('ECONNRESET') ||
+    (err as any).code === 'ECONNRESET';
+
+  if (isNeonDrop) {
+    // Log quietly — this is expected with Neon serverless idle timeouts
+    console.warn('[DB] Neon connection dropped (idle timeout) — process continues, next query will reconnect');
+    return; // do NOT re-throw — prevents process crash
+  }
+
+  // For all other uncaught exceptions, log and crash (pm2 will restart)
+  console.error('Uncaught Exception (fatal):', err.stack || err.message || err);
+  process.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
+process.on('unhandledRejection', (reason: any) => {
+  const isNeonDrop =
+    reason?.message?.includes('Connection terminated unexpectedly') ||
+    reason?.message?.includes('connection terminated') ||
+    reason?.code === 'ECONNRESET';
+
+  if (isNeonDrop) {
+    console.warn('[DB] Neon connection dropped (unhandled rejection) — continuing');
+    return;
+  }
+
   console.error('Unhandled Rejection:', reason);
 });
 
@@ -29,30 +60,8 @@ const sessionStore = new MemoryStoreSession({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
-// Block common vulnerability scanner paths — bots probe for PHP, WordPress,
-// and other attack surfaces. Return 404 immediately rather than serving the
-// React app (which currently returns 200 for all unknown paths).
-app.use((req, res, next) => {
-  const blocked = [
-    ".php", ".asp", ".aspx", ".jsp", ".cgi",
-    "wp-admin", "wp-login", "phpunit", "eval-stdin",
-    "xmlrpc", ".env", ".git", "config.json", "setup.cgi",
-  ];
-  const path = req.path.toLowerCase();
-  if (blocked.some(pattern => path.includes(pattern))) {
-    return res.status(404).end();
-  }
-  next();
-});
-
 if (isProduction) {
-  // Oracle Cloud routes traffic through multiple proxy hops
-  // (Oracle Load Balancer → nginx → Node).
-  // Setting trust proxy to true lets Express correctly see:
-  //   - req.secure = true  (needed for Secure cookie flag)
-  //   - req.ip = real client IP (not the proxy IP)
-  // This is safe when nginx is the sole external entry point.
-  app.set('trust proxy', true);
+  app.set('trust proxy', 1);
 }
 
 app.use(session({
@@ -61,14 +70,10 @@ app.use(session({
   saveUninitialized: false,
   store: sessionStore,
   cookie: {
-    // secure: true sends the cookie only over HTTPS.
-    // sameSite 'lax' (not 'none') works for same-site requests behind a
-    // reverse proxy and avoids browsers silently dropping the cookie.
-    // Use 'none' only if your frontend and backend are on different domains.
     secure: isProduction,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000,
-    sameSite: isProduction ? 'lax' : 'lax'
+    sameSite: isProduction ? 'none' : 'lax'
   },
   proxy: isProduction
 }));
@@ -138,7 +143,7 @@ app.use((req, res, next) => {
     {
       port,
       host: "0.0.0.0",
-//      reusePort: true,
+      reusePort: true,
     },
     () => {
       log(`serving on port ${port}`);

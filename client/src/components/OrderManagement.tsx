@@ -149,6 +149,11 @@ export default function OrderManagement({
   // Tab shown in the order list — "eligible" shows only ROUTE_ELIGIBLE orders
   // (post-scan confirmation view), "all" shows everything
   const [orderListTab, setOrderListTab] = useState<"all" | "eligible">("eligible");
+  const [showOlderEligible, setShowOlderEligible] = useState(false);
+  // Add to existing route modal state
+  const [addToRouteOrder, setAddToRouteOrder] = useState<DeliveryOrder | null>(null);
+  const [addToRouteId, setAddToRouteId] = useState<string>("");
+  const [addToRouteError, setAddToRouteError] = useState<string | null>(null);
   // Tracks the auto-clear timeout for scanMessage so we can cancel it
   // when a new message arrives — prevents old timeouts wiping newer messages
   const scanMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -164,6 +169,15 @@ export default function OrderManagement({
       ? [`/api/delivery-orders/by-batch/${activeBatchId}`]
       : ["/api/delivery-orders"],
     enabled: true,
+  });
+
+  // Fetch ALL route-eligible orders regardless of batch — this ensures manually
+  // scanned orders or orders from other batches always appear in the
+  // Route Eligible tab even when a specific batch is selected in the dropdown.
+  const { data: allEligibleOrders = [] } = useQuery<DeliveryOrder[]>({
+    queryKey: ["/api/delivery-orders/eligible"],
+    enabled: true,
+    refetchInterval: 5000, // refresh every 5s so newly scanned/added orders appear promptly
   });
 
   const handleBatchChange = (newBatchId: number | null) => {
@@ -275,6 +289,8 @@ export default function OrderManagement({
         // Switch to the Route Eligible tab so staff can immediately confirm
         // the order was marked — no need to hunt through the full list
         setOrderListTab("eligible");
+        // Immediately refresh eligible orders list
+        queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
       }
     },
     onError: (error: Error) => {
@@ -440,6 +456,8 @@ export default function OrderManagement({
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders"] });
+      // Immediately refresh eligible orders so newly added order appears in tab
+      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
       setShowAddOrderDialog(false);
       resetNewOrderForm();
       // Clear any lingering scan error banner before showing success
@@ -756,9 +774,33 @@ export default function OrderManagement({
     );
   });
 
-  const eligibleForRouting = orders.filter(
-    (o) => o.deliveryStatus === "ROUTE_ELIGIBLE",
-  );
+  // Use the dedicated eligible endpoint so orders from all batches appear,
+  // not just orders from the currently selected batch
+  const allEligible = allEligibleOrders.length > 0
+    ? allEligibleOrders
+    : orders.filter((o) => o.deliveryStatus === "ROUTE_ELIGIBLE");
+
+  // Separate today's orders from older unrouted ones
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const todayEligible = allEligible.filter((o) => {
+    // Include if scanned today (barcode scan by pharmacy staff)
+    if (o.scannedAt && new Date(o.scannedAt) >= todayStart) return true;
+    // Include if created today (manually added via "Add Order" dialog)
+    // Use createdAt NOT lastSeenAt — lastSeenAt is updated on every CSV
+    // upload so old orders get bumped to today even if not scanned
+    if (o.createdAt && new Date(o.createdAt) >= todayStart) return true;
+    return false;
+  });
+
+  const olderEligible = allEligible.filter((o) => {
+    const scannedToday = o.scannedAt && new Date(o.scannedAt) >= todayStart;
+    const createdToday = o.createdAt && new Date(o.createdAt) >= todayStart;
+    return !scannedToday && !createdToday;
+  });
+
+  const eligibleForRouting = showOlderEligible ? allEligible : todayEligible;
 
   const printableOrders = orders.filter(canPrintLabel);
 
@@ -1205,13 +1247,35 @@ export default function OrderManagement({
         </CardContent>
       </Card>
 
-      {filteredOrders.length > 0 && (
+      {orders.length > 0 && (
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader className="border-b border-slate-700">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-white">
-                Delivery Orders ({orders.length})
-              </CardTitle>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-1 bg-slate-700/50 rounded-lg p-1">
+                <button
+                  onClick={() => setOrderListTab("eligible")}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${orderListTab === "eligible" ? "bg-green-600 text-white" : "text-slate-400 hover:text-white"}`}
+                >
+                  ✓ Route Eligible
+                  <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs font-bold ${orderListTab === "eligible" ? "bg-green-700 text-white" : "bg-slate-600 text-slate-300"}`}>
+                    {eligibleForRouting.length}
+                  </span>
+                  {olderEligible.length > 0 && !showOlderEligible && (
+                    <span className="ml-1 text-amber-400 text-xs" title={`${olderEligible.length} older unrouted orders not shown`}>
+                      +{olderEligible.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setOrderListTab("all")}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${orderListTab === "all" ? "bg-slate-500 text-white" : "text-slate-400 hover:text-white"}`}
+                >
+                  All Orders
+                  <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs font-bold ${orderListTab === "all" ? "bg-slate-400 text-white" : "bg-slate-600 text-slate-300"}`}>
+                    {orders.length}
+                  </span>
+                </button>
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input
@@ -1225,6 +1289,37 @@ export default function OrderManagement({
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
+              {orderListTab === "eligible" && eligibleForRouting.length === 0 && (
+                <div className="p-10 text-center text-slate-500">
+                  <p className="text-2xl mb-2">✓</p>
+                  <p className="text-sm font-medium">No orders marked Route Eligible today</p>
+                  <p className="text-xs mt-1">Scan prescription barcodes to mark orders as route eligible.</p>
+                  {olderEligible.length > 0 && (
+                    <button
+                      onClick={() => setShowOlderEligible(true)}
+                      className="mt-3 text-amber-400 text-xs underline hover:text-amber-300"
+                    >
+                      Show {olderEligible.length} older unrouted order{olderEligible.length !== 1 ? "s" : ""} from previous days
+                    </button>
+                  )}
+                </div>
+              )}
+              {orderListTab === "eligible" && olderEligible.length > 0 && (
+                <div className="px-4 py-2 flex items-center justify-between border-b border-slate-700/50 bg-amber-500/5">
+                  <span className="text-amber-400 text-xs">
+                    {showOlderEligible
+                      ? `Showing all ${allEligible.length} eligible orders (including ${olderEligible.length} from previous days)`
+                      : `${olderEligible.length} older unrouted order${olderEligible.length !== 1 ? "s" : ""} from previous days not shown`}
+                  </span>
+                  <button
+                    onClick={() => setShowOlderEligible(v => !v)}
+                    className="text-amber-400 text-xs underline hover:text-amber-300 ml-3"
+                  >
+                    {showOlderEligible ? "Show today only" : "Show all"}
+                  </button>
+                </div>
+              )}
+              {(orderListTab === "all" || eligibleForRouting.length > 0) && (
               <table className="w-full">
                 <thead className="bg-slate-700/50">
                   <tr>
@@ -1258,7 +1353,19 @@ export default function OrderManagement({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700">
-                  {filteredOrders.map((order) => {
+                  {(orderListTab === "eligible"
+                    ? eligibleForRouting.filter((o) => {
+                        if (!searchQuery) return true;
+                        const q = searchQuery.toLowerCase();
+                        return (
+                          o.rxNumber?.toLowerCase().includes(q) ||
+                          o.addressText?.toLowerCase().includes(q) ||
+                          o.customerName?.toLowerCase().includes(q) ||
+                          o.customerPhone?.includes(q)
+                        );
+                      })
+                    : filteredOrders
+                  ).map((order) => {
                     const statusStyle = getStatusStyle(order.deliveryStatus);
                     return (
                       <tr

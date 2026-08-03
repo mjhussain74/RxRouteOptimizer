@@ -1,12 +1,12 @@
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
+neonConfig.webSocketConstructor = ws;
 import {
   eq,
   and,
   or,
   desc,
-  gte,
-  lte,
   inArray,
   notInArray,
   isNotNull,
@@ -70,15 +70,8 @@ import {
   type InsertInvoiceItem,
 } from "@shared/schema";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL environment variable is not set. " +
-    "Check your .env file and ecosystem.config.cjs."
-  );
-}
-
-const sql = neon(process.env.DATABASE_URL);
-export const db = drizzle(sql);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+export const db = drizzle(pool);
 
 const SALT_ROUNDS = 10;
 
@@ -208,6 +201,14 @@ export interface IStorage {
     },
   ): Promise<DeliveryProof | undefined>;
   getDeliveryProofById(id: number): Promise<DeliveryProof | undefined>;
+
+  // Bulk query methods (avoid N+1 concurrent HTTP requests to Neon)
+  getDeliveriesByIds(ids: number[]): Promise<Delivery[]>;
+  getPrescriptionsByDeliveryIds(deliveryIds: number[]): Promise<Prescription[]>;
+  getDeliveryProofsByStopIds(stopIds: number[]): Promise<DeliveryProof[]>;
+  getRouteStopsByDeliveryIds(deliveryIds: number[]): Promise<RouteStop[]>;
+  getRoutesByIds(ids: number[]): Promise<Route[]>;
+  getDriversByIds(ids: number[]): Promise<Driver[]>;
 
   createOcrLog(log: InsertOcrLog): Promise<OcrLog>;
   getOcrLogs(deliveryId: number): Promise<OcrLog[]>;
@@ -977,19 +978,6 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getDeliveryOrdersInRange(from: Date, to: Date): Promise<any[]> {
-    return db
-      .select()
-      .from(deliveryOrders)
-      .where(
-        and(
-          gte(deliveryOrders.lastSeenAt, from),
-          lte(deliveryOrders.lastSeenAt, to),
-        ),
-      )
-      .orderBy(desc(deliveryOrders.lastSeenAt));
-  }
-
   async getDeliveryProof(stopId: number): Promise<DeliveryProof | undefined> {
     const result = await db
       .select()
@@ -1259,9 +1247,11 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Restore non-delivered orders back to ROUTE_ELIGIBLE so dispatchers can
+    // immediately re-route them without any manual intervention.
     await db
       .update(deliveryOrders)
-      .set({ deliveryStatus: "CANCELLED" })
+      .set({ deliveryStatus: "ROUTE_ELIGIBLE", routeId: null })
       .where(
         and(
           eq(deliveryOrders.routeId, routeId),
@@ -1666,28 +1656,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]> {
-    // Returns ROUTE_ELIGIBLE orders for a pharmacy.
-    // Important: includes orders from "complete" batches that were manually
-    // scanned after the batch closed — these are valid deliveries that still
-    // need to be routed even though their batch is done.
-    // Also includes orders where pharmacyId is null (manually added orders
-    // that may not have a pharmacyId set).
     return db
       .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
       .where(
         and(
-          or(
-            eq(deliveryOrders.pharmacyId, pharmacyId),
-            isNull(deliveryOrders.pharmacyId), // manually added orders
-          ),
+          eq(deliveryOrders.pharmacyId, pharmacyId),
           eq(deliveryOrders.deliveryStatus, "ROUTE_ELIGIBLE"),
           or(
             isNull(deliveryOrders.batchId),
-            // Include orders from complete batches — they were scanned after
-            // batch completion and still need routing
-            notInArray(deliveryBatches.status, ["cancelled"]),
+            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
           ),
         ),
       )
@@ -1823,6 +1802,36 @@ export class DatabaseStorage implements IStorage {
       .where(eq(invoices.id, invoiceId))
       .returning();
     return updated ?? null;
+  }
+
+  async getDeliveriesByIds(ids: number[]): Promise<Delivery[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(deliveries).where(inArray(deliveries.id, ids));
+  }
+
+  async getPrescriptionsByDeliveryIds(deliveryIds: number[]): Promise<Prescription[]> {
+    if (deliveryIds.length === 0) return [];
+    return db.select().from(prescriptions).where(inArray(prescriptions.deliveryId, deliveryIds));
+  }
+
+  async getDeliveryProofsByStopIds(stopIds: number[]): Promise<DeliveryProof[]> {
+    if (stopIds.length === 0) return [];
+    return db.select().from(deliveryProofs).where(inArray(deliveryProofs.stopId, stopIds));
+  }
+
+  async getRouteStopsByDeliveryIds(deliveryIds: number[]): Promise<RouteStop[]> {
+    if (deliveryIds.length === 0) return [];
+    return db.select().from(routeStops).where(inArray(routeStops.deliveryId, deliveryIds));
+  }
+
+  async getRoutesByIds(ids: number[]): Promise<Route[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(routes).where(inArray(routes.id, ids));
+  }
+
+  async getDriversByIds(ids: number[]): Promise<Driver[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(drivers).where(inArray(drivers.id, ids));
   }
 }
 
