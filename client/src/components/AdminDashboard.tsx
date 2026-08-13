@@ -13,7 +13,7 @@ import {
   LogOut,
   Shield,
   DollarSign,
-  BarChart3,
+  BarChart2,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import RouteOptimizer from "./RouteOptimizer";
@@ -39,10 +39,10 @@ type TabType =
   | "drivers"
   | "zones"
   | "reports"
-  | "analytics"
   | "pharmacies"
   | "users"
-  | "billing";
+  | "billing"
+  | "analytics";
 
 export default function AdminDashboard({
   onOpenDriverView,
@@ -74,11 +74,11 @@ export default function AdminDashboard({
     { id: "routes" as TabType, label: "View Routes", icon: MapPin },
     { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
     { id: "drivers" as TabType, label: "Drivers", icon: Users },
-    { id: "analytics" as TabType, label: "Address Analytics", icon: BarChart3 },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
     { id: "pharmacies" as TabType, label: "Pharmacies", icon: Building2 },
     { id: "users" as TabType, label: "Users", icon: Settings },
     { id: "billing" as TabType, label: "Billing", icon: DollarSign },
+    { id: "analytics" as TabType, label: "Address Analytics", icon: BarChart2 },
   ];
 
   return (
@@ -184,8 +184,6 @@ export default function AdminDashboard({
           />
         )}
 
-        {activeTab === "analytics" && <AddressAnalytics />}
-
         {activeTab === "reports" && <ReportGenerator isAdmin={true} />}
 
         {activeTab === "pharmacies" && <PharmacyManager />}
@@ -194,6 +192,7 @@ export default function AdminDashboard({
           <UserManager pharmacies={pharmacies as any[]} />
         )}
         {activeTab === "billing" && <BillingManager />}
+        {activeTab === "analytics" && <AddressAnalytics />}
       </main>
     </div>
   );

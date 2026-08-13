@@ -1710,10 +1710,11 @@ export async function registerRoutes(
       const pharmacyId = session?.user?.pharmacyId;
 
       if (session?.user?.role === "admin") {
-        const allOrders = await storage.getAllDeliveryOrders();
-        return res.json(
-          allOrders.filter((o) => o.deliveryStatus === "ROUTE_ELIGIBLE"),
-        );
+        // Admin sees eligible orders from ALL pharmacies.
+        // Use the same query logic as getRouteEligibleOrders so orders from
+        // complete batches are included (same fix applied to pharmacy path).
+        const orders = await storage.getAllEligibleOrders();
+        return res.json(orders);
       }
 
       if (!pharmacyId) {
@@ -2246,15 +2247,18 @@ export async function registerRoutes(
       const stops = await storage.getRouteStops(route.id);
 
       // Build detailed stops with delivery proofs
+      // Each stop uses withDbRetry so a single transient Neon error
+      // doesn't fail the entire route report
       const detailedStops = await Promise.all(
         stops.map(async (stop) => {
-          const delivery = stop.deliveryId
-            ? await storage.getDelivery(stop.deliveryId)
-            : null;
-          const prescriptions = delivery
-            ? await storage.getPrescriptionsByDelivery(delivery.id)
-            : [];
-          const proof = await storage.getDeliveryProof(stop.id);
+          try {
+            const delivery = stop.deliveryId
+              ? await withDbRetry(() => storage.getDelivery(stop.deliveryId!))
+              : null;
+            const prescriptions = delivery
+              ? await withDbRetry(() => storage.getPrescriptionsByDelivery(delivery.id))
+              : [];
+            const proof = await withDbRetry(() => storage.getDeliveryProof(stop.id));
 
           return {
             id: stop.id,
@@ -2296,6 +2300,21 @@ export async function registerRoutes(
                 }
               : null,
           };
+          } catch (err: any) {
+            console.warn(`Route report: failed to enrich stop ${stop.id}:`, err?.message);
+            return {
+              id: stop.id,
+              sequence: stop.sequence,
+              status: stop.status,
+              priority: stop.priority,
+              packageScanned: stop.packageScanned,
+              eta: stop.eta,
+              actualArrival: stop.actualArrival,
+              delivery: null,
+              prescriptions: [],
+              proof: null,
+            };
+          }
         }),
       );
 
@@ -2383,7 +2402,7 @@ export async function registerRoutes(
       if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
         // New delivery_orders approach: create deliveries from ROUTE_ELIGIBLE orders
         const orders = await Promise.all(
-          orderIds.map((id) => storage.getDeliveryOrder(id)),
+          orderIds.map((id) => withDbRetry(() => storage.getDeliveryOrder(id))),
         );
         const validOrders = orders.filter(
           (o) => o && o.lat && o.lng && o.deliveryStatus === "ROUTE_ELIGIBLE",
@@ -4323,14 +4342,13 @@ export async function registerRoutes(
       // Get deliveries with pharmacy filtering
       let allDeliveries: any[];
       if (ctx.isAdmin) {
-        // Admin can filter by pharmacy or see all
         if (pharmacyId) {
-          allDeliveries = await storage.getDeliveriesByPharmacy(pharmacyId);
+          allDeliveries = await withDbRetry(() => storage.getDeliveriesByPharmacy(pharmacyId));
         } else {
-          allDeliveries = await storage.getDeliveries();
+          allDeliveries = await withDbRetry(() => storage.getDeliveries());
         }
       } else {
-        allDeliveries = await storage.getDeliveriesByPharmacy(ctx.pharmacyId!);
+        allDeliveries = await withDbRetry(() => storage.getDeliveriesByPharmacy(ctx.pharmacyId!));
       }
 
       // Filter by batch if specified
@@ -4350,53 +4368,80 @@ export async function registerRoutes(
         }
       }
 
-      // Enrich each delivery with prescriptions and proof data
-      const ordersWithDetails = await Promise.all(
-        allDeliveries.map(async (delivery) => {
-          const prescriptions = await storage.getPrescriptionsByDelivery(
-            delivery.id,
-          );
+      // Enrich each delivery with prescriptions and proof data.
+      // Process in batches of 10 to avoid opening hundreds of parallel
+      // Neon connections simultaneously — the leading cause of ETIMEDOUT
+      // and "other side closed" errors on this endpoint.
+      const BATCH_SIZE = 10;
+      const ordersWithDetails: any[] = [];
 
-          // Find route stop for this delivery to get proof
-          const routeStop = await storage.getRouteStopByDeliveryId(delivery.id);
-          let proof = null;
-          let routeInfo = null;
+      for (let i = 0; i < allDeliveries.length; i += BATCH_SIZE) {
+        const batch = allDeliveries.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          batch.map(async (delivery) => {
+            try {
+              const prescriptions = await withDbRetry(() =>
+                storage.getPrescriptionsByDelivery(delivery.id)
+              );
 
-          if (routeStop) {
-            proof = await storage.getDeliveryProof(routeStop.id);
-            const route = await storage.getRoute(routeStop.routeId!);
-            if (route) {
-              const driver = route.driverId
-                ? await storage.getDriver(route.driverId)
-                : null;
-              routeInfo = {
-                routeId: route.id,
-                routeName: route.name,
-                routeStatus: route.status,
-                driverName: driver?.name || null,
-                completedAt: routeStop.actualArrival,
+              const routeStop = await withDbRetry(() =>
+                storage.getRouteStopByDeliveryId(delivery.id)
+              );
+              let proof = null;
+              let routeInfo = null;
+
+              if (routeStop) {
+                proof = await withDbRetry(() =>
+                  storage.getDeliveryProof(routeStop.id)
+                );
+                const route = await withDbRetry(() =>
+                  storage.getRoute(routeStop.routeId!)
+                );
+                if (route) {
+                  const driver = route.driverId
+                    ? await withDbRetry(() => storage.getDriver(route.driverId!))
+                    : null;
+                  routeInfo = {
+                    routeId: route.id,
+                    routeName: route.name,
+                    routeStatus: route.status,
+                    driverName: driver?.name || null,
+                    completedAt: routeStop.actualArrival,
+                  };
+                }
+              }
+
+              return {
+                ...delivery,
+                prescriptions,
+                proof: proof
+                  ? {
+                      hasSignature: !!(proof.signature || proof.signatureUrl),
+                      hasPhoto: !!(proof.picture || proof.pictureUrl),
+                      signatureData: proof.signature || proof.signatureUrl,
+                      photoData: proof.picture || proof.pictureUrl,
+                      notes: proof.notes,
+                      barcode: proof.barcode,
+                      timestamp: proof.createdAt,
+                    }
+                  : null,
+                route: routeInfo,
+              };
+            } catch (err: any) {
+              // If a single delivery enrichment fails, return it without
+              // proof/route data rather than failing the entire report
+              console.warn(`Orders report: failed to enrich delivery ${delivery.id}:`, err?.message);
+              return {
+                ...delivery,
+                prescriptions: [],
+                proof: null,
+                route: null,
               };
             }
-          }
-
-          return {
-            ...delivery,
-            prescriptions,
-            proof: proof
-              ? {
-                  hasSignature: !!(proof.signature || proof.signatureUrl),
-                  hasPhoto: !!(proof.picture || proof.pictureUrl),
-                  signatureData: proof.signature || proof.signatureUrl,
-                  photoData: proof.picture || proof.pictureUrl,
-                  notes: proof.notes,
-                  barcode: proof.barcode,
-                  timestamp: proof.createdAt,
-                }
-              : null,
-            route: routeInfo,
-          };
-        }),
-      );
+          }),
+        );
+        ordersWithDetails.push(...batchResults);
+      }
 
       console.log(
         `[Orders Report API] User ${ctx.username}, returning ${ordersWithDetails.length} orders`,

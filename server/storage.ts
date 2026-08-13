@@ -70,14 +70,7 @@ import {
   type InsertInvoiceItem,
 } from "@shared/schema";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL environment variable is not set. " +
-    "Check your .env file and ecosystem.config.cjs."
-  );
-}
-
-const sql = neon(process.env.DATABASE_URL);
+const sql = neon(process.env.DATABASE_URL!);
 export const db = drizzle(sql);
 
 const SALT_ROUNDS = 10;
@@ -260,6 +253,8 @@ export interface IStorage {
   getDeliveryOrderUploads(orderId: number): Promise<DeliveryOrderUpload[]>;
   getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]>;
   getAllDeliveryOrders(): Promise<DeliveryOrder[]>;
+  getAllEligibleOrders(): Promise<DeliveryOrder[]>;
+  getDeliveryOrdersInRange(from: Date, to: Date): Promise<DeliveryOrder[]>;
 
   // Delivery matching methods
   findDeliveryByNormalizedAddress(
@@ -977,24 +972,12 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getDeliveryOrdersInRange(from: Date, to: Date): Promise<any[]> {
-    return db
-      .select()
-      .from(deliveryOrders)
-      .where(
-        and(
-          gte(deliveryOrders.lastSeenAt, from),
-          lte(deliveryOrders.lastSeenAt, to),
-        ),
-      )
-      .orderBy(desc(deliveryOrders.lastSeenAt));
-  }
-
   async getDeliveryProof(stopId: number): Promise<DeliveryProof | undefined> {
     const result = await db
       .select()
       .from(deliveryProofs)
-      .where(eq(deliveryProofs.stopId, stopId));
+      .where(eq(deliveryProofs.stopId, stopId))
+      .orderBy(desc(deliveryProofs.id));
     return result[0];
   }
 
@@ -1259,9 +1242,10 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Restore orders to ROUTE_ELIGIBLE so they can be re-routed
     await db
       .update(deliveryOrders)
-      .set({ deliveryStatus: "CANCELLED" })
+      .set({ deliveryStatus: "ROUTE_ELIGIBLE", routeId: null })
       .where(
         and(
           eq(deliveryOrders.routeId, routeId),
@@ -1365,7 +1349,7 @@ export class DatabaseStorage implements IStorage {
           notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
           or(
             isNull(deliveryOrders.batchId),
-            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
+            notInArray(deliveryBatches.status, ["cancelled"]),
           ),
         ),
       )
@@ -1502,6 +1486,16 @@ export class DatabaseStorage implements IStorage {
           batchId: batchId || null,
           lastSeenAt: new Date(),
           uploadCount: 1,
+        })
+        .onConflictDoUpdate({
+          target: [deliveryOrders.pharmacyId, deliveryOrders.rxNumber],
+          set: {
+            lastSeenAt: new Date(),
+            uploadCount: drizzleSql`${deliveryOrders.uploadCount} + 1`,
+            addressText: data.addressText,
+            customerName: data.customerName,
+            customerPhone: data.customerPhone,
+          },
         })
         .returning();
 
@@ -1666,29 +1660,50 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRouteEligibleOrders(pharmacyId: number): Promise<DeliveryOrder[]> {
-    // Returns ROUTE_ELIGIBLE orders for a pharmacy.
-    // Important: includes orders from "complete" batches that were manually
-    // scanned after the batch closed — these are valid deliveries that still
-    // need to be routed even though their batch is done.
-    // Also includes orders where pharmacyId is null (manually added orders
-    // that may not have a pharmacyId set).
     return db
       .select({ deliveryOrder: deliveryOrders })
       .from(deliveryOrders)
       .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
       .where(
         and(
-          or(
-            eq(deliveryOrders.pharmacyId, pharmacyId),
-            isNull(deliveryOrders.pharmacyId), // manually added orders
-          ),
+          eq(deliveryOrders.pharmacyId, pharmacyId),
           eq(deliveryOrders.deliveryStatus, "ROUTE_ELIGIBLE"),
           or(
             isNull(deliveryOrders.batchId),
-            // Include orders from complete batches — they were scanned after
-            // batch completion and still need routing
             notInArray(deliveryBatches.status, ["cancelled"]),
           ),
+        ),
+      )
+      .orderBy(desc(deliveryOrders.lastSeenAt))
+      .then((rows) => rows.map((r) => r.deliveryOrder));
+  }
+
+  async getAllEligibleOrders(): Promise<DeliveryOrder[]> {
+    return db
+      .select({ deliveryOrder: deliveryOrders })
+      .from(deliveryOrders)
+      .leftJoin(deliveryBatches, eq(deliveryOrders.batchId, deliveryBatches.id))
+      .where(
+        and(
+          eq(deliveryOrders.deliveryStatus, "ROUTE_ELIGIBLE"),
+          or(
+            isNull(deliveryOrders.batchId),
+            notInArray(deliveryBatches.status, ["cancelled"]),
+          ),
+        ),
+      )
+      .orderBy(desc(deliveryOrders.lastSeenAt))
+      .then((rows) => rows.map((r) => r.deliveryOrder));
+  }
+
+  async getDeliveryOrdersInRange(from: Date, to: Date): Promise<DeliveryOrder[]> {
+    return db
+      .select({ deliveryOrder: deliveryOrders })
+      .from(deliveryOrders)
+      .where(
+        and(
+          gte(deliveryOrders.lastSeenAt, from),
+          lte(deliveryOrders.lastSeenAt, to),
         ),
       )
       .orderBy(desc(deliveryOrders.lastSeenAt))
@@ -1705,7 +1720,7 @@ export class DatabaseStorage implements IStorage {
           notInArray(deliveryOrders.deliveryStatus, ["CANCELLED", "DELIVERED", "ROUTED"]),
           or(
             isNull(deliveryOrders.batchId),
-            notInArray(deliveryBatches.status, ["cancelled", "complete"]),
+            notInArray(deliveryBatches.status, ["cancelled"]),
           ),
         ),
       )

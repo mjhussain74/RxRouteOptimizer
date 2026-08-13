@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X, QrCode, ScanLine, Check, Trash2 } from "lucide-react";
+import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X, QrCode, ScanLine, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -46,6 +46,7 @@ interface RouteOptimizerProps {
   batches: any[];
   onSelectBatch: (batchId: number) => void;
   onRouteCreated: (routeId: number) => void;
+  pharmacyId?: number | null;
 }
 
 export default function RouteOptimizer({
@@ -53,6 +54,7 @@ export default function RouteOptimizer({
   batches,
   onSelectBatch,
   onRouteCreated,
+  pharmacyId,
 }: RouteOptimizerProps) {
   const [startAddress, setStartAddress] = useState("");
   const [startLat, setStartLat] = useState<number>(40.7128);
@@ -71,27 +73,36 @@ export default function RouteOptimizer({
   const [manualRxInput, setManualRxInput] = useState("");
   const [lastScannedRx, setLastScannedRx] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [confirmCancelAll, setConfirmCancelAll] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const queryClient = useQueryClient();
 
-  const cancelAllMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/delivery-orders/cancel-all-eligible", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Failed to cancel orders");
+  // Fetch pharmacy to use its address as the default route start point
+  const { data: pharmacyData } = useQuery<any>({
+    queryKey: ["/api/pharmacies", pharmacyId],
+    queryFn: async () => {
+      if (!pharmacyId) return null;
+      const res = await fetch(`/api/pharmacies/${pharmacyId}`, { credentials: "include" });
+      if (!res.ok) return null;
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/delivery-orders/eligible"] });
-      setSelectedDeliveryIds(new Set());
-      setConfirmCancelAll(false);
-    },
+    enabled: !!pharmacyId,
   });
+
+  // Auto-populate start address from pharmacy when it loads,
+  // but only if the user hasn't already set a custom address
+  useEffect(() => {
+    if (pharmacyData && !startAddress && pharmacyData.lat && pharmacyData.lng) {
+      setStartLat(pharmacyData.lat);
+      setStartLng(pharmacyData.lng);
+      const addr = [
+        pharmacyData.address,
+        pharmacyData.city,
+        pharmacyData.state,
+        pharmacyData.zipCode,
+      ].filter(Boolean).join(", ");
+      if (addr) setStartAddress(addr);
+    }
+  }, [pharmacyData]);
 
   const { data: zones = [] } = useQuery<DeliveryZone[]>({
     queryKey: ["/api/zones"],
@@ -540,10 +551,33 @@ export default function RouteOptimizer({
             </div>
 
             <div>
-              <Label className="text-slate-300">Starting Address</Label>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-slate-300">Starting Address</Label>
+                {pharmacyData?.lat && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartLat(pharmacyData.lat);
+                      setStartLng(pharmacyData.lng);
+                      const addr = [
+                        pharmacyData.address,
+                        pharmacyData.city,
+                        pharmacyData.state,
+                        pharmacyData.zipCode,
+                      ].filter(Boolean).join(", ");
+                      if (addr) setStartAddress(addr);
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    Reset to pharmacy address
+                  </button>
+                )}
+              </div>
               <div className="flex gap-2">
                 <Input
-                  placeholder="e.g., 123 Warehouse St, New York, NY"
+                  placeholder={pharmacyData?.address
+                    ? `Default: ${pharmacyData.address}`
+                    : "e.g., 123 Warehouse St, New York, NY"}
                   value={startAddress}
                   onChange={(e) => setStartAddress(e.target.value)}
                   className="bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
@@ -671,7 +705,7 @@ export default function RouteOptimizer({
                 <MapPin className="h-5 w-5 text-blue-400" />
                 Route-Eligible Orders ({eligibleOrders.length} RXs, {addressGroups.length} stops)
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -691,38 +725,6 @@ export default function RouteOptimizer({
                     <X className="h-4 w-4 mr-1" />
                     Clear ({selectedDeliveryIds.size})
                   </Button>
-                )}
-                {eligibleOrders.length > 0 && (
-                  confirmCancelAll ? (
-                    <div className="flex gap-1">
-                      <Button
-                        size="sm"
-                        onClick={() => cancelAllMutation.mutate()}
-                        disabled={cancelAllMutation.isPending}
-                        className="bg-red-600 hover:bg-red-700 text-white"
-                      >
-                        {cancelAllMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Cancel All"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setConfirmCancelAll(false)}
-                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
-                      >
-                        Keep
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setConfirmCancelAll(true)}
-                      className="border-red-800 text-red-400 hover:bg-red-900/30"
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Cancel All Pending
-                    </Button>
-                  )
                 )}
               </div>
             </CardTitle>

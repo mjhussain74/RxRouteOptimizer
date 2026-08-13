@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Upload, MapPin, Route, Users, Map, FileText, LogOut, Shield } from "lucide-react";
+import { Upload, MapPin, Route, Users, Map, FileText, LogOut, Shield, BarChart2 } from "lucide-react";
 import { Button } from "./ui/button";
 import RouteOptimizer from "./RouteOptimizer";
 import RouteMap from "./RouteMap";
@@ -8,6 +8,7 @@ import DriverManager from "./DriverManager";
 import OrderManagement from "./OrderManagement";
 import ZoneManager from "./ZoneManager";
 import ReportGenerator from "./ReportGenerator";
+import AddressAnalytics from "./AddressAnalytics";
 
 interface PharmacyAdminDashboardProps {
   onOpenDriverView: (driverId: number) => void;
@@ -16,7 +17,7 @@ interface PharmacyAdminDashboardProps {
   pharmacyName?: string;
 }
 
-type TabType = "orders" | "optimize" | "routes" | "zones" | "drivers" | "reports";
+type TabType = "orders" | "optimize" | "routes" | "zones" | "drivers" | "reports" | "billing" | "analytics";
 
 export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pharmacyId, pharmacyName }: PharmacyAdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("orders");
@@ -42,6 +43,7 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
     { id: "zones" as TabType, label: "Delivery Zones", icon: Map },
     { id: "drivers" as TabType, label: "Drivers", icon: Users },
     { id: "reports" as TabType, label: "Reports", icon: FileText },
+    { id: "analytics" as TabType, label: "Address Analytics", icon: BarChart2 },
   ];
 
   return (
@@ -109,7 +111,6 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
         {activeTab === "orders" && (
           <OrderManagement
             batchId={selectedBatchId}
-            isPharmacyUser={true}
             onBatchCreated={(batchId) => {
               setSelectedBatchId(batchId);
               setActiveTab("optimize");
@@ -152,6 +153,9 @@ export default function PharmacyAdminDashboard({ onOpenDriverView, onLogout, pha
 
         {activeTab === "reports" && (
           <ReportGenerator isAdmin={false} />
+        )}
+        {activeTab === "analytics" && (
+          <AddressAnalytics />
         )}
       </main>
     </div>
