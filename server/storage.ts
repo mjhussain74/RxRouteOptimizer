@@ -232,6 +232,7 @@ export interface IStorage {
   findDeliveryOrderByRx(
     pharmacyId: number,
     rxNumber: string,
+    fillDate?: string | null,
   ): Promise<DeliveryOrder | undefined>;
   upsertDeliveryOrder(
     data: InsertDeliveryOrder,
@@ -1413,16 +1414,35 @@ export class DatabaseStorage implements IStorage {
   async findDeliveryOrderByRx(
     pharmacyId: number,
     rxNumber: string,
+    fillDate?: string | null,
   ): Promise<DeliveryOrder | undefined> {
+    // When fillDate is provided, find the exact row matching all three fields.
+    // When fillDate is null/undefined (e.g. barcode scan), find the most recent
+    // non-delivered, non-cancelled order for this RX so staff can re-scan it.
+    const conditions = [
+      eq(deliveryOrders.pharmacyId, pharmacyId),
+      eq(deliveryOrders.rxNumber, rxNumber),
+    ];
+
+    if (fillDate) {
+      conditions.push(eq(deliveryOrders.fillDate, fillDate));
+    }
+
     const result = await db
       .select()
       .from(deliveryOrders)
-      .where(
-        and(
-          eq(deliveryOrders.pharmacyId, pharmacyId),
-          eq(deliveryOrders.rxNumber, rxNumber),
-        ),
+      .where(and(...conditions))
+      .orderBy(desc(deliveryOrders.lastSeenAt));
+
+    // When no fillDate specified (barcode scan), prefer active/eligible orders
+    // over delivered ones so scanning finds the current delivery not history
+    if (!fillDate && result.length > 1) {
+      const active = result.find(
+        (o) => o.deliveryStatus !== "DELIVERED" && o.deliveryStatus !== "CANCELLED",
       );
+      return active || result[0];
+    }
+
     return result[0];
   }
 
@@ -1431,9 +1451,12 @@ export class DatabaseStorage implements IStorage {
     batchId: number | null,
     fileName?: string,
   ): Promise<{ order: DeliveryOrder; isNew: boolean }> {
+    // Pass fillDate to the lookup so refills with the same RX number but a
+    // different fill date create a new row rather than updating the old delivery
     const existing = await this.findDeliveryOrderByRx(
       data.pharmacyId,
       data.rxNumber,
+      data.fillDate ?? null,
     );
 
     if (existing) {
@@ -1479,38 +1502,67 @@ export class DatabaseStorage implements IStorage {
 
       return { order: updated[0], isNew: false };
     } else {
-      const created = await db
-        .insert(deliveryOrders)
-        .values({
-          ...data,
-          batchId: batchId || null,
-          lastSeenAt: new Date(),
-          uploadCount: 1,
-        })
-        .onConflictDoUpdate({
-          target: [deliveryOrders.pharmacyId, deliveryOrders.rxNumber],
-          set: {
+      // Try to insert; catch duplicate key errors from the partial unique indexes
+      // and update the existing row instead. This handles race conditions in
+      // parallel CSV processing without relying on ON CONFLICT (which requires
+      // exact index matching that varies by Postgres version).
+      let upsertedOrder: DeliveryOrder | undefined;
+      try {
+        const result = await db
+          .insert(deliveryOrders)
+          .values({
+            ...data,
+            batchId: batchId || null,
+            lastSeenAt: new Date(),
+            uploadCount: 1,
+          })
+          .returning();
+        upsertedOrder = result[0];
+      } catch (err: any) {
+        const isDuplicate =
+          err?.code === "23505" ||
+          err?.message?.includes("duplicate key") ||
+          err?.message?.includes("unique constraint");
+        if (!isDuplicate) throw err;
+
+        // Find the existing row and update it
+        const existing = await this.findDeliveryOrderByRx(
+          data.pharmacyId,
+          data.rxNumber,
+          data.fillDate ?? null,
+        );
+        if (!existing) throw err;
+
+        const updated = await db
+          .update(deliveryOrders)
+          .set({
             lastSeenAt: new Date(),
             uploadCount: drizzleSql`${deliveryOrders.uploadCount} + 1`,
-            addressText: data.addressText,
-            customerName: data.customerName,
-            customerPhone: data.customerPhone,
-          },
-        })
-        .returning();
+            addressText: data.addressText || existing.addressText,
+            customerName: data.customerName || existing.customerName,
+            customerPhone: data.customerPhone || existing.customerPhone,
+            batchId: batchId || existing.batchId || null,
+          })
+          .where(eq(deliveryOrders.id, existing.id))
+          .returning();
+        upsertedOrder = updated[0];
+      }
+
+      if (!upsertedOrder) throw new Error("Upsert returned no rows");
 
       if (batchId) {
         await db.insert(deliveryOrderUploads).values({
-          deliveryOrderId: created[0].id,
+          deliveryOrderId: upsertedOrder.id,
           batchId,
           fileName: fileName || null,
           seenAt: new Date(),
         });
       }
 
-      return { order: created[0], isNew: true };
+      return { order: upsertedOrder, isNew: true };
     }
   }
+
 
   async updateDeliveryOrderStatus(
     id: number,

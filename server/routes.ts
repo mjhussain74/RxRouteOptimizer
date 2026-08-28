@@ -1887,10 +1887,33 @@ export async function registerRoutes(
         }
 
         if (order.deliveryStatus === "ROUTED") {
+          if (order.routeId) {
+            const assignedRoute = await storage.getRoute(order.routeId);
+            if (assignedRoute) {
+              const freeableStatuses = ["cancelled", "completed", "optimized"];
+              const isFreeable = freeableStatuses.includes(assignedRoute.status);
+
+              // Also free from dispatched/active routes that are stale
+              // (dispatched more than 24 hours ago with no completion)
+              const isStaleDispatched =
+                (assignedRoute.status === "dispatched" || assignedRoute.status === "active") &&
+                assignedRoute.dispatchedAt &&
+                new Date().getTime() - new Date(assignedRoute.dispatchedAt).getTime() > 24 * 60 * 60 * 1000;
+
+              if (isFreeable || isStaleDispatched) {
+                const resetOrder = await storage.reactivateDeliveryOrder(order.id);
+                return res.json({
+                  order: resetOrder || order,
+                  alreadyProcessed: false,
+                  message: `Order RX ${cleanBarcode} reset to ROUTE_ELIGIBLE (was on ${assignedRoute.status} route "${assignedRoute.name}")`,
+                });
+              }
+            }
+          }
           return res.json({
             order,
             alreadyProcessed: true,
-            message: `Order is already ${order.deliveryStatus}`,
+            message: `Order is already assigned to an active dispatched route`,
           });
         }
 
@@ -3096,22 +3119,40 @@ export async function registerRoutes(
   // Cancel a delivery stop (can't deliver)
   app.post(
     "/api/routes/:routeId/stops/:stopId/cancel",
-    requireAuth,
+    requireAuthOrDriver,
     async (req, res) => {
       try {
         const routeId = parseInt(req.params.routeId);
         const stopId = parseInt(req.params.stopId);
         const { reason } = req.body;
 
-        // Check route ownership (allows drivers to cancel stops on their routes)
-        if (!(await checkRouteOwnership(routeId, req.session))) {
-          return res.status(403).json({ error: "Access denied to this route" });
-        }
-
         if (!reason) {
           return res
             .status(400)
             .json({ error: "Cancellation reason is required" });
+        }
+
+        // For drivers: verify the stop belongs to a route assigned to them
+        // OR the route contains this stop (more permissive — driver is on the route)
+        const session = req.session as any;
+        if (session?.user?.role === "driver") {
+          const stop = await storage.getRouteStop(stopId);
+          if (!stop || stop.routeId !== routeId) {
+            return res.status(404).json({ error: "Stop not found" });
+          }
+          const route = await storage.getRoute(routeId);
+          if (!route) {
+            return res.status(404).json({ error: "Route not found" });
+          }
+          // Allow if route is assigned to this driver OR unassigned (being actively worked)
+          if (route.driverId && route.driverId !== session.user.driverId) {
+            return res.status(403).json({ error: "Access denied to this route" });
+          }
+        } else {
+          // Staff: check pharmacy ownership as before
+          if (!(await checkRouteOwnership(routeId, req.session))) {
+            return res.status(403).json({ error: "Access denied to this route" });
+          }
         }
 
         // Update the stop status to cancelled with the reason as notes
@@ -4465,7 +4506,6 @@ export async function registerRoutes(
         ? Number(session.user.pharmacyId)
         : null;
 
-      // Date range from query params (default: last 30 days)
       const now = new Date();
       const defaultFrom = new Date(now);
       defaultFrom.setDate(now.getDate() - 30);
@@ -4479,32 +4519,37 @@ export async function registerRoutes(
       const fromDate = new Date(fromStr + "T00:00:00.000Z");
       const toDate   = new Date(toStr   + "T23:59:59.999Z");
 
-      // Current month and week boundaries for the sub-counts
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const weekStart  = new Date(now);
       weekStart.setDate(now.getDate() - now.getDay());
       weekStart.setHours(0, 0, 0, 0);
 
-      // Fetch all delivery orders in the date range
+      // Only DELIVERED and ROUTED orders — actual completed/in-progress deliveries
       let orders = await withDbRetry(() => storage.getDeliveryOrdersInRange(fromDate, toDate));
+      orders = orders.filter((o: any) =>
+        o.deliveryStatus === "DELIVERED" || o.deliveryStatus === "ROUTED"
+      );
 
-      // Scope to pharmacy
       if (!isAdmin && sessionPharmacyId) {
         orders = orders.filter((o: any) => o.pharmacyId === sessionPharmacyId);
       } else if (isAdmin && pharmacyIdFilter) {
         orders = orders.filter((o: any) => o.pharmacyId === pharmacyIdFilter);
       }
 
-      // Group by normalizedAddressHash (fall back to addressText if hash missing)
-      const groupMap = new Map<string, any>();
+      // Step 1: Group orders into TRIPS by deliveryIdentifier.
+      // Multiple RXs for different patients at the same address = 1 trip.
+      const tripMap = new Map<string, any>();
 
       for (const order of orders) {
-        const key = order.normalizedAddressHash || order.addressText;
-        if (!key) continue;
+        const tripKey = order.deliveryIdentifier || `order-${order.id}`;
+        const addressKey = order.normalizedAddressHash || order.addressText;
+        if (!addressKey) continue;
 
-        if (!groupMap.has(key)) {
-          groupMap.set(key, {
-            normalizedAddressHash: key,
+        if (!tripMap.has(tripKey)) {
+          tripMap.set(tripKey, {
+            tripKey,
+            deliveryIdentifier: order.deliveryIdentifier,
+            addressKey,
             addressText: order.addressText,
             streetAddress: order.streetAddress ?? null,
             city: order.city ?? null,
@@ -4512,49 +4557,79 @@ export async function registerRoutes(
             zipCode: order.zipCode ?? null,
             lat: order.lat ?? null,
             lng: order.lng ?? null,
+            deliveryStatus: order.deliveryStatus,
+            lastSeenAt: order.lastSeenAt,
+            rxNumbers: [],
+            customerNames: new Set<string>(),
+          });
+        }
+
+        const trip = tripMap.get(tripKey)!;
+        trip.rxNumbers.push({
+          rxNumber: order.rxNumber,
+          customerName: order.customerName ?? null,
+          fillDate: order.fillDate ?? null,
+          deliveryStatus: order.deliveryStatus,
+        });
+        if (order.customerName) trip.customerNames.add(order.customerName);
+        if (new Date(order.lastSeenAt) > new Date(trip.lastSeenAt)) {
+          trip.lastSeenAt = order.lastSeenAt;
+        }
+      }
+
+      // Step 2: Group TRIPS by address — totalCount = number of trips (visits)
+      const addressMap = new Map<string, any>();
+
+      for (const trip of tripMap.values()) {
+        const key = trip.addressKey;
+
+        if (!addressMap.has(key)) {
+          addressMap.set(key, {
+            normalizedAddressHash: key,
+            addressText: trip.addressText,
+            streetAddress: trip.streetAddress,
+            city: trip.city,
+            state: trip.state,
+            zipCode: trip.zipCode,
+            lat: trip.lat,
+            lng: trip.lng,
             customerNames: new Set<string>(),
             totalCount: 0,
             monthCount: 0,
             weekCount: 0,
-            lastDeliveryDate: order.lastSeenAt,
-            orders: [],
+            lastDeliveryDate: trip.lastSeenAt,
+            trips: [],
           });
         }
 
-        const group = groupMap.get(key)!;
+        const group = addressMap.get(key)!;
         group.totalCount++;
 
-        const seen = new Date(order.lastSeenAt);
+        const seen = new Date(trip.lastSeenAt);
         if (seen >= monthStart) group.monthCount++;
         if (seen >= weekStart)  group.weekCount++;
-        if (new Date(order.lastSeenAt) > new Date(group.lastDeliveryDate)) {
-          group.lastDeliveryDate = order.lastSeenAt;
+        if (seen > new Date(group.lastDeliveryDate)) {
+          group.lastDeliveryDate = trip.lastSeenAt;
         }
 
-        if (order.customerName) group.customerNames.add(order.customerName);
-
-        group.orders.push({
-          id: order.id,
-          rxNumber: order.rxNumber,
-          batchId: order.batchId ?? null,
-          fillDate: order.fillDate ?? null,
-          deliveryStatus: order.deliveryStatus,
-          lastSeenAt: order.lastSeenAt,
-          customerName: order.customerName ?? null,
+        trip.customerNames.forEach((n: string) => group.customerNames.add(n));
+        group.trips.push({
+          deliveryIdentifier: trip.deliveryIdentifier,
+          deliveryStatus: trip.deliveryStatus,
+          date: trip.lastSeenAt,
+          rxCount: trip.rxNumbers.length,
+          rxNumbers: trip.rxNumbers,
         });
       }
 
-      // Convert Sets to arrays and sort orders by date desc
-      const groups = Array.from(groupMap.values()).map((g) => ({
+      const groups = Array.from(addressMap.values()).map((g) => ({
         ...g,
         customerNames: Array.from(g.customerNames),
-        orders: g.orders.sort(
-          (a: any, b: any) =>
-            new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime(),
+        trips: g.trips.sort(
+          (a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime(),
         ),
       }));
 
-      // Sort by totalCount desc by default
       groups.sort((a, b) => b.totalCount - a.totalCount);
 
       res.json({ groups });

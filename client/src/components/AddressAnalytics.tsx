@@ -29,14 +29,19 @@ L.Icon.Default.mergeOptions({
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-interface OrderDetail {
-  id: number;
+interface RxDetail {
   rxNumber: string;
-  batchId: number | null;
+  customerName: string | null;
   fillDate: string | null;
   deliveryStatus: string;
-  lastSeenAt: string;
-  customerName: string | null;
+}
+
+interface TripDetail {
+  deliveryIdentifier: string | null;
+  deliveryStatus: string;
+  date: string;
+  rxCount: number;
+  rxNumbers: RxDetail[];
 }
 
 interface AddressGroup {
@@ -53,7 +58,7 @@ interface AddressGroup {
   monthCount: number;
   weekCount: number;
   lastDeliveryDate: string;
-  orders: OrderDetail[];
+  trips: TripDetail[];
 }
 
 type SortCol = "address" | "total" | "month" | "week" | "last";
@@ -545,35 +550,50 @@ export default function AddressAnalytics() {
                             <td />
                             <td colSpan={7} className="px-6 py-3">
                               <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
-                                Scripts in period ({group.orders.length})
+                                Trips in period ({group.trips.length})
                               </p>
-                              <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                                {group.orders.map((order) => (
+                              <div className="space-y-2 max-h-64 overflow-y-auto">
+                                {group.trips.map((trip, idx) => (
                                   <div
-                                    key={order.id}
-                                    className="flex items-center gap-4 bg-slate-800/60 rounded-lg px-3 py-2 text-sm"
+                                    key={trip.deliveryIdentifier || idx}
+                                    className="bg-slate-800/60 rounded-lg px-3 py-2"
                                   >
-                                    <span className="text-slate-300 font-mono text-xs">
-                                      Rx&nbsp;{order.rxNumber}
-                                    </span>
-                                    {order.customerName && (
+                                    {/* Trip header */}
+                                    <div className="flex items-center gap-3 mb-1.5">
+                                      <span className="text-slate-300 text-xs font-medium">
+                                        {new Date(trip.date).toLocaleDateString()}
+                                      </span>
+                                      {trip.deliveryIdentifier && (
+                                        <span className="text-slate-600 font-mono text-xs">
+                                          {trip.deliveryIdentifier}
+                                        </span>
+                                      )}
                                       <span className="text-slate-400 text-xs">
-                                        {order.customerName}
+                                        {trip.rxCount} Rx{trip.rxCount !== 1 ? "s" : ""}
                                       </span>
-                                    )}
-                                    {order.fillDate && (
-                                      <span className="text-slate-500 text-xs flex items-center gap-1">
-                                        <Calendar className="h-3 w-3" />
-                                        Fill: {order.fillDate}
+                                      <span className="ml-auto">
+                                        {statusBadge(trip.deliveryStatus)}
                                       </span>
-                                    )}
-                                    <span className="text-slate-500 text-xs ml-auto">
-                                      Seen{" "}
-                                      {new Date(
-                                        order.lastSeenAt,
-                                      ).toLocaleDateString()}
-                                    </span>
-                                    {statusBadge(order.deliveryStatus)}
+                                    </div>
+                                    {/* RX breakdown */}
+                                    <div className="space-y-0.5 pl-3 border-l border-slate-700">
+                                      {trip.rxNumbers.map((rx, i) => (
+                                        <div key={i} className="flex items-center gap-3 text-xs">
+                                          <span className="text-slate-300 font-mono">
+                                            Rx&nbsp;{rx.rxNumber}
+                                          </span>
+                                          {rx.customerName && (
+                                            <span className="text-slate-500">{rx.customerName}</span>
+                                          )}
+                                          {rx.fillDate && (
+                                            <span className="text-slate-600 flex items-center gap-1">
+                                              <Calendar className="h-3 w-3" />
+                                              {rx.fillDate}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 ))}
                               </div>
