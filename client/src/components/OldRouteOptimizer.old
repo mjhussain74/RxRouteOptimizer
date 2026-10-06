@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X, QrCode, ScanLine, Check, CalendarDays } from "lucide-react";
+import { Route, MapPin, Navigation, Loader2, CheckCircle, AlertCircle, AlertTriangle, Search, X, QrCode, ScanLine, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -41,41 +41,6 @@ interface DeliveryOrder {
   createdAt: string;
 }
 
-// ---- Date filter helpers -------------------------------------------------
-// Dates are bucketed by the dispatcher's local calendar day (browser time zone),
-// so "Today" means midnight-to-midnight where the pharmacy is, not UTC.
-type DateField = "scannedAt" | "createdAt";
-
-const toLocalDateKey = (d: Date): string => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
-// Scan date falls back to created date for orders made eligible without a scan
-// (e.g. manually created route-eligible orders).
-const getOrderDateKey = (order: DeliveryOrder, field: DateField): string | null => {
-  const raw = field === "scannedAt" ? order.scannedAt ?? order.createdAt : order.createdAt;
-  if (!raw) return null;
-  const d = new Date(raw);
-  return isNaN(d.getTime()) ? null : toLocalDateKey(d);
-};
-
-const formatDateKey = (key: string): string => {
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  if (key === toLocalDateKey(today)) return "Today";
-  if (key === toLocalDateKey(yesterday)) return "Yesterday";
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-};
-
 interface RouteOptimizerProps {
   selectedBatchId: number | null;
   batches: any[];
@@ -108,11 +73,6 @@ export default function RouteOptimizer({
   const [manualRxInput, setManualRxInput] = useState("");
   const [lastScannedRx, setLastScannedRx] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
-  // Date filter: "today" (default), "all", "custom", or a specific yyyy-mm-dd day
-  const [dateField, setDateField] = useState<DateField>("scannedAt");
-  const [dateFilter, setDateFilter] = useState<string>("today");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const queryClient = useQueryClient();
 
@@ -157,44 +117,6 @@ export default function RouteOptimizer({
     },
   });
 
-  // Per-day counts of eligible orders for the chosen date field (newest first)
-  const dateCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const order of eligibleOrders) {
-      const key = getOrderDateKey(order, dateField);
-      if (key) counts.set(key, (counts.get(key) || 0) + 1);
-    }
-    return Array.from(counts.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [eligibleOrders, dateField]);
-
-  const todayKey = toLocalDateKey(new Date());
-
-  // Orders that pass the date filter — everything below works off this list
-  const visibleOrders = useMemo(() => {
-    if (dateFilter === "all") return eligibleOrders;
-    return eligibleOrders.filter((order) => {
-      const key = getOrderDateKey(order, dateField);
-      if (!key) return false;
-      if (dateFilter === "custom") {
-        if (customFrom && key < customFrom) return false;
-        if (customTo && key > customTo) return false;
-        return true;
-      }
-      return key === (dateFilter === "today" ? todayKey : dateFilter);
-    });
-  }, [eligibleOrders, dateField, dateFilter, customFrom, customTo, todayKey]);
-
-  const hiddenByDateCount = eligibleOrders.length - visibleOrders.length;
-
-  // Drop selections that the date filter now hides, so they can't be routed by accident
-  useEffect(() => {
-    const visibleIds = new Set(visibleOrders.map((o) => o.id));
-    setSelectedDeliveryIds((prev) => {
-      const next = new Set(Array.from(prev).filter((id) => visibleIds.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [visibleOrders]);
-
   // Group orders by address for visual consolidation
   interface AddressGroup {
     address: string;
@@ -206,7 +128,7 @@ export default function RouteOptimizer({
 
   const addressGroups = useMemo(() => {
     const groups = new Map<string, AddressGroup>();
-    for (const order of visibleOrders) {
+    for (const order of eligibleOrders) {
       const key = order.normalizedAddressHash || order.addressText?.toLowerCase().trim() || `order-${order.id}`;
       if (!groups.has(key)) {
         groups.set(key, {
@@ -223,7 +145,7 @@ export default function RouteOptimizer({
       group.totalUploads += order.uploadCount;
     }
     return Array.from(groups.values());
-  }, [visibleOrders]);
+  }, [eligibleOrders]);
 
   const filteredGroups = useMemo(() => {
     let groups = addressGroups;
@@ -267,25 +189,19 @@ export default function RouteOptimizer({
 
   useEffect(() => {
     if (lastScannedRx) {
-      const matches = (d: DeliveryOrder) =>
-        d.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase();
-      const matchingOrder = visibleOrders.find(matches);
-
+      const matchingOrder = eligibleOrders.find(d =>
+        d.rxNumber?.toLowerCase() === lastScannedRx.toLowerCase()
+      );
+      
       if (matchingOrder) {
         setSelectedDeliveryIds(prev => new Set([...prev, matchingOrder.id]));
         setScanError(null);
       } else {
-        const hiddenOrder = eligibleOrders.find(matches);
-        const hiddenKey = hiddenOrder ? getOrderDateKey(hiddenOrder, dateField) : null;
-        setScanError(
-          hiddenOrder
-            ? `RX ${lastScannedRx} is from ${hiddenKey ? formatDateKey(hiddenKey) : "another date"} and is hidden by the date filter`
-            : `RX ${lastScannedRx} not found in eligible orders`
-        );
+        setScanError(`RX ${lastScannedRx} not found in eligible orders`);
       }
       setLastScannedRx(null);
     }
-  }, [lastScannedRx, eligibleOrders, visibleOrders, dateField]);
+  }, [lastScannedRx, eligibleOrders]);
 
   // Cleanup scanner on unmount
   useEffect(() => {
@@ -787,12 +703,7 @@ export default function RouteOptimizer({
             <CardTitle className="text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-blue-400" />
-                Route-Eligible Orders ({visibleOrders.length} RXs, {addressGroups.length} stops)
-                {hiddenByDateCount > 0 && (
-                  <span className="text-sm font-normal text-slate-400">
-                    of {eligibleOrders.length} total
-                  </span>
-                )}
+                Route-Eligible Orders ({eligibleOrders.length} RXs, {addressGroups.length} stops)
               </div>
               <div className="flex gap-2">
                 <Button
@@ -819,96 +730,6 @@ export default function RouteOptimizer({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {/* Date filter */}
-            <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-slate-300 flex items-center gap-1 mb-1">
-                  <CalendarDays className="h-4 w-4" />
-                  Filter by
-                </Label>
-                <Select value={dateField} onValueChange={(v) => setDateField(v as DateField)}>
-                  <SelectTrigger className="bg-slate-900/50 border-slate-600 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-800 border-slate-700">
-                    <SelectItem value="scannedAt" className="text-white hover:bg-slate-700">
-                      Scan date
-                    </SelectItem>
-                    <SelectItem value="createdAt" className="text-white hover:bg-slate-700">
-                      Created (upload) date
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-slate-300 mb-1 block">Date</Label>
-                <Select value={dateFilter} onValueChange={setDateFilter}>
-                  <SelectTrigger className="bg-slate-900/50 border-slate-600 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-800 border-slate-700">
-                    <SelectItem value="today" className="text-white hover:bg-slate-700">
-                      Today ({dateCounts.find(([k]) => k === todayKey)?.[1] ?? 0})
-                    </SelectItem>
-                    {dateCounts
-                      .filter(([key]) => key !== todayKey)
-                      .map(([key, count]) => (
-                        <SelectItem key={key} value={key} className="text-white hover:bg-slate-700">
-                          {formatDateKey(key)} ({count})
-                        </SelectItem>
-                      ))}
-                    <SelectItem value="all" className="text-white hover:bg-slate-700">
-                      All dates ({eligibleOrders.length})
-                    </SelectItem>
-                    <SelectItem value="custom" className="text-white hover:bg-slate-700">
-                      Custom range…
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {dateFilter === "custom" && (
-                <div className="sm:col-span-2 flex items-end gap-2">
-                  <div className="flex-1">
-                    <Label className="text-slate-400 text-xs">From</Label>
-                    <Input
-                      type="date"
-                      value={customFrom}
-                      max={customTo || undefined}
-                      onChange={(e) => setCustomFrom(e.target.value)}
-                      className="bg-slate-900/50 border-slate-600 text-white"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <Label className="text-slate-400 text-xs">To</Label>
-                    <Input
-                      type="date"
-                      value={customTo}
-                      min={customFrom || undefined}
-                      onChange={(e) => setCustomTo(e.target.value)}
-                      className="bg-slate-900/50 border-slate-600 text-white"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {hiddenByDateCount > 0 && visibleOrders.length > 0 && (
-              <div className="mb-4 flex items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-                <span className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  {hiddenByDateCount} eligible order{hiddenByDateCount === 1 ? "" : "s"} from other dates hidden.
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setDateFilter("all")}
-                  className="text-amber-300 hover:bg-amber-500/20 hover:text-amber-200"
-                >
-                  Show all
-                </Button>
-              </div>
-            )}
-
             <div className="mb-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -927,23 +748,9 @@ export default function RouteOptimizer({
               </div>
             ) : filteredGroups.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
-                {eligibleOrders.length === 0
+                {eligibleOrders.length === 0 
                   ? "No route-eligible orders. Scan barcodes in Orders tab to make them eligible."
-                  : visibleOrders.length === 0
-                    ? (
-                      <div className="space-y-2">
-                        <p>No route-eligible orders for this date.</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setDateFilter("all")}
-                          className="border-slate-600 text-slate-300 hover:bg-slate-700"
-                        >
-                          Show all dates ({eligibleOrders.length})
-                        </Button>
-                      </div>
-                    )
-                    : "No orders match your search."}
+                  : "No orders match your search."}
               </div>
             ) : (
               <div className="max-h-[500px] overflow-y-auto space-y-2">
